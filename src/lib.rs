@@ -59,64 +59,6 @@ impl Codec for DeltaCodec {
 }
 
 // ======================================================
-// Zeta Encoding Implementation
-// ======================================================
-
-pub struct ZetaCodec {
-    k: u64,
-}
-
-impl ZetaCodec {
-    pub fn new(k: u64) -> Self {
-        ZetaCodec { k }
-    }
-}
-
-impl Codec for ZetaCodec {
-    fn encode(
-        writer: &mut BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>,
-        value: u64,
-    ) -> std::result::Result<usize, Box<dyn std::error::Error>> {
-        Ok(writer.write_zeta(value, 1)?)
-    }
-
-    fn decode(
-        reader: &mut BufBitReader<LE, MemWordReader<u64, Vec<u64>>>,
-    ) -> std::result::Result<u64, Box<dyn std::error::Error>> {
-        Ok(reader.read_zeta(1)?)
-    }
-}
-
-// ======================================================
-// Golomb Encoding Implementation
-// ======================================================
-
-pub struct GolombCodec {
-    m: u64,
-}
-
-impl GolombCodec {
-    pub fn new(m: u64) -> Self {
-        GolombCodec { m }
-    }
-}
-
-impl Codec for GolombCodec {
-    fn encode(
-        writer: &mut BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>,
-        value: u64,
-    ) -> std::result::Result<usize, Box<dyn std::error::Error>> {
-        Ok(writer.write_golomb(value, 1)?)
-    }
-
-    fn decode(
-        reader: &mut BufBitReader<LE, MemWordReader<u64, Vec<u64>>>,
-    ) -> std::result::Result<u64, Box<dyn std::error::Error>> {
-        Ok(reader.read_golomb(1)?)
-    }
-}
-
-// ======================================================
 // Compressed IntVec Structure
 // ======================================================
 
