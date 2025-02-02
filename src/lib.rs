@@ -104,32 +104,32 @@ impl<C: Codec> IntVec<C> {
         }
     }
 
+    // Get the value at the given index in the original vector
     pub fn get(&self, index: usize) -> Option<u64> {
         if index >= self.len {
             return None;
         }
 
+        // Trova il sample più vicino a sinistra dell'indice richiesto.
         let sample_index = index / self.k;
         let start = self.samples[sample_index];
-        let end = if sample_index + 1 < self.samples.len() {
-            self.samples[sample_index + 1]
-        } else {
-            self.total_bits
-        };
 
-        // TODO: remove this clone
-        let mut reader = BufBitReader::<LE, MemWordReader<u64, Vec<u64>>>::new(MemWordReader::new(
-            self.data.clone(),
-        ));
+        // Crea il reader a partire dai dati compressi.
+        let word_reader = MemWordReader::new(self.data.clone());
+        let mut reader = BufBitReader::<LE, MemWordReader<u64, Vec<u64>>>::new(word_reader);
 
-        // Seek to the start of the sample
-        reader.seek(start).unwrap();
+        // Imposta la posizione iniziale del reader sul sample.
+        reader.set_bit_pos(start as u64).unwrap();
 
-        for _ in 0..index % self.k {
-            C::decode(&mut reader).unwrap();
+        // A partire dal sample, decodifica i valori fino a raggiungere quello desiderato.
+        let mut value = 0;
+        // Calcola l'indice nel blocco a partire dal sample.
+        let start_index = sample_index * self.k;
+        for _ in start_index..=index {
+            value = C::decode(&mut reader).ok()?;
         }
 
-        C::decode(&mut reader).ok()
+        Some(value)
     }
 
     pub fn len(&self) -> usize {
@@ -152,7 +152,6 @@ mod tests {
         let compressed_input = IntVec::<GammaCodec>::from(input.clone(), GammaCodec, 64);
 
         for i in 0..input.len() {
-            println!("{} {} {}", i, input[i], compressed_input.get(i).unwrap());
             assert_eq!(input[i], compressed_input.get(i).unwrap());
         }
     }
@@ -182,7 +181,6 @@ mod tests {
         let compressed_input = IntVec::<DeltaCodec>::from(input.clone(), DeltaCodec, 64);
 
         for i in 0..input.len() {
-            println!("{} {} {}", i, input[i], compressed_input.get(i).unwrap());
             assert_eq!(input[i], compressed_input.get(i).unwrap());
         }
     }
