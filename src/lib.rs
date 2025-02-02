@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use dsi_bitstream::prelude::*;
 
 /// Trait for encoding and decoding values with a specific variable-length code.
@@ -57,6 +59,64 @@ impl Codec for DeltaCodec {
 }
 
 // ======================================================
+// Zeta Encoding Implementation
+// ======================================================
+
+pub struct ZetaCodec {
+    k: u64,
+}
+
+impl ZetaCodec {
+    pub fn new(k: u64) -> Self {
+        ZetaCodec { k }
+    }
+}
+
+impl Codec for ZetaCodec {
+    fn encode(
+        writer: &mut BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>,
+        value: u64,
+    ) -> std::result::Result<usize, Box<dyn std::error::Error>> {
+        Ok(writer.write_zeta(value, 1)?)
+    }
+
+    fn decode(
+        reader: &mut BufBitReader<LE, MemWordReader<u64, Vec<u64>>>,
+    ) -> std::result::Result<u64, Box<dyn std::error::Error>> {
+        Ok(reader.read_zeta(1)?)
+    }
+}
+
+// ======================================================
+// Golomb Encoding Implementation
+// ======================================================
+
+pub struct GolombCodec {
+    m: u64,
+}
+
+impl GolombCodec {
+    pub fn new(m: u64) -> Self {
+        GolombCodec { m }
+    }
+}
+
+impl Codec for GolombCodec {
+    fn encode(
+        writer: &mut BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>,
+        value: u64,
+    ) -> std::result::Result<usize, Box<dyn std::error::Error>> {
+        Ok(writer.write_golomb(value, 1)?)
+    }
+
+    fn decode(
+        reader: &mut BufBitReader<LE, MemWordReader<u64, Vec<u64>>>,
+    ) -> std::result::Result<u64, Box<dyn std::error::Error>> {
+        Ok(reader.read_golomb(1)?)
+    }
+}
+
+// ======================================================
 // Compressed IntVec Structure
 // ======================================================
 
@@ -64,20 +124,16 @@ impl Codec for DeltaCodec {
 pub struct IntVec<C: Codec> {
     /// Compressed data
     data: Vec<u64>,
-    /// Total number of bits used to encode the data
-    total_bits: usize,
     /// Sampled indices
     samples: Vec<usize>,
     /// Codec used to encode the data
-    codec: C,
+    codec: PhantomData<C>,
     /// Sampling rate
     k: usize,
-    /// Number of elements in the original vector
-    len: usize,
 }
 
 impl<C: Codec> IntVec<C> {
-    pub fn from(input: Vec<u64>, codec: C, k: usize) -> Self {
+    pub fn from(input: Vec<u64>, k: usize) -> Self {
         let word_writer = MemWordWriterVec::new(Vec::new());
         let mut writer = BufBitWriter::<LE, MemWordWriterVec<u64, Vec<u64>>>::new(word_writer);
         let mut samples = Vec::new();
@@ -96,17 +152,15 @@ impl<C: Codec> IntVec<C> {
 
         IntVec {
             data,
-            total_bits,
             samples,
-            codec,
+            codec: PhantomData,
             k,
-            len: input.len(),
         }
     }
 
     // Get the value at the given index in the original vector
     pub fn get(&self, index: usize) -> Option<u64> {
-        if index >= self.len {
+        if index >= self.data.len() {
             return None;
         }
 
@@ -133,11 +187,11 @@ impl<C: Codec> IntVec<C> {
     }
 
     pub fn len(&self) -> usize {
-        self.len
+        self.data.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.data.is_empty()
     }
 }
 
@@ -149,7 +203,7 @@ mod tests {
     fn test_gamma_codec() {
         // create a random vector with 1000 elements from 0 to 10000
         let input: Vec<u64> = (0..1000).map(|_| rand::random::<u64>() % 10000).collect();
-        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), GammaCodec, 64);
+        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), 64);
 
         for i in 0..input.len() {
             assert_eq!(input[i], compressed_input.get(i).unwrap());
@@ -159,7 +213,7 @@ mod tests {
     #[test]
     fn test_gamma_codec_empty() {
         let input: Vec<u64> = Vec::new();
-        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), GammaCodec, 64);
+        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), 64);
 
         assert_eq!(compressed_input.len(), 0);
         assert_eq!(compressed_input.is_empty(), true);
@@ -168,7 +222,7 @@ mod tests {
     #[test]
     fn test_gamma_codec_single_element() {
         let input: Vec<u64> = vec![42];
-        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), GammaCodec, 64);
+        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), 64);
 
         assert_eq!(compressed_input.len(), 1);
         assert_eq!(compressed_input.get(0).unwrap(), 42);
@@ -178,7 +232,7 @@ mod tests {
     fn test_delta_codec() {
         // create a random vector with 1000 elements from 0 to 10000
         let input: Vec<u64> = (0..1000).map(|_| rand::random::<u64>() % 10000).collect();
-        let compressed_input = IntVec::<DeltaCodec>::from(input.clone(), DeltaCodec, 64);
+        let compressed_input = IntVec::<DeltaCodec>::from(input.clone(), 64);
 
         for i in 0..input.len() {
             assert_eq!(input[i], compressed_input.get(i).unwrap());
@@ -188,7 +242,7 @@ mod tests {
     #[test]
     fn test_delta_codec_empty() {
         let input: Vec<u64> = Vec::new();
-        let compressed_input = IntVec::<DeltaCodec>::from(input.clone(), DeltaCodec, 64);
+        let compressed_input = IntVec::<DeltaCodec>::from(input.clone(), 64);
 
         assert_eq!(compressed_input.len(), 0);
         assert_eq!(compressed_input.is_empty(), true);
@@ -197,7 +251,7 @@ mod tests {
     #[test]
     fn test_delta_codec_single_element() {
         let input: Vec<u64> = vec![42];
-        let compressed_input = IntVec::<DeltaCodec>::from(input.clone(), DeltaCodec, 64);
+        let compressed_input = IntVec::<DeltaCodec>::from(input.clone(), 64);
 
         assert_eq!(compressed_input.len(), 1);
         assert_eq!(compressed_input.get(0).unwrap(), 42);
@@ -207,7 +261,7 @@ mod tests {
     fn test_gamma_codec_sampling() {
         // create a random vector with 1000 elements from 0 to 10000
         let input: Vec<u64> = (0..1000).map(|_| rand::random::<u64>() % 10000).collect();
-        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), GammaCodec, 64);
+        let compressed_input = IntVec::<GammaCodec>::from(input.clone(), 64);
 
         for i in 0..input.len() {
             if i % 64 == 0 {
