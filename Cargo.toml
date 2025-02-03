@@ -5,8 +5,10 @@ edition = "2021"
 
 [dependencies]
 dsi-bitstream = "0.4.2"
+mem_dbg = "0.1.8"
 rand = "0.9.0"
 vers-vecs = "1.5.1"
 
 [dev-dependencies]
-criterion = "0.4"
+criterion = "0.5.1"
+rand = "0.9.0"
