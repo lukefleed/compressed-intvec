@@ -20,10 +20,12 @@ pub trait Codec {
 pub struct GammaCodec;
 
 impl Codec for GammaCodec {
+    #[inline(always)]
     fn encode(writer: &mut MyBitWriter, value: u64) -> Result<usize, Box<dyn Error>> {
         Ok(writer.write_gamma(value)?)
     }
 
+    #[inline(always)]
     fn decode(reader: &mut MyBitReader) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_gamma()?)
     }
@@ -33,10 +35,12 @@ impl Codec for GammaCodec {
 pub struct DeltaCodec;
 
 impl Codec for DeltaCodec {
+    #[inline(always)]
     fn encode(writer: &mut MyBitWriter, value: u64) -> Result<usize, Box<dyn Error>> {
         Ok(writer.write_delta(value)?)
     }
 
+    #[inline(always)]
     fn decode(reader: &mut MyBitReader) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_delta()?)
     }
@@ -45,10 +49,12 @@ impl Codec for DeltaCodec {
 pub struct ExpGolombCodec;
 
 impl Codec for ExpGolombCodec {
+    #[inline(always)]
     fn encode(writer: &mut MyBitWriter, value: u64) -> Result<usize, Box<dyn Error>> {
         Ok(writer.write_exp_golomb(value, 3)?)
     }
 
+    #[inline(always)]
     fn decode(reader: &mut MyBitReader) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_exp_golomb(3)?)
     }
@@ -103,7 +109,7 @@ impl<C: Codec> IntVec<C> {
     /// Returns the value at the `index` position in the original vector.
     ///
     /// Returns `None` if the index exceeds the length.
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, index: usize) -> Option<u64> {
         if index >= self.len {
             return None;
@@ -128,13 +134,11 @@ impl<C: Codec> IntVec<C> {
     }
 
     /// Returns the number of stored elements.
-    #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
     /// Returns `true` if the vector is empty.
-    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
