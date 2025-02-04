@@ -85,7 +85,7 @@ impl<C: Codec> IntVec<C> {
     pub fn from(input: Vec<u64>, k: usize) -> Result<Self, Box<dyn Error>> {
         let word_writer = MemWordWriterVec::new(Vec::new());
         let mut writer = MyBitWriter::new(word_writer);
-        let mut samples = Vec::with_capacity((input.len() + k - 1) / k);
+        let mut samples = Vec::new();
         let mut total_bits = 0;
 
         for (i, &x) in input.iter().enumerate() {

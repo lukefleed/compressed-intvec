@@ -1,9 +1,12 @@
+cargo-features = ["profile-rustflags"]
+
 [package]
 name = "compressed-intvec"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+criterion = "0.5.1"
 dsi-bitstream = "0.4.2"
 mem_dbg = "0.1.8"
 rand = "0.9.0"
@@ -12,3 +15,14 @@ vers-vecs = "1.5.1"
 [dev-dependencies]
 criterion = "0.5.1"
 rand = "0.9.0"
+
+[[bench]]
+name = "random_access"
+harness = false
+
+[[bench]]
+name = "sample_density"
+harness = false
+
+[profile.release]
+rustflags = ["-C", "target-cpu=native"]
