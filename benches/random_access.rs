@@ -1,5 +1,5 @@
-use compressed_intvec::{DeltaCodec, GammaCodec, IntVec};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use compressed_intvec::{DeltaCodec, ExpGolombCodec, GammaCodec, IntVec};
+use criterion::{criterion_group, criterion_main, Criterion};
 use rand::Rng;
 
 const DATA_SIZE: usize = 100000;
@@ -15,46 +15,45 @@ fn prepare_indices(size: usize, range: usize) -> Vec<usize> {
     (0..size).map(|_| rng.random_range(0..range)).collect()
 }
 
-fn bench_vec(c: &mut Criterion, data: &Vec<u64>, indices: &Vec<usize>) {
-    c.bench_function("Random Access standard Vec", |b| {
-        b.iter(|| {
-            for &idx in indices {
-                let _ = black_box(data[idx]);
-            }
-        });
-    });
-}
-
-fn bench_intvec_gamma_64(c: &mut Criterion, data: &Vec<u64>, indices: &Vec<usize>) {
-    let compressed_data = IntVec::<GammaCodec>::from(data.clone(), 64).unwrap();
-    c.bench_function("Random Access IntVec Gamma", |b| {
-        b.iter(|| {
-            for &idx in indices {
-                let _ = black_box(compressed_data.get(idx));
-            }
-        });
-    });
-}
-
-fn bench_intvec_delta_64(c: &mut Criterion, data: &Vec<u64>, indices: &Vec<usize>) {
-    let compressed_data = IntVec::<DeltaCodec>::from(data.clone(), 64).unwrap();
-    c.bench_function("Random Access IntVec Delta", |b| {
-        b.iter(|| {
-            for &idx in indices {
-                let _ = black_box(compressed_data.get(idx));
-            }
-        });
-    });
-}
-
-fn criterion_benchmark(c: &mut Criterion) {
+fn bench_all(c: &mut Criterion) {
     let data = prepare_data(DATA_SIZE);
+    let delta_vec = IntVec::<DeltaCodec>::from(data.clone(), 32).unwrap();
+    let gamma_vec = IntVec::<GammaCodec>::from(data.clone(), 32).unwrap();
+    let exp_golomb_vec = IntVec::<ExpGolombCodec>::from(data.clone(), 32).unwrap();
     let indices = prepare_indices(ACCESS_COUNT, DATA_SIZE);
 
-    bench_vec(c, &data, &indices);
-    bench_intvec_gamma_64(c, &data, &indices);
-    bench_intvec_delta_64(c, &data, &indices);
+    c.bench_function("Random Access Standard Vec", |b| {
+        b.iter(|| {
+            for idx in indices.iter() {
+                let _ = data[*idx];
+            }
+        });
+    });
+
+    c.bench_function("Random Access IntVec Gamma", |b| {
+        b.iter(|| {
+            for idx in indices.iter() {
+                let _ = gamma_vec.get(*idx);
+            }
+        });
+    });
+
+    c.bench_function("Random Access IntVec Delta", |b| {
+        b.iter(|| {
+            for idx in indices.iter() {
+                let _ = delta_vec.get(*idx);
+            }
+        });
+    });
+
+    c.bench_function("Random Access IntVec Exp-Golomb", |b| {
+        b.iter(|| {
+            for idx in indices.iter() {
+                let _ = exp_golomb_vec.get(*idx);
+            }
+        });
+    });
 }
 
-criterion_group!(benches, criterion_benchmark);
+criterion_group!(benches, bench_all);
 criterion_main!(benches);

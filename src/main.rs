@@ -9,20 +9,20 @@ fn main() {
         .mem_dbg(DbgFlags::default() | DbgFlags::CAPACITY | DbgFlags::HUMANIZE)
         .unwrap();
 
-    let compressed_expgolomb = IntVec::<ExpGolombCodec>::from(input.clone(), 64).unwrap();
+    let compressed_expgolomb = IntVec::<ExpGolombCodec>::from(input.clone(), 16).unwrap();
 
     println!("\nSpace used by the Compressed Integer Vector with Exp-Golomb codec:");
     compressed_expgolomb
         .mem_dbg(DbgFlags::default() | DbgFlags::CAPACITY | DbgFlags::HUMANIZE)
         .unwrap();
 
-    let compressed_delta = IntVec::<DeltaCodec>::from(input.clone(), 64).unwrap();
+    let compressed_delta = IntVec::<DeltaCodec>::from(input.clone(), 16).unwrap();
     println!("\nSpace used by the Compressed Integer Vector with Delta codec:");
     compressed_delta
         .mem_dbg(DbgFlags::default() | DbgFlags::CAPACITY | DbgFlags::HUMANIZE)
         .unwrap();
 
-    let compressed_gamma = IntVec::<GammaCodec>::from(input.clone(), 64).unwrap();
+    let compressed_gamma = IntVec::<GammaCodec>::from(input.clone(), 16).unwrap();
     println!("\nSpace used by the Compressed Integer Vector with Gamma codec:");
     compressed_gamma
         .mem_dbg(DbgFlags::default() | DbgFlags::CAPACITY | DbgFlags::HUMANIZE)

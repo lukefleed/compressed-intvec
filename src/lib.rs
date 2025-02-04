@@ -51,12 +51,12 @@ pub struct ExpGolombCodec;
 impl Codec for ExpGolombCodec {
     #[inline(always)]
     fn encode(writer: &mut MyBitWriter, value: u64) -> Result<usize, Box<dyn Error>> {
-        Ok(writer.write_exp_golomb(value, 3)?)
+        Ok(writer.write_exp_golomb(value, 9)?)
     }
 
     #[inline(always)]
     fn decode(reader: &mut MyBitReader) -> Result<u64, Box<dyn Error>> {
-        Ok(reader.read_exp_golomb(3)?)
+        Ok(reader.read_exp_golomb(9)?)
     }
 }
 
