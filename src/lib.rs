@@ -77,6 +77,16 @@ pub struct IntVec<C: Codec> {
 }
 
 impl<C: Codec> IntVec<C> {
+    pub fn new() -> Self {
+        IntVec {
+            data: Vec::new(),
+            samples: Vec::new(),
+            codec: PhantomData,
+            k: 0,
+            len: 0,
+        }
+    }
+
     /// Constructs a new `IntVec` from an input vector and a sampling parameter `k`.
     ///
     /// # Errors
@@ -133,6 +143,11 @@ impl<C: Codec> IntVec<C> {
         Some(value)
     }
 
+    pub fn get_unchecked(&self, index: usize) -> u64 {
+        // Place Holder, get is already safe
+        self.get(index).unwrap()
+    }
+
     /// Returns the number of stored elements.
     pub fn len(&self) -> usize {
         self.len
@@ -141,5 +156,43 @@ impl<C: Codec> IntVec<C> {
     /// Returns `true` if the vector is empty.
     pub fn is_empty(&self) -> bool {
         self.len == 0
+    }
+}
+
+pub struct IntVecIter<'a, C: Codec> {
+    reader: MyBitReader<'a>,
+    remaining: usize,
+    codec: PhantomData<C>,
+}
+
+impl<'a, C: Codec> IntVecIter<'a, C> {
+    pub fn new(vec: &'a IntVec<C>) -> Self {
+        let word_reader = MemWordReader::new(&vec.data);
+        let reader = MyBitReader::new(word_reader);
+        IntVecIter {
+            reader,
+            remaining: vec.len,
+            codec: PhantomData,
+        }
+    }
+}
+
+impl<'a, C: Codec> Iterator for IntVecIter<'a, C> {
+    type Item = u64;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining == 0 {
+            None
+        } else {
+            // Assume error-free decoding in this hot loop or handle errors accordingly.
+            let value = C::decode(&mut self.reader).ok()?;
+            self.remaining -= 1;
+            Some(value)
+        }
+    }
+}
+
+impl<C: Codec> IntVec<C> {
+    pub fn fast_iter(&self) -> IntVecIter<C> {
+        IntVecIter::new(self)
     }
 }
