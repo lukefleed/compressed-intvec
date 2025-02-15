@@ -1,25 +1,25 @@
 use compressed_intvec::{DeltaCodec, ExpGolombCodec, GammaCodec, IntVec};
 use criterion::{criterion_group, criterion_main, Criterion};
-use rand::Rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 
 const DATA_SIZE: usize = 100000;
 const ACCESS_COUNT: usize = 1000;
 
-fn prepare_data(size: usize) -> Vec<u64> {
-    let mut rng = rand::rng();
+fn generate_vec(size: usize) -> Vec<u64> {
+    let mut rng = StdRng::seed_from_u64(42);
     (0..size).map(|_| rng.random_range(0..10000)).collect()
 }
 
 fn prepare_indices(size: usize, range: usize) -> Vec<usize> {
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(42);
     (0..size).map(|_| rng.random_range(0..range)).collect()
 }
 
 fn bench_all(c: &mut Criterion) {
-    let data = prepare_data(DATA_SIZE);
+    let data = generate_vec(DATA_SIZE);
     let delta_vec = IntVec::<DeltaCodec>::from(data.clone(), 32).unwrap();
     let gamma_vec = IntVec::<GammaCodec>::from(data.clone(), 32).unwrap();
-    let exp_golomb_vec = IntVec::<ExpGolombCodec>::from(data.clone(), 32).unwrap();
+    let exp_golomb_vec = IntVec::<ExpGolombCodec>::from_with_param(data.clone(), 3, 9).unwrap();
     let indices = prepare_indices(ACCESS_COUNT, DATA_SIZE);
 
     c.bench_function("Random Access Standard Vec", |b| {
