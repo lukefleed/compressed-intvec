@@ -9,11 +9,12 @@ edition = "2021"
 criterion = "0.5.1"
 dsi-bitstream = "0.4.2"
 mem_dbg = "0.1.8"
+once_cell = "1.20.3"
 rand = "0.9.0"
 vers-vecs = "1.5.1"
 
 [dev-dependencies]
-criterion = "0.5.1"
+criterion = { version = "0.5.1", features = ["html_reports"] }
 rand = "0.9.0"
 
 [[bench]]
@@ -21,9 +22,15 @@ name = "random_access"
 harness = false
 
 [[bench]]
-name = "sample_density"
+name = "create_intvec"
 harness = false
 
+[[bench]]
+name = "vary_k"
+harness = false
 
 [profile.release]
 rustflags = ["-C", "target-cpu=native"]
+
+[profile.bench]
+lto = true
