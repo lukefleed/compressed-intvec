@@ -400,7 +400,7 @@ pub type BEIntVec<C> = IntVec<BE, C>;
 impl<C> BEIntVec<C>
 where
     C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>>,
-    C::Params: Clone,
+    C::Params: Copy,
 {
     /// Creates a new `BEIntVec` from a vector of unsigned 64-bit integers.
     ///
@@ -438,7 +438,7 @@ where
             if i % k == 0 {
                 samples.push(total_bits);
             }
-            total_bits += C::encode(&mut writer, x, codec_param.clone())?;
+            total_bits += C::encode(&mut writer, x, codec_param)?;
         }
 
         writer.flush()?;
@@ -479,14 +479,13 @@ where
 
         let sample_index = index / self.k;
         let start_bit = self.samples[sample_index];
-        let word_reader = MemWordReader::new(self.data.clone());
-        let mut reader = MyBitRead::<BE>::new(word_reader);
+        let mut reader = MyBitRead::<BE>::new(MemWordReader::new(self.data.clone()));
         reader.set_bit_pos(start_bit as u64).ok()?;
 
         let mut value = 0;
         let start_index = sample_index * self.k;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, self.codec_param.clone()).ok()?;
+            value = C::decode(&mut reader, self.codec_param).ok()?;
         }
         Some(value)
     }
@@ -502,7 +501,7 @@ where
     /// use compressed_intvec::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
+    /// let intvec = BEIntVec::<GammaCodec>::from(input, 2).unwrap();
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
@@ -513,7 +512,7 @@ where
         let mut values = Vec::with_capacity(self.len);
 
         for _ in 0..self.len {
-            values.push(C::decode(&mut reader, self.codec_param.clone()).unwrap());
+            values.push(C::decode(&mut reader, self.codec_param).unwrap());
         }
 
         values
@@ -557,7 +556,7 @@ where
 impl<'a, C> Iterator for IntVecIterBE<'a, C>
 where
     C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>>,
-    C::Params: Clone,
+    C::Params: Copy,
 {
     type Item = u64;
 
@@ -578,7 +577,7 @@ pub type LEIntVec<C> = IntVec<LE, C>;
 impl<C> LEIntVec<C>
 where
     C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>>,
-    C::Params: Clone,
+    C::Params: Copy,
 {
     /// Creates a new `LEIntVec` from a vector of unsigned 64-bit integers.
     ///
@@ -617,7 +616,7 @@ where
             if i % k == 0 {
                 samples.push(total_bits);
             }
-            total_bits += C::encode(&mut writer, x, codec_param.clone())?;
+            total_bits += C::encode(&mut writer, x, codec_param)?;
         }
 
         writer.flush()?;
@@ -657,14 +656,13 @@ where
 
         let sample_index = index / self.k;
         let start_bit = self.samples[sample_index];
-        let word_reader = MemWordReader::new(self.data.clone());
-        let mut reader = MyBitRead::<LE>::new(word_reader);
+        let mut reader = MyBitRead::<LE>::new(MemWordReader::new(self.data.clone()));
         reader.set_bit_pos(start_bit as u64).ok()?;
 
         let mut value = 0;
         let start_index = sample_index * self.k;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, self.codec_param.clone()).ok()?;
+            value = C::decode(&mut reader, self.codec_param).ok()?;
         }
         Some(value)
     }
@@ -680,7 +678,7 @@ where
     /// use compressed_intvec::ZetaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = LEIntVec::<ZetaCodec>::from_with_param(input.clone(), 2, 3).unwrap();
+    /// let intvec = LEIntVec::<ZetaCodec>::from_with_param(input, 2, 3).unwrap();
     ///
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
@@ -691,7 +689,7 @@ where
         let mut values = Vec::with_capacity(self.len);
 
         for _ in 0..self.len {
-            values.push(C::decode(&mut reader, self.codec_param.clone()).unwrap());
+            values.push(C::decode(&mut reader, self.codec_param).unwrap());
         }
 
         values
@@ -735,7 +733,7 @@ where
 impl<'a, C> Iterator for IntVecIterLE<'a, C>
 where
     C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>>,
-    C::Params: Clone,
+    C::Params: Copy,
 {
     type Item = u64;
 
