@@ -207,5 +207,19 @@ mod tests {
             let k = 3;
             test_codec_be::<DeltaCodec>(&input, k, ());
         }
+
+        #[test]
+        fn test_in_order_iter() {
+            let input = generate_random_vec(100);
+            let k = 3;
+            let vec_le = LEIntVec::<GammaCodec>::from_with_param(input.clone(), k, ())
+                .expect("Failed to create LEIntVec");
+
+            for (i, val) in vec_le.iter().enumerate() {
+                assert_eq!(val, input[i]);
+            }
+
+            assert_eq!(vec_le.into_vec(), input);
+        }
     }
 }

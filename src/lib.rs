@@ -519,6 +519,13 @@ where
         values
     }
 
+    pub fn iter(&self) -> IntVecIterBE<C> {
+        IntVecIterBE {
+            intvec: self,
+            index: 0,
+        }
+    }
+
     /// Returns the number of elements in the vector.
     pub fn len(&self) -> usize {
         self.len
@@ -535,6 +542,33 @@ impl<C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>, Params = ()>> BEIntVec<C> {
     /// Creates a new `BEIntVec` from input values, with no extra codec parameters.
     pub fn from(input: Vec<u64>, k: usize) -> Result<Self, Box<dyn Error>> {
         Self::from_with_param(input, k, ())
+    }
+}
+
+/// Iterator for `BEIntVec`.
+pub struct IntVecIterBE<'a, C>
+where
+    C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>>,
+{
+    intvec: &'a BEIntVec<C>,
+    index: usize,
+}
+
+impl<'a, C> Iterator for IntVecIterBE<'a, C>
+where
+    C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>>,
+    C::Params: Clone,
+{
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.intvec.len {
+            return None;
+        }
+
+        let value = self.intvec.get(self.index);
+        self.index += 1;
+        value
     }
 }
 
@@ -663,6 +697,13 @@ where
         values
     }
 
+    pub fn iter(&self) -> IntVecIterLE<C> {
+        IntVecIterLE {
+            intvec: self,
+            index: 0,
+        }
+    }
+
     /// Returns the number of elements in the vector.
     pub fn len(&self) -> usize {
         self.len
@@ -680,4 +721,49 @@ impl<C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>, Params = ()>> LEIntVec<C> {
     pub fn from(input: Vec<u64>, k: usize) -> Result<Self, Box<dyn Error>> {
         Self::from_with_param(input, k, ())
     }
+}
+
+/// Iterator for `LEIntVec`.
+pub struct IntVecIterLE<'a, C>
+where
+    C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>>,
+{
+    intvec: &'a LEIntVec<C>,
+    index: usize,
+}
+
+impl<'a, C> Iterator for IntVecIterLE<'a, C>
+where
+    C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>>,
+    C::Params: Clone,
+{
+    type Item = u64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.intvec.len {
+            return None;
+        }
+
+        let value = self.intvec.get(self.index);
+        self.index += 1;
+        value
+    }
+}
+
+/// IntVec Trait
+pub trait IntVecTrait {
+    /// Returns the number of elements in the vector.
+    fn len(&self) -> usize;
+
+    /// Returns whether the vector is empty.
+    fn is_empty(&self) -> bool;
+
+    /// Retrieves the value at the given index.
+    fn get(&self, index: usize) -> Option<u64>;
+
+    /// Returns the original vector of integers.
+    fn into_vec(self) -> Vec<u64>;
+
+    /// Returns an iterator over the values in the vector.
+    fn iter(&self) -> Box<dyn Iterator<Item = u64> + '_>;
 }
