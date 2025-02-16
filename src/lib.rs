@@ -1,7 +1,6 @@
-use std::{error::Error, marker::PhantomData, rc::Rc};
+use std::{error::Error, marker::PhantomData};
 
 use dsi_bitstream::prelude::*;
-use mem_dbg::{MemDbg, MemSize};
 
 /// Trait for encoding and decoding values using a variable-length code.
 ///
@@ -12,25 +11,27 @@ use mem_dbg::{MemDbg, MemSize};
 ///
 /// - `E`: Endianness marker (e.g. big-endian `BE` or little-endian `LE`).
 /// - `W`: A writer capable of writing bits/words in the specified codec.
-/// - `R`: A reader capable of reading bits/words in the specified codec.
 ///
 /// # Associated Types
 ///
 /// - `Params`: The type of extra parameters needed for the codec. For many codecs this is
 ///   `()`, but some require additional runtime parameters.
-pub trait Codec<E: Endianness, W: BitWrite<E>, R: BitRead<E>> {
-    /// The type of parameters for encoding/decoding.
+pub trait Codec<E: Endianness, W: BitWrite<E>> {
     type Params;
 
-    /// Encodes `value` into the stream represented by `writer`, using the provided parameters.
-    ///
-    /// Returns the number of bits written.
     fn encode(writer: &mut W, value: u64, params: Self::Params) -> Result<usize, Box<dyn Error>>;
 
-    /// Decodes a value from the stream represented by `reader`, using the provided parameters.
-    ///
-    /// Returns the decoded `u64` value.
-    fn decode<'a>(reader: &'a mut R, params: Self::Params) -> Result<u64, Box<dyn Error>>;
+    fn decode<R2>(reader: &mut R2, params: Self::Params) -> Result<u64, Box<dyn Error>>
+    where
+        R2: for<'a> BitRead<E>
+            + GammaRead<E>
+            + DeltaRead<E>
+            + ExpGolombRead<E>
+            + ZetaRead<E>
+            + RiceRead<E>
+            + ZetaReadParam<E>
+            + DeltaReadParam<E>
+            + GammaReadParam<E>;
 }
 
 /// GammaCodec: no extra runtime parameter.
@@ -38,7 +39,7 @@ pub trait Codec<E: Endianness, W: BitWrite<E>, R: BitRead<E>> {
 /// Uses the gamma code for encoding and decoding.
 pub struct GammaCodec;
 
-impl<E: Endianness, W: GammaWrite<E>, R: GammaRead<E>> Codec<E, W, R> for GammaCodec {
+impl<E: Endianness, W: GammaWrite<E>> Codec<E, W> for GammaCodec {
     type Params = ();
 
     #[inline(always)]
@@ -47,7 +48,7 @@ impl<E: Endianness, W: GammaWrite<E>, R: GammaRead<E>> Codec<E, W, R> for GammaC
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: GammaRead<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_gamma()?)
     }
 }
@@ -55,18 +56,19 @@ impl<E: Endianness, W: GammaWrite<E>, R: GammaRead<E>> Codec<E, W, R> for GammaC
 impl GammaCodec {
     /// Encodes a value using gamma coding.
     #[inline(always)]
-    pub fn encode<W: GammaWrite<E>, R: GammaRead<E>, E: Endianness>(
+    pub fn encode<W: GammaWrite<E>, E: Endianness>(
         writer: &mut W,
         value: u64,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, ())
+        <Self as Codec<E, W>>::encode(writer, value, ())
     }
     /// Decodes a value using gamma coding.
     #[inline(always)]
-    pub fn decode<W: GammaWrite<E>, R: GammaRead<E>, E: Endianness>(
-        reader: &mut R,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, ())
+    pub fn decode<E: Endianness, R>(reader: &mut R) -> Result<u64, Box<dyn Error>>
+    where
+        R: BitRead<E> + GammaRead<E>,
+    {
+        Ok(reader.read_gamma()?)
     }
 }
 
@@ -75,7 +77,7 @@ impl GammaCodec {
 /// Uses the delta code for encoding and decoding.
 pub struct DeltaCodec;
 
-impl<E: Endianness, W: DeltaWrite<E>, R: DeltaRead<E>> Codec<E, W, R> for DeltaCodec {
+impl<E: Endianness, W: DeltaWrite<E>> Codec<E, W> for DeltaCodec {
     type Params = ();
 
     #[inline(always)]
@@ -84,7 +86,7 @@ impl<E: Endianness, W: DeltaWrite<E>, R: DeltaRead<E>> Codec<E, W, R> for DeltaC
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: DeltaRead<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_delta()?)
     }
 }
@@ -92,18 +94,19 @@ impl<E: Endianness, W: DeltaWrite<E>, R: DeltaRead<E>> Codec<E, W, R> for DeltaC
 impl DeltaCodec {
     /// Encodes a value using delta coding.
     #[inline(always)]
-    pub fn encode<E: Endianness, W: DeltaWrite<E>, R: DeltaRead<E>>(
+    pub fn encode<E: Endianness, W: DeltaWrite<E>>(
         writer: &mut W,
         value: u64,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, ())
+        <Self as Codec<E, W>>::encode(writer, value, ())
     }
     /// Decodes a value using delta coding.
     #[inline(always)]
-    pub fn decode<E: Endianness, W: DeltaWrite<E>, R: DeltaRead<E>>(
-        reader: &mut R,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, ())
+    pub fn decode<E: Endianness, R>(reader: &mut R) -> Result<u64, Box<dyn Error>>
+    where
+        R: BitRead<E> + DeltaRead<E>,
+    {
+        Ok(reader.read_delta()?)
     }
 }
 
@@ -112,7 +115,7 @@ impl DeltaCodec {
 /// This codec supports the Exp‑Golomb coding scheme which is parameterized by `k`.
 pub struct ExpGolombCodec;
 
-impl<E: Endianness, W: ExpGolombWrite<E>, R: ExpGolombRead<E>> Codec<E, W, R> for ExpGolombCodec {
+impl<E: Endianness, W: ExpGolombWrite<E>> Codec<E, W> for ExpGolombCodec {
     type Params = usize;
 
     #[inline(always)]
@@ -121,7 +124,7 @@ impl<E: Endianness, W: ExpGolombWrite<E>, R: ExpGolombRead<E>> Codec<E, W, R> fo
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, k: usize) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: ExpGolombRead<E>>(reader: &mut R, k: usize) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_exp_golomb(k)?)
     }
 }
@@ -129,20 +132,21 @@ impl<E: Endianness, W: ExpGolombWrite<E>, R: ExpGolombRead<E>> Codec<E, W, R> fo
 impl ExpGolombCodec {
     /// Encodes a value using Exp‑Golomb coding with the specified parameter `k`.
     #[inline(always)]
-    pub fn encode<E: Endianness, W: ExpGolombWrite<E>, R: ExpGolombRead<E>>(
+    pub fn encode<E: Endianness, W: ExpGolombWrite<E>>(
         writer: &mut W,
         value: u64,
         k: usize,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, k)
+        <Self as Codec<E, W>>::encode(writer, value, k)
     }
+
     /// Decodes a value using Exp‑Golomb coding with the specified parameter `k`.
     #[inline(always)]
-    pub fn decode<E: Endianness, W: ExpGolombWrite<E>, R: ExpGolombRead<E>>(
-        reader: &mut R,
-        k: usize,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, k)
+    pub fn decode<E: Endianness, R>(reader: &mut R, k: usize) -> Result<u64, Box<dyn Error>>
+    where
+        R: BitRead<E> + ExpGolombRead<E>,
+    {
+        Ok(reader.read_exp_golomb(k)?)
     }
 }
 
@@ -151,7 +155,7 @@ impl ExpGolombCodec {
 /// The parameter is given as a `u64`.
 pub struct ZetaCodec;
 
-impl<E: Endianness, W: ZetaWrite<E>, R: ZetaRead<E>> Codec<E, W, R> for ZetaCodec {
+impl<E: Endianness, W: ZetaWrite<E>> Codec<E, W> for ZetaCodec {
     type Params = u64;
 
     #[inline(always)]
@@ -160,7 +164,7 @@ impl<E: Endianness, W: ZetaWrite<E>, R: ZetaRead<E>> Codec<E, W, R> for ZetaCode
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, k: u64) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: ZetaRead<E>>(reader: &mut R, k: u64) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_zeta(k)?)
     }
 }
@@ -168,21 +172,21 @@ impl<E: Endianness, W: ZetaWrite<E>, R: ZetaRead<E>> Codec<E, W, R> for ZetaCode
 impl ZetaCodec {
     /// Encodes a value using Zeta coding with parameter `k`.
     #[inline(always)]
-    pub fn encode<E: Endianness, W: ZetaWrite<E>, R: ZetaRead<E>>(
+    pub fn encode<E: Endianness, W: ZetaWrite<E>>(
         writer: &mut W,
         value: u64,
         k: u64,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, k)
+        <Self as Codec<E, W>>::encode(writer, value, k)
     }
 
     /// Decodes a value using Zeta coding with parameter `k`.
     #[inline(always)]
-    pub fn decode<E: Endianness, W: ZetaWrite<E>, R: ZetaRead<E>>(
-        reader: &mut R,
-        k: u64,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, k)
+    pub fn decode<E: Endianness, R>(reader: &mut R, k: u64) -> Result<u64, Box<dyn Error>>
+    where
+        R: BitRead<E> + ZetaRead<E>,
+    {
+        Ok(reader.read_zeta(k)?)
     }
 }
 
@@ -191,7 +195,7 @@ impl ZetaCodec {
 /// The parameter represents the logarithm base‑2 of the encoding base.
 pub struct RiceCodec;
 
-impl<E: Endianness, W: RiceWrite<E>, R: RiceRead<E>> Codec<E, W, R> for RiceCodec {
+impl<E: Endianness, W: RiceWrite<E>> Codec<E, W> for RiceCodec {
     type Params = usize;
 
     #[inline(always)]
@@ -200,7 +204,7 @@ impl<E: Endianness, W: RiceWrite<E>, R: RiceRead<E>> Codec<E, W, R> for RiceCode
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, log2_b: usize) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: RiceRead<E>>(reader: &mut R, log2_b: usize) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_rice(log2_b)?)
     }
 }
@@ -208,21 +212,21 @@ impl<E: Endianness, W: RiceWrite<E>, R: RiceRead<E>> Codec<E, W, R> for RiceCode
 impl RiceCodec {
     /// Encodes a value using Rice coding with the specified `log2_b` parameter.
     #[inline(always)]
-    pub fn encode<E: Endianness, W: RiceWrite<E>, R: RiceRead<E>>(
+    pub fn encode<E: Endianness, W: RiceWrite<E>>(
         writer: &mut W,
         value: u64,
         log2_b: usize,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, log2_b)
+        <Self as Codec<E, W>>::encode(writer, value, log2_b)
     }
 
     /// Decodes a value using Rice coding with the specified `log2_b` parameter.
     #[inline(always)]
-    pub fn decode<E: Endianness, W: RiceWrite<E>, R: RiceRead<E>>(
-        reader: &mut R,
-        log2_b: usize,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, log2_b)
+    pub fn decode<E: Endianness, R>(reader: &mut R, log2_b: usize) -> Result<u64, Box<dyn Error>>
+    where
+        R: BitRead<E> + RiceRead<E>,
+    {
+        Ok(reader.read_rice(log2_b)?)
     }
 }
 
@@ -231,7 +235,7 @@ impl RiceCodec {
 /// The compile‑time flag `USE_TABLE` determines whether a lookup table is used.
 pub struct ParamZetaCodec<const USE_TABLE: bool>;
 
-impl<E: Endianness, W: ZetaWriteParam<E>, R: ZetaReadParam<E>, const USE_TABLE: bool> Codec<E, W, R>
+impl<E: Endianness, W: ZetaWriteParam<E>, const USE_TABLE: bool> Codec<E, W>
     for ParamZetaCodec<USE_TABLE>
 {
     type Params = ();
@@ -242,7 +246,7 @@ impl<E: Endianness, W: ZetaWriteParam<E>, R: ZetaReadParam<E>, const USE_TABLE: 
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: ZetaReadParam<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_zeta3_param::<USE_TABLE>()?)
     }
 }
@@ -254,14 +258,17 @@ impl<const USE_TABLE: bool> ParamZetaCodec<USE_TABLE> {
         writer: &mut W,
         value: u64,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, ())
+        <Self as Codec<E, W>>::encode(writer, value, ())
     }
     /// Decodes a value using the parameterized Zeta codec.
     #[inline(always)]
     pub fn decode<E: Endianness, W: ZetaWriteParam<E>, R: ZetaReadParam<E>>(
         reader: &mut R,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, ())
+    ) -> Result<u64, Box<dyn Error>>
+    where
+        R: ZetaReadParam<E>,
+    {
+        Ok(reader.read_zeta3_param::<USE_TABLE>()?)
     }
 }
 
@@ -275,8 +282,7 @@ impl<
         const USE_DELTA_TABLE: bool,
         const USE_GAMMA_TABLE: bool,
         W: DeltaWriteParam<E>,
-        R: DeltaReadParam<E>,
-    > Codec<E, W, R> for ParamDeltaCodec<USE_DELTA_TABLE, USE_GAMMA_TABLE>
+    > Codec<E, W> for ParamDeltaCodec<USE_DELTA_TABLE, USE_GAMMA_TABLE>
 {
     type Params = ();
 
@@ -286,7 +292,7 @@ impl<
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: DeltaReadParam<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_delta_param::<USE_DELTA_TABLE, USE_GAMMA_TABLE>()?)
     }
 }
@@ -296,26 +302,29 @@ impl<const USE_DELTA_TABLE: bool, const USE_GAMMA_TABLE: bool>
 {
     /// Encodes a value using the parameterized Delta codec.
     #[inline(always)]
-    pub fn encode<E: Endianness, W: DeltaWriteParam<E>, R: DeltaReadParam<E>>(
+    pub fn encode<E: Endianness, W: DeltaWriteParam<E>>(
         writer: &mut W,
         value: u64,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, ())
+        <Self as Codec<E, W>>::encode(writer, value, ())
     }
     /// Decodes a value using the parameterized Delta codec.
     #[inline(always)]
-    pub fn decode<E: Endianness, W: DeltaWriteParam<E>, R: DeltaReadParam<E>>(
+    pub fn decode<E: Endianness, R: DeltaReadParam<E>>(
         reader: &mut R,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, ())
+    ) -> Result<u64, Box<dyn Error>>
+    where
+        R: DeltaReadParam<E>,
+    {
+        Ok(reader.read_delta_param::<USE_DELTA_TABLE, USE_GAMMA_TABLE>()?)
     }
 }
 
 /// ParamGammaCodec: uses a compile‑time flag for table usage in gamma coding.
 pub struct ParamGammaCodec<const USE_TABLE: bool>;
 
-impl<E: Endianness, W: GammaWriteParam<E>, R: GammaReadParam<E>, const USE_TABLE: bool>
-    Codec<E, W, R> for ParamGammaCodec<USE_TABLE>
+impl<E: Endianness, W: GammaWriteParam<E>, const USE_TABLE: bool> Codec<E, W>
+    for ParamGammaCodec<USE_TABLE>
 {
     type Params = ();
 
@@ -325,7 +334,7 @@ impl<E: Endianness, W: GammaWriteParam<E>, R: GammaReadParam<E>, const USE_TABLE
     }
 
     #[inline(always)]
-    fn decode(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
+    fn decode<R: GammaReadParam<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_gamma_param::<USE_TABLE>()?)
     }
 }
@@ -333,18 +342,21 @@ impl<E: Endianness, W: GammaWriteParam<E>, R: GammaReadParam<E>, const USE_TABLE
 impl<const USE_TABLE: bool> ParamGammaCodec<USE_TABLE> {
     /// Encodes a value using the parameterized Gamma codec.
     #[inline(always)]
-    pub fn encode<E: Endianness, W: GammaWriteParam<E>, R: GammaReadParam<E>>(
+    pub fn encode<E: Endianness, W: GammaWriteParam<E>>(
         writer: &mut W,
         value: u64,
     ) -> Result<usize, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::encode(writer, value, ())
+        <Self as Codec<E, W>>::encode(writer, value, ())
     }
     /// Decodes a value using the parameterized Gamma codec.
     #[inline(always)]
-    pub fn decode<E: Endianness, W: GammaWriteParam<E>, R: GammaReadParam<E>>(
+    pub fn decode<E: Endianness, R: GammaReadParam<E>>(
         reader: &mut R,
-    ) -> Result<u64, Box<dyn Error>> {
-        <Self as Codec<E, W, R>>::decode(reader, ())
+    ) -> Result<u64, Box<dyn Error>>
+    where
+        R: GammaReadParam<E>,
+    {
+        Ok(reader.read_gamma_param::<USE_TABLE>()?)
     }
 }
 
@@ -380,7 +392,7 @@ impl<const USE_TABLE: bool> ParamGammaCodec<USE_TABLE> {
 /// assert_eq!(intvec.len(), 5);
 /// ```
 #[derive(Debug, Clone)]
-pub struct IntVec<E: Endianness, W: BitWrite<E>, R: BitRead<E>, C: Codec<E, W, R>> {
+pub struct IntVec<E: Endianness, W: BitWrite<E>, C: Codec<E, W>> {
     pub data: Vec<u64>,
     pub samples: Vec<usize>,
     pub codec: PhantomData<C>,
@@ -391,27 +403,12 @@ pub struct IntVec<E: Endianness, W: BitWrite<E>, R: BitRead<E>, C: Codec<E, W, R
 }
 
 /// Big-endian variant of `IntVec`.
-pub type BEIntVec<W: BitWrite<BE>, R: BitRead<BE>, C: Codec<BE, W, R>> = IntVec<BE, W, R, C>;
+pub type BEIntVec<W, C> = IntVec<BE, W, C>;
 
-impl<
-        'a,
-        C: Codec<
-            BE,
-            BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>,
-            BufBitReader<BE, MemWordReader<u64, &'a Vec<u64>>>,
-        >,
-    >
-    BEIntVec<
-        BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>,
-        BufBitReader<BE, MemWordReader<u64, &'a Vec<u64>>>,
-        C,
-    >
+impl<'a, C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>>
+    BEIntVec<BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>
 where
-    C: Codec<
-        BE,
-        BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>,
-        BufBitReader<BE, MemWordReader<u64, &'a Vec<u64>>>,
-    >,
+    C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>,
     C::Params: Copy,
 {
     /// Creates a new `BEIntVec` from a vector of unsigned 64-bit integers.
@@ -522,8 +519,8 @@ where
     /// ```
     ///
     pub fn into_vec(self) -> Vec<u64> {
-        let word_reader = MemWordReader::new(self.data);
-        let mut reader = MyBitRead::<BE>::new(word_reader);
+        let word_reader = MemWordReader::new(&self.data);
+        let mut reader = BufBitReader::<BE, MemWordReader<u64, &Vec<u64>>>::new(word_reader);
         let mut values = Vec::with_capacity(self.len);
 
         for _ in 0..self.len {
@@ -533,11 +530,16 @@ where
         values
     }
 
-    pub fn iter(&self) -> IntVecIterBE<C> {
-        IntVecIterBE {
+    /// Returns an iterator over the values stored in the vector.
+    pub fn iter(&self) -> BEIntVecIter<C> {
+        BEIntVecIter {
             intvec: self,
             index: 0,
         }
+    }
+
+    pub fn limbs(&self) -> Vec<u64> {
+        self.data.clone()
     }
 
     /// Returns the number of elements in the vector.
@@ -552,46 +554,47 @@ where
 }
 
 /// Convenience constructor for codecs with no extra runtime parameter.
-impl<C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>, Params = ()>> BEIntVec<C> {
-    /// Creates a new `BEIntVec` from input values, with no extra codec parameters.
+impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>>
+    BEIntVec<BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>
+{
     pub fn from(input: Vec<u64>, k: usize) -> Result<Self, Box<dyn Error>> {
         Self::from_with_param(input, k, ())
     }
 }
 
-/// Iterator for `BEIntVec`.
-pub struct IntVecIterBE<'a, C>
-where
-    C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>>,
-{
-    intvec: &'a BEIntVec<C>,
+/// Iterator over the values stored in a `BEIntVec`.
+/// The iterator decodes values on the fly.
+
+pub struct BEIntVecIter<'a, C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>> {
+    intvec: &'a BEIntVec<BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>,
     index: usize,
 }
 
-impl<'a, C> Iterator for IntVecIterBE<'a, C>
+impl<'a, C> Iterator for BEIntVecIter<'a, C>
 where
-    C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>>,
-    C::Params: Copy,
+    C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>,
+    for<'b> C: Codec<BE, BufBitReader<BE, MemWordReader<u64, &'b Vec<u64>>>>,
+    <C as Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>>::Params: Copy,
 {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.intvec.len {
+        if self.index >= self.intvec.len() {
             return None;
         }
-
         let value = self.intvec.get(self.index);
         self.index += 1;
         value
     }
 }
 
-/// Little-endian variant of `IntVec`.
-pub type LEIntVec<C> = IntVec<LE, C>;
+/// Big-endian variant of `IntVec`.
+pub type LEIntVec<W, C> = IntVec<LE, W, C>;
 
-impl<C> LEIntVec<C>
+impl<'a, C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>>
+    LEIntVec<BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>
 where
-    C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>>,
+    C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
     C::Params: Copy,
 {
     /// Creates a new `LEIntVec` from a vector of unsigned 64-bit integers.
@@ -600,20 +603,19 @@ where
     ///
     /// # Arguments
     ///
-    /// - `input`: The values to compress.
-    /// - `k`: The sampling rate.
+    /// - `input`: The values to LE compressed.
+    /// - `k`: The sampling rate (every k-th value is stored as a sample).
     /// - `codec_param`: Parameters for the codec.
-    ///
     ///
     /// # Examples
     ///
     /// ```
     /// use compressed_intvec::LEIntVec;
-    /// use compressed_intvec::ZetaCodec;
+    /// use compressed_intvec::ExpGolombCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
+    /// let intvec = LEIntVec::<ExpGolombCodec>::from_with_param(input, 2, 3).unwrap();
     ///
-    /// let intvec = LEIntVec::<ZetaCodec>::from_with_param(input, 2, 3).unwrap();
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(1991));
     /// ```
@@ -623,7 +625,7 @@ where
         codec_param: C::Params,
     ) -> Result<Self, Box<dyn Error>> {
         let word_writer = MemWordWriterVec::new(Vec::new());
-        let mut writer = MyBitWrite::<LE>::new(word_writer);
+        let mut writer = BufBitWriter::<LE, MemWordWriterVec<u64, Vec<u64>>>::new(word_writer);
         let mut samples = Vec::new();
         let mut total_bits = 0;
 
@@ -656,13 +658,14 @@ where
     ///
     /// ```
     /// use compressed_intvec::LEIntVec;
-    /// use compressed_intvec::ZetaCodec;
+    /// use compressed_intvec::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = LEIntVec::<ZetaCodec>::from_with_param(input, 2, 3).unwrap();
+    /// let intvec = LEIntVec::<GammaCodec>::from(input, 2).unwrap();
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(1991));
     /// ```
+    ///
     #[inline(always)]
     pub fn get(&self, index: usize) -> Option<u64> {
         if index >= self.len {
@@ -671,13 +674,16 @@ where
 
         let sample_index = index / self.k;
         let start_bit = self.samples[sample_index];
-        let mut reader = MyBitRead::<LE>::new(MemWordReader::new(self.data.clone()));
+        let mut reader =
+            BufBitReader::<LE, MemWordReader<u64, &Vec<u64>>>::new(MemWordReader::new(&self.data));
+
         reader.set_bit_pos(start_bit as u64).ok()?;
 
         let mut value = 0;
         let start_index = sample_index * self.k;
+        let param = self.codec_param;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, self.codec_param).ok()?;
+            value = C::decode(&mut reader, param).ok()?;
         }
         Some(value)
     }
@@ -690,17 +696,17 @@ where
     ///
     /// ```
     /// use compressed_intvec::LEIntVec;
-    /// use compressed_intvec::ZetaCodec;
+    /// use compressed_intvec::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = LEIntVec::<ZetaCodec>::from_with_param(input, 2, 3).unwrap();
-    ///
+    /// let intvec = LEIntVec::<GammaCodec>::from(input, 2).unwrap();
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
+    ///
     pub fn into_vec(self) -> Vec<u64> {
-        let word_reader = MemWordReader::new(self.data);
-        let mut reader = MyBitRead::<LE>::new(word_reader);
+        let word_reader = MemWordReader::new(&self.data);
+        let mut reader = BufBitReader::<LE, MemWordReader<u64, &Vec<u64>>>::new(word_reader);
         let mut values = Vec::with_capacity(self.len);
 
         for _ in 0..self.len {
@@ -710,14 +716,19 @@ where
         values
     }
 
-    pub fn iter(&self) -> IntVecIterLE<C> {
-        IntVecIterLE {
+    /// Returns an iterator over the values stored in the vector.
+    pub fn iter(&self) -> LEIntVecIter<C> {
+        LEIntVecIter {
             intvec: self,
             index: 0,
         }
     }
 
-    /// Returns the number of elements in the vector.
+    pub fn limbs(&self) -> Vec<u64> {
+        self.data.clone()
+    }
+
+    /// Returns the numLEr of elements in the vector.
     pub fn len(&self) -> usize {
         self.len
     }
@@ -729,34 +740,34 @@ where
 }
 
 /// Convenience constructor for codecs with no extra runtime parameter.
-impl<C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>, Params = ()>> LEIntVec<C> {
-    /// Creates a new `LEIntVec` from input values, without extra codec parameters.
+impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>>
+    LEIntVec<BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>
+{
     pub fn from(input: Vec<u64>, k: usize) -> Result<Self, Box<dyn Error>> {
         Self::from_with_param(input, k, ())
     }
 }
 
-/// Iterator for `LEIntVec`.
-pub struct IntVecIterLE<'a, C>
-where
-    C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>>,
-{
-    intvec: &'a LEIntVec<C>,
+/// Iterator over the values stored in a `LEIntVec`.
+/// The iterator decodes values on the fly.
+
+pub struct LEIntVecIter<'a, C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>> {
+    intvec: &'a LEIntVec<BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>,
     index: usize,
 }
 
-impl<'a, C> Iterator for IntVecIterLE<'a, C>
+impl<'a, C> Iterator for LEIntVecIter<'a, C>
 where
-    C: Codec<LE, MyBitWrite<LE>, MyBitRead<LE>>,
-    C::Params: Copy,
+    C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
+    for<'b> C: Codec<LE, BufBitReader<LE, MemWordReader<u64, &'b Vec<u64>>>>,
+    <C as Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>>::Params: Copy,
 {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.intvec.len {
+        if self.index >= self.intvec.len() {
             return None;
         }
-
         let value = self.intvec.get(self.index);
         self.index += 1;
         value
