@@ -1,4 +1,4 @@
-use std::{error::Error, marker::PhantomData};
+use std::{error::Error, marker::PhantomData, rc::Rc};
 
 use dsi_bitstream::prelude::*;
 use mem_dbg::{MemDbg, MemSize};
@@ -18,7 +18,7 @@ use mem_dbg::{MemDbg, MemSize};
 ///
 /// - `Params`: The type of extra parameters needed for the codec. For many codecs this is
 ///   `()`, but some require additional runtime parameters.
-pub trait Codec<E: Endianness, W, R> {
+pub trait Codec<E: Endianness, W: BitWrite<E>, R: BitRead<E>> {
     /// The type of parameters for encoding/decoding.
     type Params;
 
@@ -30,7 +30,7 @@ pub trait Codec<E: Endianness, W, R> {
     /// Decodes a value from the stream represented by `reader`, using the provided parameters.
     ///
     /// Returns the decoded `u64` value.
-    fn decode(reader: &mut R, params: Self::Params) -> Result<u64, Box<dyn Error>>;
+    fn decode<'a>(reader: &'a mut R, params: Self::Params) -> Result<u64, Box<dyn Error>>;
 }
 
 /// GammaCodec: no extra runtime parameter.
@@ -348,10 +348,6 @@ impl<const USE_TABLE: bool> ParamGammaCodec<USE_TABLE> {
     }
 }
 
-/// Type aliases to simplify inner type signatures.
-pub type MyBitWrite<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
-pub type MyBitRead<E> = BufBitReader<E, MemWordReader<u64, Vec<u64>>>;
-
 /// A compressed vector of integers.
 ///
 /// The `IntVec` stores values in a compressed bitstream along with sample offsets for
@@ -383,8 +379,8 @@ pub type MyBitRead<E> = BufBitReader<E, MemWordReader<u64, Vec<u64>>>;
 /// assert_eq!(value, Some(4));
 /// assert_eq!(intvec.len(), 5);
 /// ```
-#[derive(Debug, Clone, MemDbg, MemSize)]
-pub struct IntVec<E: Endianness, C: Codec<E, MyBitWrite<E>, MyBitRead<E>>> {
+#[derive(Debug, Clone)]
+pub struct IntVec<E: Endianness, W: BitWrite<E>, R: BitRead<E>, C: Codec<E, W, R>> {
     pub data: Vec<u64>,
     pub samples: Vec<usize>,
     pub codec: PhantomData<C>,
@@ -395,11 +391,27 @@ pub struct IntVec<E: Endianness, C: Codec<E, MyBitWrite<E>, MyBitRead<E>>> {
 }
 
 /// Big-endian variant of `IntVec`.
-pub type BEIntVec<C> = IntVec<BE, C>;
+pub type BEIntVec<W: BitWrite<BE>, R: BitRead<BE>, C: Codec<BE, W, R>> = IntVec<BE, W, R, C>;
 
-impl<C> BEIntVec<C>
+impl<
+        'a,
+        C: Codec<
+            BE,
+            BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>,
+            BufBitReader<BE, MemWordReader<u64, &'a Vec<u64>>>,
+        >,
+    >
+    BEIntVec<
+        BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>,
+        BufBitReader<BE, MemWordReader<u64, &'a Vec<u64>>>,
+        C,
+    >
 where
-    C: Codec<BE, MyBitWrite<BE>, MyBitRead<BE>>,
+    C: Codec<
+        BE,
+        BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>,
+        BufBitReader<BE, MemWordReader<u64, &'a Vec<u64>>>,
+    >,
     C::Params: Copy,
 {
     /// Creates a new `BEIntVec` from a vector of unsigned 64-bit integers.
@@ -430,7 +442,7 @@ where
         codec_param: C::Params,
     ) -> Result<Self, Box<dyn Error>> {
         let word_writer = MemWordWriterVec::new(Vec::new());
-        let mut writer = MyBitWrite::<BE>::new(word_writer);
+        let mut writer = BufBitWriter::<BE, MemWordWriterVec<u64, Vec<u64>>>::new(word_writer);
         let mut samples = Vec::new();
         let mut total_bits = 0;
 
@@ -479,13 +491,16 @@ where
 
         let sample_index = index / self.k;
         let start_bit = self.samples[sample_index];
-        let mut reader = MyBitRead::<BE>::new(MemWordReader::new(self.data.clone()));
+        let mut reader =
+            BufBitReader::<BE, MemWordReader<u64, &Vec<u64>>>::new(MemWordReader::new(&self.data));
+
         reader.set_bit_pos(start_bit as u64).ok()?;
 
         let mut value = 0;
         let start_index = sample_index * self.k;
+        let param = self.codec_param;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, self.codec_param).ok()?;
+            value = C::decode(&mut reader, param).ok()?;
         }
         Some(value)
     }
