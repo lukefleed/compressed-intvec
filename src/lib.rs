@@ -386,7 +386,7 @@ impl<const USE_TABLE: bool> ParamGammaCodec<USE_TABLE> {
 ///
 /// // Create a compressed vector using a codec without extra parameters.
 /// let input = vec![1, 2, 3, 4, 5];
-/// let intvec = BEIntVec::<GammaCodec>::from(input, 2).unwrap();
+/// let intvec = BEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
 /// let value = intvec.get(3);
 /// assert_eq!(value, Some(4));
 /// assert_eq!(intvec.len(), 5);
@@ -403,12 +403,10 @@ pub struct IntVec<E: Endianness, W: BitWrite<E>, C: Codec<E, W>> {
 }
 
 /// Big-endian variant of `IntVec`.
-pub type BEIntVec<W, C> = IntVec<BE, W, C>;
+pub type BEIntVec<C> = IntVec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>;
 
-impl<'a, C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>>
-    BEIntVec<BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>
+impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>> BEIntVec<C>
 where
-    C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>,
     C::Params: Copy,
 {
     /// Creates a new `BEIntVec` from a vector of unsigned 64-bit integers.
@@ -475,7 +473,7 @@ where
     /// use compressed_intvec::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(input, 2).unwrap();
+    /// let intvec = BEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(1991));
     /// ```
@@ -513,7 +511,7 @@ where
     /// use compressed_intvec::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(input, 2).unwrap();
+    /// let intvec = BEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
@@ -554,9 +552,7 @@ where
 }
 
 /// Convenience constructor for codecs with no extra runtime parameter.
-impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>>
-    BEIntVec<BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>
-{
+impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>> BEIntVec<C> {
     pub fn from(input: Vec<u64>, k: usize) -> Result<Self, Box<dyn Error>> {
         Self::from_with_param(input, k, ())
     }
@@ -566,7 +562,7 @@ impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()
 /// The iterator decodes values on the fly.
 
 pub struct BEIntVecIter<'a, C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>> {
-    intvec: &'a BEIntVec<BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>,
+    intvec: &'a BEIntVec<C>,
     index: usize,
 }
 
@@ -588,11 +584,10 @@ where
     }
 }
 
-/// Big-endian variant of `IntVec`.
-pub type LEIntVec<W, C> = IntVec<LE, W, C>;
+/// Little-endian variant of `IntVec`.
+pub type LEIntVec<C> = IntVec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>;
 
-impl<'a, C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>>
-    LEIntVec<BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>
+impl<'a, C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>> LEIntVec<C>
 where
     C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
     C::Params: Copy,
@@ -661,7 +656,7 @@ where
     /// use compressed_intvec::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = LEIntVec::<GammaCodec>::from(input, 2).unwrap();
+    /// let intvec = LEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(1991));
     /// ```
@@ -699,7 +694,7 @@ where
     /// use compressed_intvec::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = LEIntVec::<GammaCodec>::from(input, 2).unwrap();
+    /// let intvec = LEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
@@ -740,9 +735,7 @@ where
 }
 
 /// Convenience constructor for codecs with no extra runtime parameter.
-impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>>
-    LEIntVec<BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>
-{
+impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>> LEIntVec<C> {
     pub fn from(input: Vec<u64>, k: usize) -> Result<Self, Box<dyn Error>> {
         Self::from_with_param(input, k, ())
     }
@@ -752,7 +745,7 @@ impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()
 /// The iterator decodes values on the fly.
 
 pub struct LEIntVecIter<'a, C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>> {
-    intvec: &'a LEIntVec<BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>,
+    intvec: &'a LEIntVec<C>,
     index: usize,
 }
 
