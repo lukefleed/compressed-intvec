@@ -25,10 +25,6 @@ harness = false
 name = "create_intvec"
 harness = false
 
-[[bench]]
-name = "vary_k"
-harness = false
-
 [profile.release]
 rustflags = ["-C", "target-cpu=native"]
 

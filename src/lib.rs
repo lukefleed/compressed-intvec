@@ -749,21 +749,3 @@ where
         value
     }
 }
-
-/// IntVec Trait
-pub trait IntVecTrait {
-    /// Returns the number of elements in the vector.
-    fn len(&self) -> usize;
-
-    /// Returns whether the vector is empty.
-    fn is_empty(&self) -> bool;
-
-    /// Retrieves the value at the given index.
-    fn get(&self, index: usize) -> Option<u64>;
-
-    /// Returns the original vector of integers.
-    fn into_vec(self) -> Vec<u64>;
-
-    /// Returns an iterator over the values in the vector.
-    fn iter(&self) -> Box<dyn Iterator<Item = u64> + '_>;
-}
