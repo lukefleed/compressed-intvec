@@ -24,5 +24,6 @@ harness = false
 name = "sample_density"
 harness = false
 
+
 [profile.release]
 rustflags = ["-C", "target-cpu=native"]
