@@ -1,6 +1,7 @@
 use std::{error::Error, marker::PhantomData};
 
 use dsi_bitstream::prelude::*;
+use mem_dbg::{MemDbg, MemSize};
 
 /// Trait for encoding and decoding values using a variable-length code.
 ///
@@ -23,8 +24,7 @@ pub trait Codec<E: Endianness, W: BitWrite<E>> {
 
     fn decode<R2>(reader: &mut R2, params: Self::Params) -> Result<u64, Box<dyn Error>>
     where
-        R2: for<'a> BitRead<E>
-            + GammaRead<E>
+        R2: for<'a> GammaRead<E>
             + DeltaRead<E>
             + ExpGolombRead<E>
             + ZetaRead<E>
@@ -391,7 +391,7 @@ impl<const USE_TABLE: bool> ParamGammaCodec<USE_TABLE> {
 /// assert_eq!(value, Some(4));
 /// assert_eq!(intvec.len(), 5);
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, MemDbg, MemSize)]
 pub struct IntVec<E: Endianness, W: BitWrite<E>, C: Codec<E, W>> {
     pub data: Vec<u64>,
     pub samples: Vec<usize>,
@@ -472,10 +472,10 @@ where
     /// use compressed_intvec::BEIntVec;
     /// use compressed_intvec::GammaCodec;
     ///
-    /// let input = vec![1, 5, 3, 1991, 42];
+    /// let input = vec![1, 5, 3, 12, 42];
     /// let intvec = BEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
     /// let value = intvec.get(3);
-    /// assert_eq!(value, Some(1991));
+    /// assert_eq!(value, Some(12));
     /// ```
     ///
     #[inline(always)]
