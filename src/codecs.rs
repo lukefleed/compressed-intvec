@@ -1,3 +1,5 @@
+//! # Codecs Module
+//!
 //! This module provides implementations of various variable-length codes, such as minimal binary, gamma,
 //! delta, Exp‑Golomb, Zeta, Rice, and their parameterized variants. These codecs facilitate encoding and
 //! decoding unsigned 64-bit integers at the bit level, parameterized by an endianness marker and custom bit
