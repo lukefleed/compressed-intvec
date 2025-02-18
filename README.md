@@ -1,7 +1,8 @@
-
 # Compressed Integer Vector Library
 
-[![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec)
+[![crates.io](https://img.shields.io/crates/v/compressed-intvec.svg)](https://crates.io/crates/compressed-intvec)
+[![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
+[![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec)
 
 The library provides a compressed representation for vectors of unsigned 64-bit integers by utilizing several variable‑length coding methods. It is engineered to offer both efficient compression and fast random access to individual elements.
 
@@ -15,7 +16,6 @@ The key features include:
 - **Endian Flexibility:** Offers both big-endian and little-endian representations using `BEIntVec` and `LEIntVec` respectively.
 - **Sampling Support:** Users may provide a sampling period to balance decoding speed and memory footprint.
 - **Benchmarks and Tests:** Integrated benchmarks in benches and comprehensive tests in tests ensure reliability and performance.
-
 
 ## Usage Examples
 
@@ -64,7 +64,6 @@ The efficiency of a codec is highly dependent on the underlying data distributio
 - **Uniform Distributions:** When the data is uniformly distributed over the range \([0, u64::MAX)\), minimal binary coding offers the best performance.
 
 For further details, refer to the literature on entropy coding.
-
 
 ### Why Choosing the Right Codec Matters: An Example
 
@@ -164,7 +163,7 @@ If we were to increase the range even further, all codecs except MinimalBinaryCo
 
 ![Random Access](python/images/random_access/time_total_100k.svg)
 
-Even though in theory the access of this compressed integer vector is $O(1)$, we can't expect it to be as fast as a standard vector. The performance will be affected by the codec used and the distribution of the data. However, the benchmarks show that the performance is still quite good, even for large vectors. Choosing as sample rate a value like `k = 32`  seems to be a good trade-off between memory and speed.
+Even though in theory the access of this compressed integer vector is $O(1)$, we can't expect it to be as fast as a standard vector. The performance will be affected by the codec used and the distribution of the data. However, the benchmarks show that the performance is still quite good, even for large vectors. Choosing as sample rate a value like `k = 32` seems to be a good trade-off between memory and speed.
 
 ## License
 
