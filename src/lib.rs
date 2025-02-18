@@ -28,12 +28,12 @@
 //! To compress a vector of integers using gamma coding in big‑endian format:
 //!
 //! ```rust
-//! use compressed_intvec::BEIntVec;
+//! use compressed_intvec::intvec::BEIntVec;
 //! use compressed_intvec::codecs::GammaCodec;
 //!
 //! let input = vec![1, 2, 3, 4, 5];
 //! // Create a compressed vector with a sampling period of 2 (every 2nd value is stored as a sample)
-//! let intvec = BEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
+//! let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
 //!
 //! // Random access: decode the 4th element
 //! assert_eq!(intvec.get(3), Some(4));
@@ -45,11 +45,11 @@
 //! For little‑endian encoding, use [`LEIntVec`](src/intvec.rs) similarly:
 //!
 //! ```rust
-//! use compressed_intvec::LEIntVec;
+//! use compressed_intvec::intvec::LEIntVec;
 //! use compressed_intvec::codecs::GammaCodec;
 //!
 //! let input = vec![10, 20, 30, 40];
-//! let intvec = LEIntVec::<GammaCodec>::from(input.clone(), 2).unwrap();
+//! let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
 //! assert_eq!(intvec.get(2), Some(30));
 //! ```
 //!

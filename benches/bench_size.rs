@@ -34,14 +34,12 @@ fn benchmark_space<T, C: Copy>(
     size: impl Fn(&T) -> usize,
     benchmark_name: &str,
 ) {
-    let bench_label = format!("{} (k = {})", benchmark_name, k);
+    let bench_label = format!("{}", benchmark_name);
 
-    // Costruisci l'intvec una sola volta e misura l'occupazione
     let intvec = build_vec(input.clone(), k, codec_param);
     let space = size(&intvec);
     results.push((bench_label.clone(), k, space));
 
-    // Esegui il benchmark (qui si usa solo un no-op per consentire a Criterion di processare il benchmark)
     c.bench_function(&bench_label, |b| {
         b.iter(|| {
             std::hint::black_box(&intvec);

@@ -53,14 +53,7 @@ assert_eq!(intvec.get(2), Some(30));
 
 ## Codecs and Customization
 
-The library provides several codecs in `codecs.rs`:
-
-- **GammaCodec:** No extra runtime parameters. Ideal for data with moderate spread.
-- **DeltaCodec:** Often used when values are clustered.
-- **ExpGolombCodec:** Requires a runtime parameter; ideal for values with a wide range.
-- **Parameterized Codecs:** Such as `ParamDeltaCodec` and `ParamGammaCodec` allow customization via compile‑time flags.
-
-Each codec implements the `Codec` trait and encodes/decodes values at the bit level. See the inline documentation in codecs.rs for additional details.
+Each codec implements the `Codec` trait and encodes/decodes values at the bit level.
 
 ### Choosing the Right Codec
 
@@ -72,7 +65,6 @@ The efficiency of a codec is highly dependent on the underlying data distributio
 
 For further details, refer to the literature on entropy coding.
 
----
 
 ### Why Choosing the Right Codec Matters: An Example
 

@@ -33,7 +33,7 @@
 //! ### Creating a Big-Endian Compressed Vector
 //!
 //! ```rust
-//! use compressed_intvec::BEIntVec;
+//! use compressed_intvec::intvec::BEIntVec;
 //! use compressed_intvec::codecs::ExpGolombCodec;
 //!
 //! // Define a vector of unsigned 64-bit integers.
@@ -41,7 +41,7 @@
 //!
 //! // Create a Big-Endian compressed vector using ExpGolombCodec with a parameter (e.g., 3)
 //! // and sample every 2 elements.
-//! let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3).unwrap();
+//! let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3);
 //!
 //! // Retrieve a specific element by its index.
 //! let value = intvec.get(3);
@@ -55,7 +55,7 @@
 //! ### Creating a Little-Endian Compressed Vector
 //!
 //! ```rust
-//! use compressed_intvec::LEIntVec;
+//! use compressed_intvec::intvec::LEIntVec;
 //! use compressed_intvec::codecs::GammaCodec;
 //!
 //! // Define a vector of unsigned 64-bit integers.
@@ -63,7 +63,7 @@
 //!
 //! // Create a Little-Endian compressed vector using GammaCodec without extra codec parameters,
 //! // sampling every 2 elements.
-//! let intvec = LEIntVec::<GammaCodec>::from(input, 2);
+//! let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
 //!
 //! assert_eq!(intvec.get(2), Some(30));
 //! ```
@@ -123,12 +123,12 @@ use std::marker::PhantomData;
 /// # Examples
 ///
 /// ```
-/// use compressed_intvec::BEIntVec;
-/// use compressed_intvec::GammaCodec;
+/// use compressed_intvec::intvec::BEIntVec;
+/// use compressed_intvec::codecs::GammaCodec;
 ///
 /// // Create a compressed vector using a codec without extra parameters.
 /// let input = vec![1, 2, 3, 4, 5];
-/// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
+/// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
 /// let value = intvec.get(3);
 /// assert_eq!(value, Some(4));
 /// assert_eq!(intvec.len(), 5);
@@ -171,11 +171,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::BEIntVec;
+    /// use compressed_intvec::intvec::BEIntVec;
     /// use compressed_intvec::codecs::ExpGolombCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(input, 2, 3).unwrap();
+    /// let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3);
     ///
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(1991));
@@ -214,11 +214,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::BEIntVec;
+    /// use compressed_intvec::intvec::BEIntVec;
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 12, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
+    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(12));
     /// ```
@@ -252,11 +252,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::BEIntVec;
+    /// use compressed_intvec::intvec::BEIntVec;
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
+    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
@@ -349,11 +349,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::LEIntVec;
+    /// use compressed_intvec::intvec::LEIntVec;
     /// use compressed_intvec::codecs::ExpGolombCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = LEIntVec::<ExpGolombCodec>::from_with_param(input, 2, 3).unwrap();
+    /// let intvec = LEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3);
     ///
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(1991));
@@ -391,11 +391,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::LEIntVec;
+    /// use compressed_intvec::intvec::LEIntVec;
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2).unwrap();
+    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
     /// let value = intvec.get(3);
     /// assert_eq!(value, Some(1991));
     /// ```
@@ -429,11 +429,11 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::LEIntVec;
+    /// use compressed_intvec::intvec::LEIntVec;
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2).unwrap();
+    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
