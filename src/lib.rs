@@ -61,7 +61,9 @@
 //! - **GammaCodec:** Uses gamma coding without requiring extra runtime parameters.
 //! - **DeltaCodec:** Uses delta coding, likewise without extra parameters.
 //! - **ExpGolombCodec:** Requires an extra parameter (e.g. a parameter `k`) for encoding/decoding.
-//! - **ZetaCodec and RiceCodec:** Use additional runtime parameters for ζ or Rice coding respectively.
+//! - **ZetaCodec:** Uses additional runtime parameters ζ.
+//! - **RiceCodec:** Uses a Rice parameter for encoding/decoding. Ideal for skewed distributions, you likely want to the set the rice prameter as the floor of the base‑2 logarithm of the mean value of the data.
+//! - **MinimalBinaryCodec:** A minimal binary code with upper bound `u > 0` ([truncated binary encoding](https://en.wikipedia.org/wiki/Truncated_binary_encoding)). This is optimal for uniformly distributed data in the range [0, u).
 //! - **Parameterized Codecs:** Variants like `ParamZetaCodec`, `ParamDeltaCodec`, and `ParamGammaCodec`
 //!   use compile‑time flags (e.g. lookup table usage) to control internal behavior. If you choose to use this, consider that the tables are hardcoded in the library [dsi-dsi-bitstream](https://crates.io/crates/dsi-dsi-bitstream) (in the file `_tables.rs`). If you want to change the tables, you need to clone the repository and change the tables with the python script `gen_code_tables.py` and then compile the library. See
 //!
@@ -72,7 +74,7 @@
 //! - **Power Law Distributions:** If the data roughly follows a power law (i.e. P(x) ∝ x⁻²),
 //!   Gamma coding is often the optimal choice.
 //! - **Uniform Distributions:** For data uniformly distributed across the range [0, u64::MAX),
-//!   a standard vector may be the most efficient.
+//!  minimal binary coding is the most efficient.
 //!
 //! For more in‐depth information, please consult the literature on entropy coding.
 //!

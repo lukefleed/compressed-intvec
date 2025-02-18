@@ -298,8 +298,8 @@ where
 
 /// Convenience constructor for codecs with no extra runtime parameter.
 impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>> BEIntVec<C> {
-    pub fn from(input: Vec<u64>, k: usize) -> Self {
-        Self::from_with_param(&input, k, ())
+    pub fn from(input: &[u64], k: usize) -> Self {
+        Self::from_with_param(input, k, ())
     }
 }
 
@@ -475,8 +475,8 @@ where
 
 /// Convenience constructor for codecs with no extra runtime parameter.
 impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>> LEIntVec<C> {
-    pub fn from(input: Vec<u64>, k: usize) -> Self {
-        Self::from_with_param(&input, k, ())
+    pub fn from(input: &[u64], k: usize) -> Self {
+        Self::from_with_param(input, k, ())
     }
 }
 

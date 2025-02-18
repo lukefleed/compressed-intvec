@@ -38,15 +38,16 @@ pub trait Codec<E: Endianness, W: BitWrite<E>> {
             + RiceRead<E>
             + ZetaReadParam<E>
             + DeltaReadParam<E>
-            + GammaReadParam<E>;
+            + GammaReadParam<E>
+            + MinimalBinaryRead<E>;
 }
 
-/// MinimalBinary: uses an upper bound as a runtime parameter.
+/// MinimalBinaryCodec: uses an upper bound as a runtime parameter.
 ///
-/// For more information refer to the [`MinimalBinary`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/minimal_binary/index.html) module.
-pub struct MinimalBinary;
+/// For more information refer to the [`MinimalBinaryCodec`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/minimal_binary/index.html) module.
+pub struct MinimalBinaryCodec;
 
-impl<E: Endianness, W: MinimalBinaryWrite<E>> Codec<E, W> for MinimalBinary {
+impl<E: Endianness, W: MinimalBinaryWrite<E>> Codec<E, W> for MinimalBinaryCodec {
     type Params = u64; // The upper bound u > 0
 
     #[inline(always)]
@@ -63,7 +64,7 @@ impl<E: Endianness, W: MinimalBinaryWrite<E>> Codec<E, W> for MinimalBinary {
     }
 }
 
-impl MinimalBinary {
+impl MinimalBinaryCodec {
     /// Encodes a value using the minimal binary codec with the specified upper bound.
     #[inline(always)]
     pub fn encode<E: Endianness, W: MinimalBinaryWrite<E>>(
