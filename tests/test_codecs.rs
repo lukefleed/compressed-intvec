@@ -1,10 +1,10 @@
 extern crate compressed_intvec;
-use compressed_intvec::{BEIntVec, Codec, DeltaCodec, ExpGolombCodec, GammaCodec, LEIntVec};
+use compressed_intvec::codecs::{Codec, DeltaCodec, ExpGolombCodec, GammaCodec};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compressed_intvec::{ParamDeltaCodec, ParamGammaCodec, RiceCodec};
+    use compressed_intvec::intvec::{BEIntVec, LEIntVec};
     use dsi_bitstream::{
         impls::{BufBitWriter, MemWordWriterVec},
         traits::{BE, LE},
@@ -113,6 +113,8 @@ mod tests {
 
     // --- RiceCodec Tests ---
     mod rice_tests {
+        use compressed_intvec::codecs::RiceCodec;
+
         use super::*;
         #[test]
         fn le() {
@@ -131,6 +133,8 @@ mod tests {
 
     // --- ParamDeltaCodec Tests ---
     mod param_delta_tests {
+        use compressed_intvec::codecs::ParamDeltaCodec;
+
         use super::*;
         #[test]
         fn le() {
@@ -155,6 +159,8 @@ mod tests {
 
     // --- ParamGammaCodec Tests ---
     mod param_gamma_tests {
+        use compressed_intvec::codecs::ParamGammaCodec;
+
         use super::*;
         #[test]
         fn le() {
@@ -175,6 +181,8 @@ mod tests {
 
     // --- Edge Case Tests ---
     mod edge_cases {
+        use compressed_intvec::intvec::BEIntVec;
+
         use super::*;
         #[test]
         fn empty_input_le() {

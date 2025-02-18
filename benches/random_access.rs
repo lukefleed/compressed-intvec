@@ -1,7 +1,7 @@
-use compressed_intvec::{
-    BEIntVec, DeltaCodec, ExpGolombCodec, GammaCodec, LEIntVec, ParamDeltaCodec, ParamGammaCodec,
-    RiceCodec,
+use compressed_intvec::codecs::{
+    DeltaCodec, ExpGolombCodec, GammaCodec, ParamDeltaCodec, ParamGammaCodec, RiceCodec,
 };
+use compressed_intvec::intvec::{BEIntVec, LEIntVec};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::distr::{Distribution, Uniform};
 use rand::{Rng, SeedableRng};
@@ -9,20 +9,6 @@ use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
 use std::u64;
-
-// enum Codec {
-//     Gamma,
-//     Delta,
-//     ExpGolomb,
-//     Rice,
-//     ParamDelta,
-//     ParamGamma,
-// }
-
-// enum Endianness {
-//     LE,
-//     BE,
-// }
 
 /// Generate a vector of random u64 values in the range [0, max) using a uniform distribution.
 fn generate_uniform_vec(size: usize, max: u64) -> Vec<u64> {
@@ -116,13 +102,16 @@ fn bench_all(c: &mut Criterion) {
             },
             LEIntVec::<_>::get,
         );
+        let exp_k = (uniform.iter().sum::<u64>() as f64 / uniform.len() as f64)
+            .log2()
+            .floor() as usize;
         benchmark_random_access(
             &mut results,
             c,
             &format!("LEIntVec ExpGolombCodec"),
             uniform.clone(),
             k,
-            3,
+            exp_k,
             |data: Vec<u64>, k: usize, param: usize| {
                 LEIntVec::<ExpGolombCodec>::from_with_param(data, k, param)
             },
@@ -193,25 +182,31 @@ fn bench_all(c: &mut Criterion) {
             },
             BEIntVec::<_>::get,
         );
+        let exp_k = (uniform.iter().sum::<u64>() as f64 / uniform.len() as f64)
+            .log2()
+            .floor() as usize;
         benchmark_random_access(
             &mut results,
             c,
             &format!("BEIntVec ExpGolombCodec"),
             uniform.clone(),
             k,
-            3,
+            exp_k,
             |data: Vec<u64>, k: usize, param: usize| {
                 BEIntVec::<ExpGolombCodec>::from_with_param(data, k, param)
             },
             BEIntVec::<_>::get,
         );
+        let rice_k = (uniform.iter().sum::<u64>() as f64 / uniform.len() as f64)
+            .log2()
+            .floor() as usize;
         benchmark_random_access(
             &mut results,
             c,
             &format!("BEIntVec RiceCodec"),
             uniform.clone(),
             k,
-            3,
+            rice_k,
             |data: Vec<u64>, k: usize, param: usize| {
                 BEIntVec::<RiceCodec>::from_with_param(data, k, param)
             },
@@ -243,8 +238,9 @@ fn bench_all(c: &mut Criterion) {
         );
     }
 
-    // Scrittura dei risultati in CSV (nella cartella corrente)
-    let mut file = File::create("benchmark_results.csv").expect("Impossibile creare il file CSV");
+    // Scrittura dei risultati in CSV
+    let mut file =
+        File::create("benchmark_random_access.csv").expect("Impossibile creare il file CSV");
     writeln!(file, "name,k,elapsed").expect("Errore di scrittura header CSV");
     for (name, k, elapsed) in results {
         writeln!(file, "{},{},{}", name, k, elapsed).expect("Errore di scrittura nel CSV");

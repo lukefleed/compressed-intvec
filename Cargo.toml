@@ -22,7 +22,7 @@ name = "random_access"
 harness = false
 
 [[bench]]
-name = "create_intvec"
+name = "bench_size"
 harness = false
 
 [profile.release]
