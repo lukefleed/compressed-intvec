@@ -8,7 +8,10 @@ use std::{fs::File, time::Duration};
 
 // Assume these are re-exported from the relevant module.
 use compressed_intvec::{
-    codecs::{DeltaCodec, ExpGolombCodec, GammaCodec, ParamDeltaCodec, ParamGammaCodec, RiceCodec},
+    codecs::{
+        DeltaCodec, ExpGolombCodec, GammaCodec, MinimalBinaryCodec, ParamDeltaCodec,
+        ParamGammaCodec, RiceCodec,
+    },
     intvec::{BEIntVec, LEIntVec},
 };
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -116,6 +119,20 @@ fn bench_all(c: &mut Criterion) {
         );
     }
 
+    // Benchmark LEIntVec with MinimalBinaryCodec.
+    for &k in &ks {
+        benchmark_space(
+            &mut results,
+            c,
+            uniform.clone(),
+            k,
+            16,
+            |data, k, param| LEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param),
+            |intvec| intvec.mem_size(SizeFlags::default()),
+            "LEIntVec MinimalBinaryCodec",
+        );
+    }
+
     // Benchmark LEIntVec with ParamDeltaCodec.
     for &k in &ks {
         benchmark_space(
@@ -208,6 +225,20 @@ fn bench_all(c: &mut Criterion) {
         );
     }
 
+    // Benchmark LEIntVec with MinimalBinaryCodec.
+    for &k in &ks {
+        benchmark_space(
+            &mut results,
+            c,
+            uniform.clone(),
+            k,
+            16,
+            |data, k, param| BEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param),
+            |intvec| intvec.mem_size(SizeFlags::default()),
+            "BEIntVec MinimalBinaryCodec",
+        );
+    }
+
     // Benchmark BEIntVec with ParamDeltaCodec.
     for &k in &ks {
         benchmark_space(
@@ -239,7 +270,7 @@ fn bench_all(c: &mut Criterion) {
     }
 
     // Write the accumulated benchmark results to a CSV file.
-    let mut file = File::create("benchmark_space.csv").expect("Cannot create CSV file");
+    let mut file = File::create("bench_results/bench_space.csv").expect("Cannot create CSV file");
     writeln!(file, "name,k,space").expect("Error writing CSV header");
     // the second line is just name,0,space and it's the space of the uniform vector
     writeln!(
@@ -255,7 +286,7 @@ fn bench_all(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(10).warm_up_time(Duration::from_secs(0));
+    config = Criterion::default().sample_size(10).warm_up_time(Duration::from_secs(1));
     targets = bench_all
 }
 criterion_main!(benches);

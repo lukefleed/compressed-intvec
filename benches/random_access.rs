@@ -276,7 +276,8 @@ fn bench_all(c: &mut Criterion) {
     }
 
     // Write the benchmark results into a CSV file
-    let mut file = File::create("benchmark_random_access.csv").expect("Unable to create CSV file");
+    let mut file =
+        File::create("bench_results/bench_random_access.csv").expect("Unable to create CSV file");
     writeln!(file, "name,k,elapsed").expect("Error writing CSV header");
     for (name, k, elapsed) in results {
         writeln!(file, "{},{},{}", name, k, elapsed).expect("Error writing CSV data");
