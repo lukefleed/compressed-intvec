@@ -13,18 +13,22 @@
 // }
 
 fn main() {
-    //     let input_vec = generate_uniform_vec(1000, u64::MAX);
+    // let input_vec = generate_uniform_vec(50, 50000);
 
-    //     let minimal_intvec = BEIntVec::<MinimalBinaryCodec>::from_with_param(&input_vec, 64, 10);
+    // let minimal_intvec = BEIntVec::<DeltaCodec>::from(&input_vec, 64);
 
-    //     println!("Size of the standard Vec<u64>");
-    //     input_vec.mem_dbg(DbgFlags::empty());
+    // for (i, val) in minimal_intvec.iter().enumerate() {
+    //     assert_eq!(val, input_vec[i]);
+    // }
 
-    //     println!("\nSize of the compressed IntVec with MinimalBinaryCodec");
-    //     minimal_intvec.mem_dbg(DbgFlags::empty());
+    // println!("Size of the standard Vec<u64>");
+    // input_vec.mem_dbg(DbgFlags::empty());
 
-    //     let delta_intvec = BEIntVec::<DeltaCodec>::from(&input_vec, 64);
+    // println!("\nSize of the compressed IntVec with MinimalBinaryCodec");
+    // minimal_intvec.mem_dbg(DbgFlags::empty());
 
-    //     println!("\nSize of the compressed IntVec with DeltaCodec");
-    //     delta_intvec.mem_dbg(DbgFlags::empty());
+    // let delta_intvec = BEIntVec::<DeltaCodec>::from(&input_vec, 64);
+
+    // println!("\nSize of the compressed IntVec with DeltaCodec");
+    // delta_intvec.mem_dbg(DbgFlags::empty());
 }

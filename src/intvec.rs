@@ -273,24 +273,54 @@ where
         values
     }
 
-    /// Returns an iterator over the values stored in the vector.
+    /// Returns an iterator over the decompressed integer values stored in this compressed vector.
+    ///
+    /// The iterator decodes values on the fly and does not modify the underlying data.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use compressed_intvec::intvec::BEIntVec;
+    /// use compressed_intvec::codecs::GammaCodec;
+    ///
+    /// let input = vec![1, 5, 3, 12, 42];
+    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
+    ///
+    /// // Iterate over the vector and print each value.
+    /// for (i, value) in intvec.iter().enumerate() {
+    ///     assert_eq!(value, input[i]);
+    /// }
+    /// ```
     pub fn iter(&self) -> BEIntVecIter<C> {
+        let word_reader = MemWordReader::new(&self.data);
+        let reader = BufBitReader::new(word_reader);
         BEIntVecIter {
             intvec: self,
-            index: 0,
+            reader,
+            current_index: 0,
         }
     }
 
+    /// Returns a clone of the internal bitstream data as a vector of 64-bit unsigned integers.
+    ///
+    /// This can be used for debugging or low-level operations where access to the raw
+    /// compressed limb data is required.
+    /// ```
     pub fn limbs(&self) -> Vec<u64> {
         self.data.clone()
     }
 
-    /// Returns the number of elements in the vector.
+    /// Returns the number of integers stored in the compressed vector.
+    ///
+    /// This value represents the total count of decompressed integers.
+    /// ```
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// Returns whether the vector is empty.
+    /// Checks whether the compressed vector contains no elements.
+    ///
+    /// Returns `true` if the vector is empty, and `false` otherwise.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -305,26 +335,50 @@ impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()
 
 /// Iterator over the values stored in a `BEIntVec`.
 /// The iterator decodes values on the fly.
-pub struct BEIntVecIter<'a, C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>> {
+///
+/// # Examples
+///
+/// ```rust
+/// use compressed_intvec::intvec::BEIntVec;
+/// use compressed_intvec::codecs::GammaCodec;
+///
+/// // Create a big-endian compressed vector using GammaCodec.
+/// let input = vec![1, 5, 3, 1991, 42];
+/// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
+///
+/// // Iterate over the compressed vector.
+/// for (i, value) in intvec.iter().enumerate() {
+///    assert_eq!(value, input[i]);
+/// }
+/// ```
+pub struct BEIntVecIter<'a, C>
+where
+    C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>,
+{
     intvec: &'a BEIntVec<C>,
-    index: usize,
+    reader: BufBitReader<BE, MemWordReader<u64, &'a Vec<u64>>>,
+    current_index: usize,
 }
 
 impl<C> Iterator for BEIntVecIter<'_, C>
 where
     C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>,
-    for<'b> C: Codec<BE, BufBitReader<BE, MemWordReader<u64, &'b Vec<u64>>>>,
-    <C as Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>>::Params: Copy,
+    C::Params: Copy,
 {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.intvec.len() {
+        if self.current_index >= self.intvec.len {
             return None;
         }
-        let value = self.intvec.get(self.index);
-        self.index += 1;
-        value
+
+        match C::decode(&mut self.reader, self.intvec.codec_param) {
+            Ok(value) => {
+                self.current_index += 1;
+                Some(value)
+            }
+            Err(_) => None,
+        }
     }
 }
 
@@ -452,22 +506,35 @@ where
 
     /// Returns an iterator over the values stored in the vector.
     pub fn iter(&self) -> LEIntVecIter<C> {
+        let word_reader = MemWordReader::new(&self.data);
+        let reader = BufBitReader::new(word_reader);
         LEIntVecIter {
             intvec: self,
-            index: 0,
+            reader,
+            current_index: 0,
         }
     }
 
+    /// Returns a clone of the internal bitstream data as a vector of 64-bit unsigned integers.
+    ///
+    /// This can be used for debugging or low-level operations where access to the raw
+    /// compressed limb data is required.
+    /// ```
     pub fn limbs(&self) -> Vec<u64> {
         self.data.clone()
     }
 
-    /// Returns the numLEr of elements in the vector.
+    /// Returns the number of integers stored in the compressed vector.
+    ///
+    /// This value represents the total count of decompressed integers.
+    /// ```
     pub fn len(&self) -> usize {
         self.len
     }
 
-    /// Returns whether the vector is empty.
+    /// Checks whether the compressed vector contains no elements.
+    ///
+    /// Returns `true` if the vector is empty, and `false` otherwise.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -481,26 +548,51 @@ impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()
 }
 
 /// Iterator over the values stored in a `LEIntVec`.
-/// The iterator decodes values on the fly.
-pub struct LEIntVecIter<'a, C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>> {
+///
+/// This iterator decodes values on the fly using a bit‐stream reader.
+/// # Examples
+///
+/// ```rust
+/// use compressed_intvec::intvec::LEIntVec;
+/// use compressed_intvec::codecs::GammaCodec;
+///
+/// // Create a little-endian compressed vector using GammaCodec.
+/// // Note: Ensure your codec implements the required traits for iteration.
+/// let input = vec![10, 20, 30, 40, 50];
+/// let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
+///
+/// // Iterate over the compressed vector.
+/// for (i, value) in intvec.iter().enumerate() {
+///     assert_eq!(value, input[i]);
+/// }
+/// ```
+pub struct LEIntVecIter<'a, C>
+where
+    C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
+{
     intvec: &'a LEIntVec<C>,
-    index: usize,
+    reader: BufBitReader<LE, MemWordReader<u64, &'a Vec<u64>>>,
+    current_index: usize,
 }
 
 impl<C> Iterator for LEIntVecIter<'_, C>
 where
     C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
-    for<'b> C: Codec<LE, BufBitReader<LE, MemWordReader<u64, &'b Vec<u64>>>>,
-    <C as Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>>::Params: Copy,
+    C::Params: Copy,
 {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.index >= self.intvec.len() {
+        if self.current_index >= self.intvec.len {
             return None;
         }
-        let value = self.intvec.get(self.index);
-        self.index += 1;
-        value
+
+        match C::decode(&mut self.reader, self.intvec.codec_param) {
+            Ok(value) => {
+                self.current_index += 1;
+                Some(value)
+            }
+            Err(_) => None,
+        }
     }
 }

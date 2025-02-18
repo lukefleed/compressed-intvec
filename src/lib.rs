@@ -1,8 +1,9 @@
 //! # Compressed IntVec Library
 //!
-//! This library provides a compressed representation for vectors of unsigned 64-bit
-//! integers using variable‑length coding methods. The key structure, [`IntVec`](src/intvec.rs),
-//! compresses the data into a bitstream while storing sample offsets for fast random access.
+//! A Rust implementation of compressed vectors of unsigned 64-bit
+//! integers using instantaneous codes. The key structure, [`IntVec`](src/intvec.rs),
+//! compresses the data into a bitstream while storing sample offsets for fast random access. The bitstream
+//! and the codes are provided by the library [dsi-bitstream](https://crates.io/crates/dsi-bitstream).
 //!
 //! ## Features
 //!
@@ -73,8 +74,7 @@
 //!   In these cases, choose the Rice parameter as the floor of the base‑2 logarithm of the mean value.
 //! - **Power Law Distributions:** If the data roughly follows a power law (i.e. P(x) ∝ x⁻²),
 //!   Gamma coding is often the optimal choice.
-//! - **Uniform Distributions:** For data uniformly distributed across the range [0, u64::MAX),
-//!  minimal binary coding is the most efficient.
+//! - **Uniform Distributions:** For data uniformly distributed across the range [0, u64::MAX), minimal binary coding is the most efficient.
 //!
 //! For more in‐depth information, please consult the literature on entropy coding.
 //!
