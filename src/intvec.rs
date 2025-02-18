@@ -305,7 +305,6 @@ where
     ///
     /// This can be used for debugging or low-level operations where access to the raw
     /// compressed limb data is required.
-    /// ```
     pub fn limbs(&self) -> Vec<u64> {
         self.data.clone()
     }
@@ -313,7 +312,6 @@ where
     /// Returns the number of integers stored in the compressed vector.
     ///
     /// This value represents the total count of decompressed integers.
-    /// ```
     pub fn len(&self) -> usize {
         self.len
     }
@@ -519,7 +517,6 @@ where
     ///
     /// This can be used for debugging or low-level operations where access to the raw
     /// compressed limb data is required.
-    /// ```
     pub fn limbs(&self) -> Vec<u64> {
         self.data.clone()
     }
@@ -527,7 +524,6 @@ where
     /// Returns the number of integers stored in the compressed vector.
     ///
     /// This value represents the total count of decompressed integers.
-    /// ```
     pub fn len(&self) -> usize {
         self.len
     }
