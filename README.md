@@ -146,13 +146,26 @@ To run the benchmarks, execute:
 cargo bench
 ```
 
-
-
 The results are output to the terminal and also written to CSV files (e.g. `benchmark_space.csv`).
 
+### Space Occupancy
 
+![Space Occupancy](python/images/space/space_total_10k.svg)
 
+In the first graph, the input is a vector of 10k random elements uniformly distributed in the range `[0, 10k)`. Here, all codecs outperform the standard vector in terms of space occupancy, but the MinimalBinaryCodec clearly wins as it is specifically designed for this type of distribution. However, the other codecs also perform well because the range is small.
 
-## Additional Resources
+![Space Occupancy](python/images/space/space_total_u32max.svg)
 
-- Codec Documentation in [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/index.html)
+In the second graph, the input is the same vector, but the range is `[0, u32::MAX)` (viewed as u64). Here, we see that all codecs start to perform poorly, except for MinimalBinaryCodec, which continues to be the best. In particular, codecs like Gamma perform worse than the standard vector.
+
+If we were to increase the range even further, all codecs except MinimalBinaryCodec would perform worse than the standard vector.
+
+### Random Access
+
+![Random Access](python/images/random_access/time_total_100k.svg)
+
+Even though in theory the access of this compressed integer vector is $O(1)$, we can't expect it to be as fast as a standard vector. The performance will be affected by the codec used and the distribution of the data. However, the benchmarks show that the performance is still quite good, even for large vectors. Choosing as sample rate a value like `k = 32`  seems to be a good trade-off between memory and speed.
+
+## License
+
+This library is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for more details.

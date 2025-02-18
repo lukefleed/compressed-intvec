@@ -77,7 +77,7 @@ fn benchmark_random_access<T, C: Copy>(
 /// Main entry point for running all benchmarks.
 fn bench_all(c: &mut Criterion) {
     let input_size = 10_000;
-    let max_value = u64::MAX;
+    let max_value = 100_000;
     let ks = vec![4, 8, 16, 32, 64, 128];
 
     // Vector to store benchmark results
@@ -155,14 +155,13 @@ fn bench_all(c: &mut Criterion) {
             LEIntVec::<_>::get,
         );
 
-        let min_param = *uniform.iter().max().unwrap();
         benchmark_random_access(
             &mut results,
             c,
             &format!("LEIntVec MinimalBinaryCodec"),
             uniform.clone(),
             k,
-            min_param,
+            16,
             |data: Vec<u64>, k: usize, param: u64| {
                 LEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param)
             },
@@ -249,6 +248,20 @@ fn bench_all(c: &mut Criterion) {
             },
             BEIntVec::<_>::get,
         );
+
+        benchmark_random_access(
+            &mut results,
+            c,
+            &format!("BEIntVec MinimalBinaryCodec"),
+            uniform.clone(),
+            k,
+            16,
+            |data: Vec<u64>, k: usize, param: u64| {
+                BEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param)
+            },
+            BEIntVec::<_>::get,
+        );
+
         benchmark_random_access(
             &mut results,
             c,
