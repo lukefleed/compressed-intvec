@@ -9,12 +9,10 @@ license = "Apache-2.0"
 repository = "https://github.com/lukefleed/compressed-intvec"
 keywords = [
     "compression",
-    "integer",
     "vector",
     "bitstream",
     "data-compression",
-    "variable-length-encoding",
-    "bitvector",
+    "integer-encoding",
 ]
 categories = ["data-structures", "compression", "algorithms"]
 exclude = [".github/*", "python/*"]
