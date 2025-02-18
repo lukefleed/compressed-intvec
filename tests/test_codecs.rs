@@ -27,8 +27,7 @@ mod tests {
         C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
         C::Params: Copy + Clone + PartialEq + std::fmt::Debug,
     {
-        let vec_le = LEIntVec::<C>::from_with_param(input.to_vec(), k, codec_param.clone())
-            .expect("Failed to create LEIntVec");
+        let vec_le = LEIntVec::<C>::from_with_param(input, k, codec_param.clone());
         assert_eq!(vec_le.len(), input.len());
         for (i, &val) in input.iter().enumerate() {
             assert_eq!(vec_le.get(i).unwrap(), val, "Mismatch at index {}", i);
@@ -45,8 +44,7 @@ mod tests {
         C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>,
         C::Params: Clone + Copy + std::fmt::Debug,
     {
-        let vec_be = BEIntVec::<C>::from_with_param(input.to_vec(), k, codec_param.clone())
-            .expect("Failed to create BEIntVec");
+        let vec_be = BEIntVec::<C>::from_with_param(input, k, codec_param.clone());
         assert_eq!(vec_be.len(), input.len());
         assert_eq!(vec_be.k, k);
         let expected_samples = if input.is_empty() {
@@ -188,8 +186,7 @@ mod tests {
         fn empty_input_le() {
             let input: Vec<u64> = vec![];
             let k = 3;
-            let vec_le = LEIntVec::<GammaCodec>::from_with_param(input.clone(), k, ())
-                .expect("Failed on empty input");
+            let vec_le = LEIntVec::<GammaCodec>::from_with_param(&input, k, ());
             assert_eq!(vec_le.len, 0);
             assert!(vec_le.get(0).is_none());
         }
@@ -197,8 +194,7 @@ mod tests {
         #[test]
         fn empty_input_be() {
             let input: Vec<u64> = vec![];
-            let vec_be = BEIntVec::<DeltaCodec>::from_with_param(input.clone(), 2, ())
-                .expect("Failed on empty input");
+            let vec_be = BEIntVec::<DeltaCodec>::from_with_param(&input, 2, ());
             assert_eq!(vec_be.len, 0);
             assert_eq!(vec_be.samples.len(), 0);
         }
@@ -221,7 +217,7 @@ mod tests {
         // fn test_in_order_iter() {
         //     let input = generate_random_vec(100);
         //     let k = 3;
-        //     let vec_le = LEIntVec::<GammaCodec>::from_with_param(input.clone(), k, ())
+        //     let vec_le = LEIntVec::<GammaCodec>::from_with_param(&input, k, ())
         //         .expect("Failed to create LEIntVec");
 
         //     for (i, val) in vec_le.iter().enumerate() {

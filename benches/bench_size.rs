@@ -27,14 +27,14 @@ fn benchmark_space<T, C: Copy>(
     input: Vec<u64>,
     k: usize,
     codec_param: C,
-    build_vec: impl Fn(Vec<u64>, usize, C) -> Result<T, Box<dyn std::error::Error>>,
+    build_vec: impl Fn(Vec<u64>, usize, C) -> T,
     size: impl Fn(&T) -> usize,
     benchmark_name: &str,
 ) {
     let bench_label = format!("{} (k = {})", benchmark_name, k);
 
     // Costruisci l'intvec una sola volta e misura l'occupazione
-    let intvec = build_vec(input.clone(), k, codec_param).unwrap();
+    let intvec = build_vec(input.clone(), k, codec_param);
     let space = size(&intvec);
     results.push((bench_label.clone(), k, space));
 
@@ -62,7 +62,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             (), // GammaCodec uses no extra runtime parameter
-            |data, k, param| LEIntVec::<GammaCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<GammaCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec GammaCodec",
         );
@@ -76,7 +76,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             (), // DeltaCodec uses no extra runtime parameter
-            |data, k, param| LEIntVec::<DeltaCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<DeltaCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec DeltaCodec",
         );
@@ -93,7 +93,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             exp_param, // Use the calculated exp_param for ExpGolombCodec
-            |data, k, param| LEIntVec::<ExpGolombCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec ExpGolombCodec",
         );
@@ -110,7 +110,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             rice_param,
-            |data, k, param| LEIntVec::<RiceCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<RiceCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec RiceCodec",
         );
@@ -125,7 +125,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             (), // ParamDeltaCodec has no extra runtime parameter
             |data, k, param| {
-                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param)
+                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, param)
             },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec ParamDeltaCodec",
@@ -140,7 +140,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             (), // ParamGammaCodec has no extra runtime parameter
-            |data, k, param| LEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec ParamGammaCodec",
         );
@@ -154,7 +154,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             (), // GammaCodec uses no extra runtime parameter
-            |data, k, param| BEIntVec::<GammaCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<GammaCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec GammaCodec",
         );
@@ -168,7 +168,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             (), // DeltaCodec uses no extra runtime parameter
-            |data, k, param| BEIntVec::<DeltaCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<DeltaCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec DeltaCodec",
         );
@@ -185,7 +185,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             exp_param, // Use the calculated exp_param for ExpGolombCodec
-            |data, k, param| BEIntVec::<ExpGolombCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec ExpGolombCodec",
         );
@@ -202,7 +202,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             rice_param,
-            |data, k, param| BEIntVec::<RiceCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<RiceCodec>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec RiceCodec",
         );
@@ -217,7 +217,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             (), // ParamDeltaCodec has no extra runtime parameter
             |data, k, param| {
-                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param)
+                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, param)
             },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec ParamDeltaCodec",
@@ -232,7 +232,7 @@ fn bench_all(c: &mut Criterion) {
             uniform.clone(),
             k,
             (), // ParamGammaCodec has no extra runtime parameter
-            |data, k, param| BEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, param),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec ParamGammaCodec",
         );

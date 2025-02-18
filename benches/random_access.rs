@@ -3,41 +3,56 @@ use compressed_intvec::codecs::{
 };
 use compressed_intvec::intvec::{BEIntVec, LEIntVec};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rand::distr::{Distribution, Uniform};
+use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use rand_distr::{Distribution, Uniform};
 use std::fs::File;
 use std::io::Write;
 use std::time::Instant;
 use std::u64;
 
-/// Generate a vector of random u64 values in the range [0, max) using a uniform distribution.
-fn generate_uniform_vec(size: usize, max: u64) -> Vec<u64> {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-    let uniform = Uniform::new(0, max).unwrap();
-    (0..size).map(|_| uniform.sample(&mut rng)).collect()
+/// Genera un vettore di `size` valori di tipo `u64` campionati dalla distribuzione `dist`
+/// che produce valori di tipo `T`, convertendoli in u64 tramite la funzione `convert`.
+fn generate_vec_with_distribution<D, T>(
+    size: usize,
+    dist: D,
+    convert: impl Fn(T) -> u64,
+) -> Vec<u64>
+where
+    D: Distribution<T>,
+{
+    let mut rng = StdRng::seed_from_u64(42);
+    (0..size).map(|_| convert(dist.sample(&mut rng))).collect()
 }
 
-/// Generate a list of random indexes within the range [0, max).
+/// Genera una lista di indici casuali nell'intervallo [0, max)
 fn generate_random_indexes(n: usize, max: usize) -> Vec<usize> {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+    let mut rng = StdRng::seed_from_u64(42);
     (0..n).map(|_| rng.random_range(0..max)).collect()
 }
 
-/// Benchmark random access per varianti, raccogliendo il tempo di esecuzione in results.
+/// Benchmark per l'accesso casuale, che raccoglie il tempo di esecuzione in `results`.
+///
+/// - `results`: vettore per salvare (nome benchmark, valore di k, tempo in sec)
+/// - `input`: vettore di input su cui effettuare il benchmark
+/// - `k`: parametro usato per la costruzione della struttura
+/// - `param`: parametro specifico della codec
+/// - `build_vec`: closure per costruire la struttura compressa a partire dai dati
+/// - `get`: funzione per effettuare l'accesso ad un elemento
 fn benchmark_random_access<T, C: Copy>(
-    results: &mut Vec<(String, usize, f64)>, // (nome benchmark, valore di k, tempo in sec)
+    results: &mut Vec<(String, usize, f64)>,
     c: &mut Criterion,
     name: &str,
     input: Vec<u64>,
     k: usize,
     param: C,
-    build_vec: impl Fn(Vec<u64>, usize, C) -> Result<T, Box<dyn std::error::Error>>,
+    build_vec: impl Fn(Vec<u64>, usize, C) -> T,
     get: impl Fn(&T, usize) -> Option<u64>,
 ) {
-    // Usato anche per Criterion
+    // Benchmark tramite Criterion
     c.bench_function(name, |b| {
         b.iter(|| {
-            let vec = build_vec(input.clone(), k, param).unwrap();
+            let vec = build_vec(input.clone(), k, param);
             let indexes = generate_random_indexes(input.len(), input.len());
             for &i in &indexes {
                 black_box(get(&vec, i).unwrap());
@@ -45,8 +60,8 @@ fn benchmark_random_access<T, C: Copy>(
         });
     });
 
-    // Misurazione extra per registrare il tempo in un CSV
-    let vec = build_vec(input.clone(), k, param).unwrap();
+    // Misurazione diretta per registrare il tempo in un CSV
+    let vec = build_vec(input.clone(), k, param);
     let indexes = generate_random_indexes(input.len(), input.len());
     let start = Instant::now();
     for &i in &indexes {
@@ -56,17 +71,20 @@ fn benchmark_random_access<T, C: Copy>(
     results.push((name.to_string(), k, elapsed));
 }
 
-/// Benchmarks per LE e BE, salvando i risultati in un CSV al termine.
+/// Funzione principale dei benchmark.
 fn bench_all(c: &mut Criterion) {
     let input_size = 10_000;
     let max_value = u64::MAX;
-    let ks = vec![4, 8, 16, 32, 64, 128]; // diversi valori di k
+    let ks = vec![4, 8, 16, 32, 64, 128];
 
-    // Vettore per raccogliere risultati per CSV.
+    // Vettore per salvare i risultati
     let mut results: Vec<(String, usize, f64)> = Vec::new();
-    let uniform = generate_uniform_vec(input_size, max_value);
 
-    // Benchmark su Vec<u64> (base di riferimento)
+    // Esempio 1: utilizzo di una distribuzione che restituisce già u64 (Uniform)
+    let dist_vec = Uniform::new(0, max_value).unwrap();
+    let uniform = generate_vec_with_distribution(input_size, dist_vec, |x| x);
+
+    // Benchmark di riferimento su Vec<u64>
     let indexes = generate_random_indexes(input_size, input_size);
     c.bench_function("Vec<u64> random access (uniform)", |b| {
         b.iter(|| {
@@ -76,6 +94,7 @@ fn bench_all(c: &mut Criterion) {
         });
     });
 
+    // Esecuzione dei benchmark per diverse strutture e codec
     for &k in &ks {
         // LEIntVec benchmarks
         benchmark_random_access(
@@ -86,7 +105,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &GammaCodec,
             |data: Vec<u64>, k: usize, _codec: &GammaCodec| {
-                LEIntVec::<GammaCodec>::from_with_param(data, k, ())
+                LEIntVec::<GammaCodec>::from_with_param(&data, k, ())
             },
             LEIntVec::<_>::get,
         );
@@ -98,7 +117,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &DeltaCodec,
             |data: Vec<u64>, k: usize, _codec: &DeltaCodec| {
-                LEIntVec::<DeltaCodec>::from_with_param(data, k, ())
+                LEIntVec::<DeltaCodec>::from_with_param(&data, k, ())
             },
             LEIntVec::<_>::get,
         );
@@ -113,7 +132,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             exp_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                LEIntVec::<ExpGolombCodec>::from_with_param(data, k, param)
+                LEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param)
             },
             LEIntVec::<_>::get,
         );
@@ -128,7 +147,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             rice_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                LEIntVec::<RiceCodec>::from_with_param(data, k, param)
+                LEIntVec::<RiceCodec>::from_with_param(&data, k, param)
             },
             LEIntVec::<_>::get,
         );
@@ -140,7 +159,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamDeltaCodec::<true, true>,
             |data: Vec<u64>, k: usize, _codec: &ParamDeltaCodec<true, true>| {
-                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, ())
+                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, ())
             },
             LEIntVec::<_>::get,
         );
@@ -152,7 +171,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamGammaCodec::<true>,
             |data: Vec<u64>, k: usize, _codec: &ParamGammaCodec<true>| {
-                LEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, ())
+                LEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, ())
             },
             LEIntVec::<_>::get,
         );
@@ -166,7 +185,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &GammaCodec,
             |data: Vec<u64>, k: usize, _codec: &GammaCodec| {
-                BEIntVec::<GammaCodec>::from_with_param(data, k, ())
+                BEIntVec::<GammaCodec>::from_with_param(&data, k, ())
             },
             BEIntVec::<_>::get,
         );
@@ -178,7 +197,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &DeltaCodec,
             |data: Vec<u64>, k: usize, _codec: &DeltaCodec| {
-                BEIntVec::<DeltaCodec>::from_with_param(data, k, ())
+                BEIntVec::<DeltaCodec>::from_with_param(&data, k, ())
             },
             BEIntVec::<_>::get,
         );
@@ -193,7 +212,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             exp_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                BEIntVec::<ExpGolombCodec>::from_with_param(data, k, param)
+                BEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param)
             },
             BEIntVec::<_>::get,
         );
@@ -208,7 +227,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             rice_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                BEIntVec::<RiceCodec>::from_with_param(data, k, param)
+                BEIntVec::<RiceCodec>::from_with_param(&data, k, param)
             },
             BEIntVec::<_>::get,
         );
@@ -220,7 +239,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamDeltaCodec::<true, true>,
             |data: Vec<u64>, k: usize, _codec: &ParamDeltaCodec<true, true>| {
-                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, ())
+                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, ())
             },
             BEIntVec::<ParamDeltaCodec<true, true>>::get,
         );
@@ -232,13 +251,13 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamGammaCodec::<true>,
             |data: Vec<u64>, k: usize, _codec: &ParamGammaCodec<true>| {
-                BEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, ())
+                BEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, ())
             },
             BEIntVec::<ParamGammaCodec<true>>::get,
         );
     }
 
-    // Scrittura dei risultati in CSV
+    // Scrittura dei risultati in un file CSV
     let mut file =
         File::create("benchmark_random_access.csv").expect("Impossibile creare il file CSV");
     writeln!(file, "name,k,elapsed").expect("Errore di scrittura header CSV");

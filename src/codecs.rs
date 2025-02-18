@@ -1,3 +1,12 @@
+//! This module provides implementations of various variable-length codes, such as minimal binary, gamma,
+//! delta, Exp‑Golomb, Zeta, Rice, and their parameterized variants. These codecs facilitate encoding and
+//! decoding unsigned 64-bit integers at the bit level, parameterized by an endianness marker and custom bit
+//! read/write implementations.
+//!
+//! ## Codecs Overview
+//!
+//! Refer to the [`codes`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/index.html) module for more information on the available codecs.
+
 use std::error::Error;
 
 use dsi_bitstream::prelude::*;
@@ -32,9 +41,52 @@ pub trait Codec<E: Endianness, W: BitWrite<E>> {
             + GammaReadParam<E>;
 }
 
+/// MinimalBinary: uses an upper bound as a runtime parameter.
+///
+/// For more information refer to the [`MinimalBinary`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/minimal_binary/index.html) module.
+pub struct MinimalBinary;
+
+impl<E: Endianness, W: MinimalBinaryWrite<E>> Codec<E, W> for MinimalBinary {
+    type Params = u64; // The upper bound u > 0
+
+    #[inline(always)]
+    fn encode(writer: &mut W, value: u64, upper_bound: u64) -> Result<usize, Box<dyn Error>> {
+        Ok(writer.write_minimal_binary(value, upper_bound)?)
+    }
+
+    #[inline(always)]
+    fn decode<R: MinimalBinaryRead<E>>(
+        reader: &mut R,
+        upper_bound: u64,
+    ) -> Result<u64, Box<dyn Error>> {
+        Ok(reader.read_minimal_binary(upper_bound)?)
+    }
+}
+
+impl MinimalBinary {
+    /// Encodes a value using the minimal binary codec with the specified upper bound.
+    #[inline(always)]
+    pub fn encode<E: Endianness, W: MinimalBinaryWrite<E>>(
+        writer: &mut W,
+        value: u64,
+        upper_bound: u64,
+    ) -> Result<usize, Box<dyn Error>> {
+        Ok(writer.write_minimal_binary(value, upper_bound)?)
+    }
+
+    /// Decodes a value using the minimal binary codec with the specified upper bound.
+    #[inline(always)]
+    pub fn decode<E: Endianness, R>(reader: &mut R, upper_bound: u64) -> Result<u64, Box<dyn Error>>
+    where
+        R: MinimalBinaryRead<E>,
+    {
+        Ok(reader.read_minimal_binary(upper_bound)?)
+    }
+}
+
 /// GammaCodec: no extra runtime parameter.
 ///
-/// Uses the gamma code for encoding and decoding.
+/// Uses the gamma code for encoding and decoding. For more information refer to the [`Gamma`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/gamma/index.html) module.
 pub struct GammaCodec;
 
 impl<E: Endianness, W: GammaWrite<E>> Codec<E, W> for GammaCodec {
@@ -72,7 +124,7 @@ impl GammaCodec {
 
 /// DeltaCodec: no extra runtime parameter.
 ///
-/// Uses the delta code for encoding and decoding.
+/// Uses the delta code for encoding and decoding. For more information refer to the [`Delta`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/delta/index.html) module.
 pub struct DeltaCodec;
 
 impl<E: Endianness, W: DeltaWrite<E>> Codec<E, W> for DeltaCodec {
@@ -110,7 +162,9 @@ impl DeltaCodec {
 
 /// Exp‑Golomb Codec: requires a runtime parameter (e.g. k).
 ///
-/// This codec supports the Exp‑Golomb coding scheme which is parameterized by `k`.
+/// This codec supports the Exp‑Golomb coding scheme which is parameterized by `k`. For more information refer to the [`ExpGolomb`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/exp_golomb/index.html) module.
+///
+/// Note: When k=1, the Exp‑Golomb code is equivalent to the Gamma code.
 pub struct ExpGolombCodec;
 
 impl<E: Endianness, W: ExpGolombWrite<E>> Codec<E, W> for ExpGolombCodec {
@@ -150,7 +204,7 @@ impl ExpGolombCodec {
 
 /// ZetaCodec: uses runtime parameter (k) with non‑parametric ζ functions.
 ///
-/// The parameter is given as a `u64`.
+/// The parameter is given as a `u64`. For more information refer to the [`Zeta`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/zeta/index.html) module.
 pub struct ZetaCodec;
 
 impl<E: Endianness, W: ZetaWrite<E>> Codec<E, W> for ZetaCodec {
@@ -190,7 +244,7 @@ impl ZetaCodec {
 
 /// RiceCodec: uses the Rice functions with a runtime parameter (log2_b).
 ///
-/// The parameter represents the logarithm base‑2 of the encoding base.
+/// The parameter represents the logarithm base‑2 of the encoding base. For more information refer to the [`Rice`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/rice/index.html) module.
 pub struct RiceCodec;
 
 impl<E: Endianness, W: RiceWrite<E>> Codec<E, W> for RiceCodec {
@@ -230,7 +284,7 @@ impl RiceCodec {
 
 /// ParamZetaCodec: uses a compile‑time flag for ζ functions.
 ///
-/// The compile‑time flag `USE_TABLE` determines whether a lookup table is used.
+/// The compile‑time flag `USE_TABLE` determines whether a lookup table is used. For more information refer to the [`Zeta`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/zeta/index.html) module.
 pub struct ParamZetaCodec<const USE_TABLE: bool>;
 
 impl<E: Endianness, W: ZetaWriteParam<E>, const USE_TABLE: bool> Codec<E, W>
@@ -270,7 +324,7 @@ impl<const USE_TABLE: bool> ParamZetaCodec<USE_TABLE> {
 
 /// ParamDeltaCodec: uses compile‑time booleans for table usage.
 ///
-/// The parameters `USE_DELTA_TABLE` and `USE_GAMMA_TABLE` are compile‑time flags.
+/// The parameters `USE_DELTA_TABLE` and `USE_GAMMA_TABLE` are compile‑time flags. For more information refer to the [`Delta`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/delta/index.html) module.
 pub struct ParamDeltaCodec<const USE_DELTA_TABLE: bool, const USE_GAMMA_TABLE: bool>;
 
 impl<
@@ -314,7 +368,7 @@ impl<const USE_DELTA_TABLE: bool, const USE_GAMMA_TABLE: bool>
     }
 }
 
-/// ParamGammaCodec: uses a compile‑time flag for table usage in gamma coding.
+/// ParamGammaCodec: uses a compile‑time flag for table usage in gamma coding. For more information refer to the [`Gamma`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/gamma/index.html) module.
 pub struct ParamGammaCodec<const USE_TABLE: bool>;
 
 impl<E: Endianness, W: GammaWriteParam<E>, const USE_TABLE: bool> Codec<E, W>

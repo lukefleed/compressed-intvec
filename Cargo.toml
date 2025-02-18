@@ -9,9 +9,9 @@ edition = "2021"
 criterion = "0.5.1"
 dsi-bitstream = "0.4.2"
 mem_dbg = "0.1.8"
-once_cell = "1.20.3"
 rand = "0.9.0"
-vers-vecs = "1.5.1"
+rand_distr = "0.5.0"
+serde = { version = "1.0.217", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
@@ -30,3 +30,7 @@ rustflags = ["-C", "target-cpu=native"]
 
 [profile.bench]
 lto = true
+
+[features]
+default = []
+serde = ["dep:serde"]
