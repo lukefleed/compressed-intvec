@@ -1,6 +1,7 @@
-//! This module implements a compressed vector for storing unsigned 64-bit integers
-//! in an efficient manner. It leverages a codec to encode the integers into a compact
-//! bitstream and uses a sampling strategy to achieve fast random access.
+//! # Compressed IntVec
+//!
+//! This module provides the `IntVec` structure for efficiently compressing a series of `u64` values
+//! using a specified instantaneous code from the [dsi-bitstream](https://crates.io/crates/dsi_bitstream) crate.
 //!
 //! ## How It Works
 //!
