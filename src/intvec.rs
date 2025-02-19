@@ -225,9 +225,8 @@ where
 
         let mut value = 0;
         let start_index = sample_index * self.k;
-        let param = self.codec_param;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, param).unwrap();
+            value = C::decode(&mut reader, self.codec_param).unwrap();
         }
         value
     }
@@ -459,7 +458,7 @@ where
             panic!("Index {} is out of bounds", index);
         }
 
-        let sample_index = index / self.k;
+        let sample_index = index / self.k; // this is an integer division
         let start_bit = self.samples[sample_index];
         let mut reader =
             BufBitReader::<LE, MemWordReader<u64, &Vec<u64>>>::new(MemWordReader::new(&self.data));
@@ -468,9 +467,8 @@ where
 
         let mut value = 0;
         let start_index = sample_index * self.k;
-        let param = self.codec_param;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, param).unwrap();
+            value = C::decode(&mut reader, self.codec_param).unwrap();
         }
         value
     }

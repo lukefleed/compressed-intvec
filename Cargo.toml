@@ -15,13 +15,12 @@ keywords = [
     "integer-encoding",
 ]
 categories = ["data-structures", "compression", "algorithms"]
-exclude = [".github/*", "python/*"]
+exclude = [".github/*"]
 
 [dependencies]
 dsi-bitstream = "0.4.2"
 mem_dbg = "0.1.8"
 serde = { version = "1.0.217", optional = true }
-
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }

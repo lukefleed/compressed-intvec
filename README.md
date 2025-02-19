@@ -6,12 +6,12 @@
 [![downloads](https://img.shields.io/crates/d/compressed-intvec)](https://crates.io/crates/compressed-intvec)
 ![license](https://img.shields.io/crates/l/compressed-intvec)
 
-A Rust library for compressing vectors of `u64` integers using variable-length coding from [dsi-bitstream](https://docs.rs/dsi-bitstream). Offers fast random access via sampling to balance speed and memory. Choose between big-endian (`BEIntVec`) or little-endian (`LEIntVec`) encoding.
+A Rust library for compressing vectors of `u64` integers using instantaneous codes the from [dsi-bitstream](https://docs.rs/dsi-bitstream) library. Offers fast random access via sampling to balance speed and memory. Choose between big-endian (`BEIntVec`) or little-endian (`LEIntVec`) encoding.
 
 ## Features
 
 - **Efficient Compression**: Leverage various codecs like Gamma, Delta, and Rice coding.
-- **Fast Random Access**: Achieve O(1) access with configurable sampling.
+- **Fast Random Access**: Achieve $O(1)$ access with configurable sampling.
 - **Memory Analysis**: Integrate with [`mem-dbg`](https://crates.io/crates/mem-dbg) for memory profiling.
 - **Flexible Codecs**: Select codecs based on data distribution for optimal compression.
 
@@ -29,7 +29,7 @@ let vec = vec![1, 3, 6, 8, 13, 3];
 
 // The compressed-intvec needs a sampling parameter
 let sampling_param = 2; // small since the vector is small
-let compressed_be = BEIntVec::<GammaCodec>::from(&vec, sampling_param);
+let compressed_be = BEIntVec::<GammaCodec>::from(&vec, sampling_param).unwrap();
 
 assert_eq!(compressed_be.get(3), 8);
 
@@ -46,7 +46,7 @@ use compressed_intvec::LEIntVec;
 use compressed_intvec::codecs::GammaCodec;
 
 let vec = vec![1, 3, 6, 8, 13, 3];
-let compressed_le = LEIntVec::<GammaCodec>::from(&vec, 2);
+let compressed_le = LEIntVec::<GammaCodec>::from(&vec, 2).unwrap();
 
 for (i, val) in compressed.iter().enumerate() {
     assert_eq!(val, vec[i]);
@@ -121,7 +121,7 @@ input_vec.mem_dbg(DbgFlags::empty());
 
 This outputs:
 
-```
+```bash
 Size of the standard Vec<u64>
 8024 B ⏺
 ```
@@ -129,8 +129,8 @@ Size of the standard Vec<u64>
 Next, we compress the vector using both `MinimalBinaryCodec` and `DeltaCodec` using for both a sampling parameter of `32`:
 
 ```rust
-let minimal_intvec = BEIntVec::<MinimalBinaryCodec>::from_with_param(&input_vec, 32, 10);
-let delta_intvec = BEIntVec::<DeltaCodec>::from(&input_vec, 32);
+let minimal_intvec = BEIntVec::<MinimalBinaryCodec>::from_with_param(&input_vec, 32, 10).unwrap();
+let delta_intvec = BEIntVec::<DeltaCodec>::from(&input_vec, 32).unwrap();
 
 println!("Size of the compressed IntVec with MinimalBinaryCodec");
 minimal_intvec.mem_dbg(DbgFlags::empty());
@@ -141,7 +141,7 @@ delta_intvec.mem_dbg(DbgFlags::empty());
 
 The compression results are:
 
-```
+```bash
 Size of the compressed IntVec with MinimalBinaryCodec
 832 B ⏺
 528 B ├╴data
@@ -182,11 +182,11 @@ The results are output to the terminal and also written to CSV files (e.g. `benc
 
 ### Space Occupancy
 
-![Space Occupancy](python/images/space/space_total_10k.svg)
+![Space Occupancy](images/space/space_total_10k.svg)
 
 In the first graph, the input is a vector of `10k` random elements uniformly distributed in the range `[0, 10k)`. Here, all codecs outperform the standard vector in terms of space occupancy, but the `MinimalBinaryCodec` clearly wins as it is specifically designed for this type of distribution. However, the other codecs also perform well because the range is small.
 
-![Space Occupancy](python/images/space/space_total_u32max.svg)
+![Space Occupancy](images/space/space_total_u32max.svg)
 
 In the second graph, the input is the same vector, but the range is `[0, u32::MAX)` (viewed as `u64`). Here, we see that all codecs start to perform poorly, except for `MinimalBinaryCodec`, which continues to be the best. In particular, codecs like Gamma perform worse than the standard vector.
 
@@ -194,10 +194,6 @@ If we were to increase the range even further, all codecs except `MinimalBinaryC
 
 ### Random Access
 
-![Random Access](python/images/random_access/time_total_100k.svg)
+![Random Access](images/random_access/time_total_100k.svg)
 
 Even though in theory the access of this compressed integer vector is $O(1)$, we can't expect it to be as fast as a standard vector. The performance will be affected by the codec used, the distribution of the data and the sampling parameter. However, the benchmarks show that the performance is still quite good, even for large vectors. Choosing as sample rate a value like `k = 32` seems to be a good trade-off between memory and speed.
-
-## License
-
-This library is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for more details.
