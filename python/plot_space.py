@@ -1,45 +1,70 @@
+"""
+This script reads CSV data about space usage from various codecs and plots a line chart comparing
+the space usage (in kB) for different codecs as sample size k increases. It also adds a horizontal
+reference line for a "Standard Vec" (the baseline measurement) and writes the resulting plot as both
+SVG and HTML files.
+
+The CSV is expected to contain at least the following columns:
+- 'name': Name of the codec.
+- 'k': Sample size identifier (with k = 0 representing the standard vector).
+- 'space': The space usage in bytes.
+
+The codec names are processed to remove unnecessary prefixes/suffixes via the extract_codec_base() function.
+"""
+
 import pandas as pd
 import plotly.express as px
 
-# Leggi il CSV dal percorso specificato
+# Read the CSV file containing benchmark results.
+# The CSV file includes a 'space' column (in bytes) and other columns such as 'k' and 'name'.
 df = pd.read_csv("../bench_results/bench_space.csv")
 
-# Salva il valore di riferimento "Standard Vec" (k=0) e converti in kB
+# Extract the baseline "Standard Vec" (where k == 0) and convert its space usage from byte to kB.
 standard_row = df[df['k'] == 0].iloc[0]
-standard_vec = standard_row['space']  # valore in byte
-standard_vec_kb = standard_vec / 1024
+standard_vec = standard_row['space']  # value in byte
+standard_vec_kb = standard_vec / 1024  # convert to kilobytes
 
-# Rimuovi la riga di riferimento (k = 0)
+# Remove the baseline row from the dataframe so it doesn't interfere with plotting.
 df = df[df['k'] != 0].copy()
 
-# Assicurati che 'k' sia numerico e converti lo spazio da byte a kB
+# Ensure that the 'k' column is numeric.
 df['k'] = pd.to_numeric(df['k'])
+# Create a new column 'space_kb' by converting 'space' from bytes to kilobytes.
 df['space_kb'] = df['space'] / 1024
 
-# Funzione per estrarre il nome base del codec (senza prefissi/suffissi inutili)
+# Define a helper function to extract the base name of the codec, removing unnecessary prefixes and suffixes.
 def extract_codec_base(name):
-    # Rimuovi il prefisso "LEIntVec " o "BEIntVec "
+    """
+    Process the codec name to remove specific prefixes and suffixes:
+    - Remove "LEIntVec " or "BEIntVec " prefix.
+    - Remove "Param" prefix if present.
+    - Remove "Codec" suffix if present.
+    Returns the cleaned codec name.
+    """
+    # Remove "LEIntVec " or "BEIntVec " prefix.
     if name.startswith("LEIntVec "):
         s = name[len("LEIntVec "):]
     elif name.startswith("BEIntVec "):
         s = name[len("BEIntVec "):]
     else:
         s = name
-    # Rimuovi "Param" se presente all'inizio
+    # Remove "Param" if present.
     if s.startswith("Param"):
         s = s[len("Param"):]
-    # Rimuovi il suffisso "Codec" se presente
+    # Remove "Codec" suffix if present.
     if s.endswith("Codec"):
         s = s[:-len("Codec")]
     return s.strip()
 
-# Aggiungi la colonna 'codec_base'
+# Add a new column 'codec_base' with the cleaned codec names.
 df['codec_base'] = df['name'].apply(extract_codec_base)
 
-# --- Grafico Totale ---
-# Raggruppa per codec_base e per k (le implementazioni sono identiche, quindi si usa la media)
+# --- Plotting the Total Space Usage per Codec ---
+# Group the data by the cleaned codec base and 'k', aggregating the space usage (in kB) using mean.
 df_total = df.groupby(['codec_base', 'k'], as_index=False)['space_kb'].mean()
 
+# Create a line plot using Plotly Express.
+# The x-axis represents 'k' (sample size), and the y-axis represents average space usage (in kB).
 fig_total = px.line(
     df_total,
     x="k",
@@ -57,7 +82,7 @@ fig_total = px.line(
     width=1200
 )
 
-# Aggiungi linea orizzontale per "Standard Vec"
+# Add a horizontal dashed line representing the "Standard Vec" baseline value.
 fig_total.add_hline(
     y=standard_vec_kb,
     line_dash="dash",
@@ -65,7 +90,10 @@ fig_total.add_hline(
     annotation_text="Standard Vec",
     annotation_position="bottom right"
 )
+
+# Display the plotted figure.
 fig_total.show()
-# write the svg and the html in images/space
+
+# Save the plot as an SVG image and an interactive HTML file in the specified directory.
 fig_total.write_image("../images/space/space_total_10k.svg")
 fig_total.write_html("../images/space/space_total_10k.html")
