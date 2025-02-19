@@ -4,68 +4,90 @@
 [![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
 [![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec)
 
-The library provides a compressed representation for vectors of unsigned 64-bit integers by utilizing several variable‑length coding methods. It is engineered to offer both efficient compression and fast random access to individual elements.
+A Rust library that provides a compressed representation for vectors of unsigned 64-bit integers by utilizing several variable-length coding methods provided by the [dsi-bitstream](https://docs.rs/dsi-bitstream/) library. It is engineered to offer both efficient compression and fast random access to individual elements. To support fast random access, the library uses a sampling technique to balance decoding speed and memory footprint.
 
-## Overview
+The compressed-intvec behaves like a standard Rust vector, allowing for efficient storage and retrieval of integers while minimizing memory usage through compression techniques. The library supports both big-endian (`BEIntVec`) and little-endian (`LEIntVec`) representations and offers a variety of codecs to choose from.
 
-This library leverages several encoding schemes including Gamma, Delta, Exp‑Golomb, Zeta, Rice, and their parameterized variants. These codecs are implemented in the library [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/index.html) and are used to compress and decompress integers in the vector.
+### A Quick Example
 
-The key features include:
-
-- **Multiple Codecs:** Choose between codecs like `GammaCodec`, `DeltaCodec`, `ExpGolombCodec`, and more can be found in the ['codecs'](src/codecs.rs) module.
-- **Endian Flexibility:** Offers both big-endian and little-endian representations using `BEIntVec` and `LEIntVec` respectively.
-- **Sampling Support:** Users may provide a sampling period to balance decoding speed and memory footprint.
-- **Benchmarks and Tests:** Integrated benchmarks in benches and comprehensive tests in tests ensure reliability and performance.
-
-## Usage Examples
-
-### Creating a Big-Endian Compressed Vector
-
-Using ExpGolombCodec with a runtime parameter:
+Let's consider the _universal_ code **Gamma** introduced by Elias in the 1960s. This code represents an integer as a unary prefix followed by the binary representation of the integer (thus the name universal, as for every integer `x` the length of the code is always $O(\log x)$, so just a constant factor longer than its binary form). So for example `9` will be encoded as `0001001`.
 
 ```rust
 use compressed_intvec::BEIntVec;
-use compressed_intvec::codecs::DeltaCodec;
+use compressed_intvec::codecs::GammaCodec;
 
-let input = vec![1, 5, 3, 1991, 42];
-let intvec = BEIntVec::<DeltaCodec>::from(&input, 2).unwrap();
+let vec = vec![1, 3, 6, 8, 13, 3];
 
-let value = intvec.get(3);
-assert_eq!(value, Some(1991));
+// The compressed-intvec needs a sampling parameter
+let sampling_param = 2; // small since the vector is small
+let compressed_be = BEIntVec::<GammaCodec>::from(&vec, sampling_param);
 
-let decoded = intvec.into_vec();
-assert_eq!(decoded, input);
+assert_eq!(compressed_be.get(3), Some(8));
+
+for (i, val) in compressed.iter().enumerate() {
+assert_eq!(val, vec[i]);
+}
+
 ```
 
-### Creating a Little-Endian Compressed Vector
-
-Using GammaCodec without extra codec parameters:
+Or alternatively, you can use the `LEIntVec` for little-endian representation:
 
 ```rust
 use compressed_intvec::LEIntVec;
 use compressed_intvec::codecs::GammaCodec;
 
-let input = vec![10, 20, 30, 40, 50];
-let intvec = LEIntVec::<GammaCodec>::from(input, 2);
+let vec = vec![1, 3, 6, 8, 13, 3];
+let compressed_le = LEIntVec::<GammaCodec>::from(&vec, 2);
 
-assert_eq!(intvec.get(2), Some(30));
+for (i, val) in compressed.iter().enumerate() {
+    assert_eq!(val, vec[i]);
+}
 ```
 
-## Codecs and Customization
+## Available Codecs
 
-Each codec implements the `Codec` trait and encodes/decodes values at the bit level.
+All the codecs are provided by the [dsi-bitstream](https://docs.rs/dsi-bitstream/) library. The following are implemented in the `compressed-intvec` library:
 
-### Choosing the Right Codec
+| Codec Name           | Description                                                                                                                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GammaCodec`         | Uses gamma coding without requiring extra runtime parameters.                                                                                                                                              |
+| `DeltaCodec`         | Uses delta coding, likewise without extra parameters.                                                                                                                                                      |
+| `ExpGolombCodec`     | Requires an extra parameter (e.g., a parameter `k`) for encoding/decoding.                                                                                                                                 |
+| `ZetaCodec`          | Uses additional runtime parameters ζ.                                                                                                                                                                      |
+| `RiceCodec`          | Uses a Rice parameter for encoding/decoding. Ideal for skewed distributions. In this case you may want to set this paramater as the floor of the log_2 of the mean of your values                          |
+| `MinimalBinaryCodec` | A minimal binary code with upper bound `u > 0` ([truncated binary encoding](https://en.wikipedia.org/wiki/Truncated_binary_encoding)). This is optimal for uniformly distributed data in the range [0, u). |
+| `ParamZetaCodec`     | Parameterized variant of Zeta codec using compile-time flags.                                                                                                                                              |
+| `ParamDeltaCodec`    | Parameterized variant of Delta codec using compile-time flags.                                                                                                                                             |
+| `ParamGammaCodec`    | Parameterized variant of Gamma codec using compile-time flags.                                                                                                                                             |
 
-The efficiency of a codec is highly dependent on the underlying data distribution, so selecting the appropriate codec is crucial for achieving optimal compression. Here are general guidelines to help you choose:
+For codecs that require extra parameters, we can create a compressed int-vec with the method `from_with_params`:
 
-- **Skewed Distributions:** If the data is skewed, Rice coding is usually effective. In this case, set the Rice parameter to the floor of the base-2 logarithm of the mean value.
-- **Power Law Distributions:** For data following a power law (e.g., \(P(x) \propto x^{-2}\)), Gamma coding is typically the most efficient.
-- **Uniform Distributions:** When the data is uniformly distributed over the range \([0, u64::MAX)\), minimal binary coding offers the best performance.
+```rust
+use compressed_intvec::BEIntVec;
+use compressed_intvec::codecs::RiceCodec;
 
-For further details, refer to the literature on entropy coding.
+let vec = vec![1, 3, 6, 8, 13, 3];
+let rice_param = 3; // for example
+let sampling_param = 2;
+let compressed = BEIntVec::<RiceCodec>::from_with_params(&vec, sampling_param, rice_param);
+```
 
-### Why Choosing the Right Codec Matters: An Example
+Choosing the right codec is crucial for achieving optimal compression. The efficiency of a codec is highly dependent on the underlying data distribution. For example, Rice coding is usually effective for skewed distributions, while Minimal Binary coding is optimal for uniformly distributed data.
+
+## Memory Analysis (and why choosing the right codec is important)
+
+Both the little-endian and big-endian version of the compressed int-vec include support for the [MemDbg/MemSize][https://docs.rs/mem-dbg/] traits from the [mem_dbg](https://crates.io/crates/mem-dbg) crate. For example, this is the output of `mem_dbg(DbgFlags::empty()` for a very large BeIntVec instance:
+
+```bash
+11536 B ⏺
+10864 B ├╴data
+  656 B ├╴samples
+    0 B ├╴codec
+    8 B ├╴k
+    8 B ├╴len
+    0 B ├╴codec_param
+    0 B ╰╴endian
+```
 
 Consider a vector of `u64` values uniformly distributed in the range \([0, u64::MAX)\). The following function generates this vector:
 
@@ -163,7 +185,7 @@ If we were to increase the range even further, all codecs except MinimalBinaryCo
 
 ![Random Access](python/images/random_access/time_total_100k.svg)
 
-Even though in theory the access of this compressed integer vector is $O(1)$, we can't expect it to be as fast as a standard vector. The performance will be affected by the codec used and the distribution of the data. However, the benchmarks show that the performance is still quite good, even for large vectors. Choosing as sample rate a value like `k = 32` seems to be a good trade-off between memory and speed.
+Even though in theory the access of this compressed integer vector is $O(1)$, we can't expect it to be as fast as a standard vector. The performance will be affected by the codec used, the distribution of the data and the sampling parameter. However, the benchmarks show that the performance is still quite good, even for large vectors. Choosing as sample rate a value like `k = 32` seems to be a good trade-off between memory and speed.
 
 ## License
 
