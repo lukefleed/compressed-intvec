@@ -46,13 +46,13 @@ mod tests {
     {
         let vec_be = BEIntVec::<C>::from_with_param(input, k, codec_param.clone()).unwrap();
         assert_eq!(vec_be.len(), input.len());
-        assert_eq!(vec_be.k, k);
+        assert_eq!(vec_be.get_sampling_rate(), k);
         let expected_samples = if input.is_empty() {
             0
         } else {
             (input.len() + k - 1) / k
         };
-        assert_eq!(vec_be.samples.len(), expected_samples);
+        assert_eq!(vec_be.get_samples().len(), expected_samples);
     }
 
     // --- GammaCodec Tests ---
@@ -187,15 +187,14 @@ mod tests {
             let input: Vec<u64> = vec![];
             let k = 3;
             let vec_le = LEIntVec::<GammaCodec>::from_with_param(&input, k, ()).unwrap();
-            assert_eq!(vec_le.len, 0);
+            assert_eq!(vec_le.len(), 0);
         }
 
         #[test]
         fn empty_input_be() {
             let input: Vec<u64> = vec![];
             let vec_be = BEIntVec::<DeltaCodec>::from_with_param(&input, 2, ()).unwrap();
-            assert_eq!(vec_be.len, 0);
-            assert_eq!(vec_be.samples.len(), 0);
+            assert_eq!(vec_be.len(), 0);
         }
 
         #[test]
@@ -210,9 +209,9 @@ mod tests {
             let input = vec![42];
             let k = 3;
             let vec_be = BEIntVec::<DeltaCodec>::from_with_param(&input, k, ()).unwrap();
-            assert_eq!(vec_be.len, 1);
+            assert_eq!(vec_be.len(), 1);
             let sample_index = 0; // since there's only one sample.
-            assert_eq!(vec_be.samples[sample_index], 0);
+            assert_eq!(vec_be.get_samples()[sample_index], 0);
         }
 
         #[test]

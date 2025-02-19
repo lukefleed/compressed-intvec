@@ -126,13 +126,13 @@ use std::marker::PhantomData;
     ))
 )]
 pub struct IntVec<E: Endianness, W: BitWrite<E>, C: Codec<E, W>> {
-    pub data: Vec<u64>,
-    pub samples: Vec<usize>,
-    pub codec: PhantomData<C>,
-    pub k: usize,
-    pub len: usize,
-    pub codec_param: C::Params,
-    pub endian: PhantomData<E>,
+    data: Vec<u64>,
+    samples: Vec<usize>,
+    codec: PhantomData<C>,
+    k: usize,
+    len: usize,
+    codec_param: C::Params,
+    endian: PhantomData<E>,
 }
 /// Big-endian variant of `IntVec`.
 pub type BEIntVec<C> = IntVec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>;
@@ -301,6 +301,16 @@ where
     /// This value represents the total count of decompressed integers.
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    /// Returns the sampling rate used by the compressed vector.
+    pub fn get_sampling_rate(&self) -> usize {
+        self.k
+    }
+
+    /// Returns the codec parameter used by the compressed vector.
+    pub fn get_samples(&self) -> Vec<usize> {
+        self.samples.clone()
     }
 
     /// Checks whether the compressed vector contains no elements.
@@ -517,6 +527,16 @@ where
     /// This value represents the total count of decompressed integers.
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    /// Returns the sampling rate used by the compressed vector.
+    pub fn get_sampling_rate(&self) -> usize {
+        self.k
+    }
+
+    /// Returns the codec parameter used by the compressed vector.
+    pub fn get_samples(&self) -> Vec<usize> {
+        self.samples.clone()
     }
 
     /// Checks whether the compressed vector contains no elements.

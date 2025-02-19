@@ -3,6 +3,8 @@
 [![crates.io](https://img.shields.io/crates/v/compressed-intvec.svg)](https://crates.io/crates/compressed-intvec)
 [![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
 [![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec)
+[![downloads](https://img.shields.io/crates/d/compressed-intvec)](https://crates.io/crates/compressed-intvec)
+![license](https://img.shields.io/crates/l/compressed-intvec)
 
 A Rust library for compressing vectors of `u64` integers using variable-length coding from [dsi-bitstream](https://docs.rs/dsi-bitstream). Offers fast random access via sampling to balance speed and memory. Choose between big-endian (`BEIntVec`) or little-endian (`LEIntVec`) encoding.
 
@@ -29,10 +31,10 @@ let vec = vec![1, 3, 6, 8, 13, 3];
 let sampling_param = 2; // small since the vector is small
 let compressed_be = BEIntVec::<GammaCodec>::from(&vec, sampling_param);
 
-assert_eq!(compressed_be.get(3), Some(8));
+assert_eq!(compressed_be.get(3), 8);
 
 for (i, val) in compressed_be.iter().enumerate() {
-assert_eq!(val, vec[i]);
+  assert_eq!(val, vec[i]);
 }
 
 ```
