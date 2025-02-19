@@ -6,7 +6,7 @@
 [![downloads](https://img.shields.io/crates/d/compressed-intvec)](https://crates.io/crates/compressed-intvec)
 ![license](https://img.shields.io/crates/l/compressed-intvec)
 
-A Rust library for compressing vectors of `u64` integers using instantaneous codes the from [dsi-bitstream](https://docs.rs/dsi-bitstream) library. Offers fast random access via sampling to balance speed and memory. Choose between big-endian (`BEIntVec`) or little-endian (`LEIntVec`) encoding.
+A Rust library for compressing vectors of `u64` integers using instantaneous codes the from [dsi-bitstream](https://docs.rs/dsi-bitstream) library. Offers fast random access via sampling to balance speed and memory.
 
 ## Features
 
@@ -29,6 +29,7 @@ let vec = vec![1, 3, 6, 8, 13, 3];
 
 // The compressed-intvec needs a sampling parameter
 let sampling_param = 2; // small since the vector is small
+// We are using a convenient type alias for the big-endian representation
 let compressed_be = BEIntVec::<GammaCodec>::from(&vec, sampling_param).unwrap();
 
 assert_eq!(compressed_be.get(3), 8);
@@ -39,16 +40,20 @@ for (i, val) in compressed_be.iter().enumerate() {
 
 ```
 
-Or alternatively, you can use the `LEIntVec` for little-endian representation:
+Or alternatively, you can use directly the `IntVec` specifying the endianness (little-endian in this case):
 
 ```rust
-use compressed_intvec::intvec::LEIntVec;
+use compressed_intvec::intvec::IntVec;
 use compressed_intvec::codecs::GammaCodec;
+use dsi_bitstream::traits::LE;
 
 let vec = vec![1, 3, 6, 8, 13, 3];
-let compressed_le = LEIntVec::<GammaCodec>::from(&vec, 2).unwrap();
+let sampling_param = 2; // small since the vector is small
+let compressed = IntVec::<LE, _, GammaCodec>::from(&vec, sampling_param).unwrap();
 
-for (i, val) in compressed_le.iter().enumerate() {
+assert_eq!(compressed.get(3), 8);
+
+for (i, val) in compressed.iter().enumerate() {
     assert_eq!(val, vec[i]);
 }
 ```
@@ -82,8 +87,6 @@ let compressed = BEIntVec::<RiceCodec>::from_with_param(&vec, sampling_param, ri
 Choosing the right codec is crucial for achieving optimal compression. The efficiency of a codec is highly dependent on the underlying data distribution. For example, Rice coding is usually effective for skewed distributions, while Minimal Binary coding is optimal for uniformly distributed data.
 
 ## Endianness
-
-Choose `BEIntVec` or `LEIntVec` based on data interoperability needs. Performance is equivalent; endianness affects byte order in compressed storage.
 
 ## Memory Analysis (and why choosing the right codec is important)
 

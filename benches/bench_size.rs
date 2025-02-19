@@ -14,6 +14,7 @@ use compressed_intvec::{
     intvec::{BEIntVec, LEIntVec},
 };
 use criterion::{criterion_group, criterion_main, Criterion};
+use std::fs;
 
 fn generate_uniform_vec(size: usize, max: u64) -> Vec<u64> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
@@ -250,7 +251,10 @@ fn bench_all(c: &mut Criterion) {
     }
 
     // Write the accumulated benchmark results to a CSV file.
-    let mut file = File::create("bench_results/bench_space.csv").expect("Cannot create CSV file");
+    let dir = "bench_results";
+    fs::create_dir_all(dir).expect("Cannot create benchmark results directory");
+    let file_path = format!("{}/bench_space.csv", dir);
+    let mut file = File::create(&file_path).expect("Cannot create CSV file");
     writeln!(file, "name,k,space").expect("Error writing CSV header");
     writeln!(
         file,
