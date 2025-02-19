@@ -82,6 +82,8 @@
 //!
 //! ## Endianness
 //!
+//! The library supports both little-endian and big-endian representations. The `IntVec` type allows you to specify the endianness at runtime, while the `BEIntVec` and `LEIntVec` types provide convenient aliases for big-endian and little-endian representations, respectively.
+//!
 //! ## Memory Analysis (and why choosing the right codec is important)
 //!
 //! Both the little-endian and big-endian version of the compressed int-vec include support for the [MemDbg/MemSize](https://docs.rs/mem-dbg/) traits from the [mem_dbg](https://crates.io/crates/mem-dbg) crate. For example, this is the output of `mem_dbg(DbgFlags::empty()` for a very large `BEIntVec` instance:
