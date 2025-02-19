@@ -1,12 +1,6 @@
 //! # Compressed Integer Vector Library
 //!
-//! [![crates.io](https://img.shields.io/crates/v/compressed-intvec.svg)](https://crates.io/crates/compressed-intvec)
-//! [![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
-//! [![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec)
-//! [![downloads](https://img.shields.io/crates/d/compressed-intvec)](https://crates.io/crates/compressed-intvec)
-//! ![license](https://img.shields.io/crates/l/compressed-intvec)
-//!
-//! A Rust library for compressing vectors of `u64` integers using instantaneous codes the from [dsi-bitstream](https://docs.rs/dsi-bitstream) library. Offers fast random access via sampling to balance speed and memory. Choose between big-endian (`BEIntVec`) or little-endian (`LEIntVec`) encoding.
+//! A Rust library for compressing vectors of `u64` integers using instantaneous codes the from [dsi-bitstream](https://docs.rs/dsi-bitstream) library. Offers fast random access via sampling to balance speed and memory.
 //!
 //! ## Features
 //!
@@ -29,6 +23,7 @@
 //!
 //! // The compressed-intvec needs a sampling parameter
 //! let sampling_param = 2; // small since the vector is small
+//! // We are using a convenient type alias for the big-endian representation
 //! let compressed_be = BEIntVec::<GammaCodec>::from(&vec, sampling_param).unwrap();
 //!
 //! assert_eq!(compressed_be.get(3), 8);
@@ -39,16 +34,20 @@
 //!
 //! ```
 //!
-//! Or alternatively, you can use the `LEIntVec` for little-endian representation:
+//! Or alternatively, you can use directly the `IntVec` specifying the endianness (little-endian in this case):
 //!
 //! ```rust
-//! use compressed_intvec::intvec::LEIntVec;
+//! use compressed_intvec::intvec::IntVec;
 //! use compressed_intvec::codecs::GammaCodec;
+//! use dsi_bitstream::traits::LE;
 //!
 //! let vec = vec![1, 3, 6, 8, 13, 3];
-//! let compressed_le = LEIntVec::<GammaCodec>::from(&vec, 2).unwrap();
+//! let sampling_param = 2; // small since the vector is small
+//! let compressed = IntVec::<LE, _, GammaCodec>::from(&vec, sampling_param).unwrap();
 //!
-//! for (i, val) in compressed_le.iter().enumerate() {
+//! assert_eq!(compressed.get(3), 8);
+//!
+//! for (i, val) in compressed.iter().enumerate() {
 //!     assert_eq!(val, vec[i]);
 //! }
 //! ```
@@ -83,8 +82,6 @@
 //!
 //! ## Endianness
 //!
-//! Choose `BEIntVec` or `LEIntVec` based on data interoperability needs. Performance is equivalent; endianness affects byte order in compressed storage.
-//!
 //! ## Memory Analysis (and why choosing the right codec is important)
 //!
 //! Both the little-endian and big-endian version of the compressed int-vec include support for the [MemDbg/MemSize](https://docs.rs/mem-dbg/) traits from the [mem_dbg](https://crates.io/crates/mem-dbg) crate. For example, this is the output of `mem_dbg(DbgFlags::empty()` for a very large `BEIntVec` instance:
@@ -97,7 +94,7 @@
 //!     8 B ├╴k
 //!     8 B ├╴len
 //!     0 B ├╴codec_param
-//!     0 B ╰╴endian
+//!     0 B ├╴endian
 //! ```
 //!
 //! Consider now a vector of `u64` values uniformly distributed in the range `[0, u64::MAX)` and see it's memory usage
@@ -174,12 +171,12 @@
 //! Size of the compressed IntVec with DeltaCodec
 //! 9584 B ⏺
 //! 9288 B ├╴data
-//! 280 B ├╴samples
-//!   0 B ├╴codec
-//!   8 B ├╴k
-//!   8 B ├╴len
-//!   0 B ├╴codec_param
-//!   0 B ╰╴endian
+//!  280 B ├╴samples
+//!    0 B ├╴codec
+//!    8 B ├╴k
+//!    8 B ├╴len
+//!    0 B ├╴codec_param
+//!    0 B ╰╴endian
 //! ```
 //!
 //! As shown, `MinimalBinaryCodec` is the most efficient for uniformly distributed data, reducing the size to 832 bytes, an order of magnitude smaller than the original vector. In contrast, `DeltaCodec` actually increases the size to 9584 bytes, as it is poorly suited for uniform distributions.
@@ -196,5 +193,7 @@
 //! ```bash
 //! cargo bench
 //! ```
+//!
+//! The results are output to the terminal and also written to CSV files (e.g. `benchmark_space.csv`).
 pub mod codecs;
 pub mod intvec;
