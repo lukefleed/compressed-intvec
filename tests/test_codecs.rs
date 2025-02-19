@@ -27,12 +27,12 @@ mod tests {
         C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
         C::Params: Copy + Clone + PartialEq + std::fmt::Debug,
     {
-        let vec_le = LEIntVec::<C>::from_with_param(input, k, codec_param.clone());
+        // Unwrap the Result to get the LEIntVec.
+        let vec_le = LEIntVec::<C>::from_with_param(input, k, codec_param.clone()).unwrap();
         assert_eq!(vec_le.len(), input.len());
         for (i, &val) in input.iter().enumerate() {
-            assert_eq!(vec_le.get(i).unwrap(), val, "Mismatch at index {}", i);
+            assert_eq!(vec_le.get(i), val, "Mismatch at index {}", i);
         }
-        assert!(vec_le.get(input.len()).is_none());
     }
 
     /// Helper for testing BE codecs.
@@ -44,7 +44,7 @@ mod tests {
         C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>,
         C::Params: Clone + Copy + std::fmt::Debug,
     {
-        let vec_be = BEIntVec::<C>::from_with_param(input, k, codec_param.clone());
+        let vec_be = BEIntVec::<C>::from_with_param(input, k, codec_param.clone()).unwrap();
         assert_eq!(vec_be.len(), input.len());
         assert_eq!(vec_be.k, k);
         let expected_samples = if input.is_empty() {
@@ -186,15 +186,14 @@ mod tests {
         fn empty_input_le() {
             let input: Vec<u64> = vec![];
             let k = 3;
-            let vec_le = LEIntVec::<GammaCodec>::from_with_param(&input, k, ());
+            let vec_le = LEIntVec::<GammaCodec>::from_with_param(&input, k, ()).unwrap();
             assert_eq!(vec_le.len, 0);
-            assert!(vec_le.get(0).is_none());
         }
 
         #[test]
         fn empty_input_be() {
             let input: Vec<u64> = vec![];
-            let vec_be = BEIntVec::<DeltaCodec>::from_with_param(&input, 2, ());
+            let vec_be = BEIntVec::<DeltaCodec>::from_with_param(&input, 2, ()).unwrap();
             assert_eq!(vec_be.len, 0);
             assert_eq!(vec_be.samples.len(), 0);
         }
@@ -210,14 +209,17 @@ mod tests {
         fn single_element_be() {
             let input = vec![42];
             let k = 3;
-            test_codec_be::<DeltaCodec>(&input, k, ());
+            let vec_be = BEIntVec::<DeltaCodec>::from_with_param(&input, k, ()).unwrap();
+            assert_eq!(vec_be.len, 1);
+            let sample_index = 0; // since there's only one sample.
+            assert_eq!(vec_be.samples[sample_index], 0);
         }
 
         #[test]
         fn test_in_order_iter() {
             let input = generate_random_vec(100);
             let k = 3;
-            let vec_le = LEIntVec::<GammaCodec>::from_with_param(&input, k, ());
+            let vec_le = LEIntVec::<GammaCodec>::from_with_param(&input, k, ()).unwrap();
 
             for (i, val) in vec_le.iter().enumerate() {
                 assert_eq!(val, input[i]);

@@ -1,32 +1,34 @@
 //! # Compressed IntVec Module
 //!
-//! This module provides a compressed vector of integers that leverages bit-level encoding to
-//! efficiently store a sequence of unsigned 64-bit integers.
+//! This module delivers an efficient compressed vector for storing sequences of unsigned 64-bit integers.
+//! By leveraging bit-level encoding, it minimizes storage space while supporting fast random access.
 //!
 //! ## Overview
 //!
-//! The core data structure, `IntVec`, maintains a compressed bitstream along with sampling offsets,
-//! which enable fast random access to individual elements without the need to decode the entire stream.
-//! The module supports two variants based on endianness:
+//! The principal data structure, [`IntVec`], encapsulates a compressed bitstream along with sampling offsets.
+//! These offsets enable fast, random access to individual elements without decompressing the entire stream.
+//! The module offers two variants based on endianness:
 //!
-//! - **Big-Endian** (`BEIntVec`)
-//! - **Little-Endian** (`LEIntVec`)
+//! - **Big-Endian** ([`BEIntVec`])
+//! - **Little-Endian** ([`LEIntVec`])
 //!
-//! Both variants work with codecs that implement the [`Codec`] trait, allowing flexible and configurable
-//! encoding/decoding strategies. Codecs may optionally accept extra runtime parameters to tune the compression.
+//! Both variants operate with codecs that implement the [`Codec`] trait, allowing for flexible and configurable
+//! encoding/decoding strategies. Some codecs even accept extra runtime parameters to fine-tune the compression.
+//!
+//! > **Note:** The [`IntVec`] structure is generic and you are not supposed to interact with it directly. Use the two endianness-specific types instead.
 //!
 //! ## Key Features
 //!
-//! - **Efficient Storage**: Compresses integer sequences into a compact bitstream.
-//! - **Random Access**: Uses periodic sampling (every *k*-th element) to jump-start decompression.
-//! - **Generic Codec Support**: Works with any codec implementing the [`Codec`] trait.
-//! - **Endian Flexibility**: Supports both big-endian and little-endian representations.
+//! - **Compact Storage:** Compresses sequences of integers into a streamlined bitstream.
+//! - **Fast Random Access:** Employs periodic sampling (every *k*-th element) to quickly locate individual elements.
+//! - **Flexible Codec Integration:** Compatible with any codec conforming to the [`Codec`] trait.
+//! - **Endianness Options:** Provides both big-endian and little-endian formats to suit various interoperability needs.
 //!
 //! ## Components
-//!
-//! - **`IntVec`**: The main structure containing compressed data, sample offsets, codec parameters, and metadata. You don't need to interact with this directly.
-//! - **`BEIntVec` / `LEIntVec`**: Type aliases for endianness-specific versions of `IntVec`.
-//! - **Iterators**: `BEIntVecIter` and `LEIntVecIter` decode values on the fly when iterated.
+//! - **[`IntVec`]:** The core structure holding compressed data, sampling offsets, codec parameters, and metadata.
+//!   Direct interaction with this structure is not permitted, and you should use the endianness-specific types instead.
+//! - **[`BEIntVec`] / [`LEIntVec`]:** Type aliases for the big-endian and little-endian implementations of [`IntVec`].
+//! - **Iterators:** [`BEIntVecIter`] and [`LEIntVecIter`] facilitate on-the-fly decoding as you iterate through the vector.
 //!
 //! ## Usage Examples
 //!
@@ -39,15 +41,15 @@
 //! // Define a vector of unsigned 64-bit integers.
 //! let input = vec![1, 5, 3, 1991, 42];
 //!
-//! // Create a Big-Endian compressed vector using ExpGolombCodec with a parameter (e.g., 3)
+//! // Create a Big-Endian compressed vector using ExpGolombCodec with an extra codec parameter (e.g., 3)
 //! // and sample every 2 elements.
-//! let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3);
+//! let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3).unwrap();
 //!
 //! // Retrieve a specific element by its index.
 //! let value = intvec.get(3);
-//! assert_eq!(value, Some(1991));
+//! assert_eq!(value, 1991);
 //!
-//! // Decode the entire compressed vector back to its original form.
+//! // Decompress the entire structure back into a standard vector.
 //! let decoded = intvec.into_vec();
 //! assert_eq!(decoded, input);
 //! ```
@@ -61,41 +63,22 @@
 //! // Define a vector of unsigned 64-bit integers.
 //! let input = vec![10, 20, 30, 40, 50];
 //!
-//! // Create a Little-Endian compressed vector using GammaCodec without extra codec parameters,
+//! // Create a Little-Endian compressed vector using GammaCodec without additional codec parameters,
 //! // sampling every 2 elements.
-//! let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
+//! let intvec = LEIntVec::<GammaCodec>::from(&input, 2).unwrap();
 //!
-//! assert_eq!(intvec.get(2), Some(30));
+//! // Verify that random access works correctly.
+//! assert_eq!(intvec.get(2), 30);
 //! ```
 //!
-//! ## Design Details
+//! ## Design Considerations
 //!
-//! - **Bitstream Storage**: The compressed data is stored as a vector of 64-bit words (`Vec<u64>`).
-//! - **Sampling Strategy**: To support fast random access, sample offsets (in bits) are stored for every *k*-th integer.
-//! - **Codec Abstraction**: The module is codec-agnostic; any codec conforming to the [`Codec`] trait can be used.
-//! - **Endian Handling**: The endianness of the encoding/decoding process is managed through phantom types,
-//!   enabling both big-endian and little-endian variants.
-//!
-//! ## Module Structure and Extensibility
-//!
-//! The module's API provides constructors (`from_with_param` and `from`), element access (`get`), full
-//! decoding (`into_vec`), and iteration (`iter`). It can be extended with new codecs by implementing
-//! the [`Codec`] trait for additional compression methods or parameters.
-//!
-//! ## Error Handling
-//!
-//! The current implementation assumes that errors in encoding/decoding are exceptional and uses `.unwrap()`
-//! in places where failure is unexpected. For production code, you might consider propagating errors
-//! instead of panicking.
-//!
-//! ## Getting Started
-//!
-//! 1. Choose or implement a codec that satisfies the [`Codec`] trait requirements.
-//! 2. Use the provided constructors to compress a vector of integers.
-//! 3. Leverage the efficient sampling mechanism for fast random access, or decode the full content when needed.
-//!
-//! For more details, refer to the documentation of the [`Codec`] trait and the respective codec implementations.
-//!
+//! - **Bitstream Representation:** The compressed data is stored as a vector of 64-bit words ([`Vec<u64>`]).
+//! - **Sampling Strategy:** To ensure fast random access, sampling offsets are recorded
+//!   for every *k*-th integer.
+//! - **Codec Abstraction:** The module is codec-agnostic; any codec that implements the [`Codec`] trait may be employed.
+//! - **Endianness Management:** Endianness is seamlessly handled via phantom types, supporting both big-endian and
+//!   little-endian variants without affecting performance.
 
 use crate::codecs::Codec;
 use dsi_bitstream::prelude::*;
@@ -104,13 +87,13 @@ use std::marker::PhantomData;
 
 /// A compressed vector of integers.
 ///
-/// The `IntVec` stores values in a compressed bitstream along with sample offsets for
+/// The [`IntVec`] stores values in a compressed bitstream along with sample offsets for
 /// fast random access. The type is generic over an endianness (`E`) and codec (`C`).
 ///
 /// # Type Parameters
 ///
-/// - `E`: Endianness marker (e.g. `BE` or `LE`).
-/// - `C`: The codec used for compression. Must implement `Codec<E, MyBitWrite<E>, MyBitRead<E>>`.
+/// - `E`: Endianness marker (e.g. [`BE`] or [`LE`]).
+/// - `C`: The codec used for compression. Must implement [`Codec<E, MyBitWrite<E>, MyBitRead<E>>`].
 ///
 /// # Fields
 ///
@@ -128,9 +111,9 @@ use std::marker::PhantomData;
 ///
 /// // Create a compressed vector using a codec without extra parameters.
 /// let input = vec![1, 2, 3, 4, 5];
-/// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
+/// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
 /// let value = intvec.get(3);
-/// assert_eq!(value, Some(4));
+/// assert_eq!(value, 4);
 /// assert_eq!(intvec.len(), 5);
 /// ```
 #[derive(Debug, Clone, MemDbg, MemSize)]
@@ -158,7 +141,7 @@ impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>> BEIntVec<C
 where
     C::Params: Copy,
 {
-    /// Creates a new `BEIntVec` from a vector of unsigned 64-bit integers.
+    /// Creates a new [`BEIntVec`] from a vector of unsigned 64-bit integers.
     ///
     /// Values are encoded with the specified codec parameter.
     ///
@@ -175,12 +158,16 @@ where
     /// use compressed_intvec::codecs::ExpGolombCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3);
+    /// let intvec = BEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3).unwrap();
     ///
     /// let value = intvec.get(3);
-    /// assert_eq!(value, Some(1991));
+    /// assert_eq!(value, 1991);
     /// ```
-    pub fn from_with_param(input: &[u64], k: usize, codec_param: C::Params) -> Self {
+    pub fn from_with_param(
+        input: &[u64],
+        k: usize,
+        codec_param: C::Params,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let word_writer = MemWordWriterVec::new(Vec::new());
         let mut writer = BufBitWriter::<BE, MemWordWriterVec<u64, Vec<u64>>>::new(word_writer);
         let mut samples = Vec::new();
@@ -190,13 +177,13 @@ where
             if i % k == 0 {
                 samples.push(total_bits);
             }
-            total_bits += C::encode(&mut writer, x, codec_param).unwrap();
+            total_bits += C::encode(&mut writer, x, codec_param)?;
         }
 
-        writer.flush().unwrap();
-        let data = writer.into_inner().unwrap().into_inner();
+        writer.flush()?;
+        let data = writer.into_inner()?.into_inner();
 
-        IntVec {
+        Ok(IntVec {
             data,
             samples,
             codec: PhantomData,
@@ -204,12 +191,12 @@ where
             len: input.len(),
             codec_param,
             endian: PhantomData,
-        }
+        })
     }
 
     /// Retrieves the value at the given index.
     ///
-    /// Returns `None` if the index is out of bounds.
+    /// Panics if the index is out of bounds.
     ///
     /// # Examples
     ///
@@ -218,15 +205,15 @@ where
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 12, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
+    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
     /// let value = intvec.get(3);
-    /// assert_eq!(value, Some(12));
+    /// assert_eq!(value, 12);
     /// ```
     ///
     #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<u64> {
+    pub fn get(&self, index: usize) -> u64 {
         if index >= self.len {
-            return None;
+            panic!("Index {} is out of bounds", index);
         }
 
         let sample_index = index / self.k;
@@ -234,15 +221,15 @@ where
         let mut reader =
             BufBitReader::<BE, MemWordReader<u64, &Vec<u64>>>::new(MemWordReader::new(&self.data));
 
-        reader.set_bit_pos(start_bit as u64).ok()?;
+        reader.set_bit_pos(start_bit as u64).unwrap();
 
         let mut value = 0;
         let start_index = sample_index * self.k;
         let param = self.codec_param;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, param).ok()?;
+            value = C::decode(&mut reader, param).unwrap();
         }
-        Some(value)
+        value
     }
 
     /// Returns the original vector of integers.
@@ -256,7 +243,7 @@ where
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
+    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
@@ -284,7 +271,7 @@ where
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 12, 42];
-    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
+    /// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
     ///
     /// // Iterate over the vector and print each value.
     /// for (i, value) in intvec.iter().enumerate() {
@@ -326,12 +313,12 @@ where
 
 /// Convenience constructor for codecs with no extra runtime parameter.
 impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>> BEIntVec<C> {
-    pub fn from(input: &[u64], k: usize) -> Self {
+    pub fn from(input: &[u64], k: usize) -> Result<Self, Box<dyn std::error::Error>> {
         Self::from_with_param(input, k, ())
     }
 }
 
-/// Iterator over the values stored in a `BEIntVec`.
+/// Iterator over the values stored in a [`BEIntVec`].
 /// The iterator decodes values on the fly.
 ///
 /// # Examples
@@ -342,7 +329,7 @@ impl<C: Codec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()
 ///
 /// // Create a big-endian compressed vector using GammaCodec.
 /// let input = vec![1, 5, 3, 1991, 42];
-/// let intvec = BEIntVec::<GammaCodec>::from(&input, 2);
+/// let intvec = BEIntVec::<GammaCodec>::from(&input, 2).unwrap();
 ///
 /// // Iterate over the compressed vector.
 /// for (i, value) in intvec.iter().enumerate() {
@@ -388,13 +375,13 @@ where
     C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>>,
     C::Params: Copy,
 {
-    /// Creates a new `LEIntVec` from a vector of unsigned 64-bit integers.
+    /// Creates a new [`LEIntVec`] from a vector of unsigned 64-bit integers.
     ///
     /// Values are encoded with the specified codec parameter.
     ///
     /// # Arguments
     ///
-    /// - `input`: The values to LE compressed.
+    /// - `input`: The values to be compressed.
     /// - `k`: The sampling rate (every k-th value is stored as a sample).
     /// - `codec_param`: Parameters for the codec.
     ///
@@ -405,12 +392,16 @@ where
     /// use compressed_intvec::codecs::ExpGolombCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = LEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3);
+    /// let intvec = LEIntVec::<ExpGolombCodec>::from_with_param(&input, 2, 3).unwrap();
     ///
     /// let value = intvec.get(3);
-    /// assert_eq!(value, Some(1991));
+    /// assert_eq!(value, 1991);
     /// ```
-    pub fn from_with_param(input: &[u64], k: usize, codec_param: C::Params) -> Self {
+    pub fn from_with_param(
+        input: &[u64],
+        k: usize,
+        codec_param: C::Params,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let word_writer = MemWordWriterVec::new(Vec::new());
         let mut writer = BufBitWriter::<LE, MemWordWriterVec<u64, Vec<u64>>>::new(word_writer);
         let mut samples = Vec::new();
@@ -426,7 +417,7 @@ where
         writer.flush().unwrap();
         let data = writer.into_inner().unwrap().into_inner();
 
-        IntVec {
+        Ok(IntVec {
             data,
             samples,
             codec: PhantomData,
@@ -434,7 +425,7 @@ where
             len: input.len(),
             codec_param,
             endian: PhantomData,
-        }
+        })
     }
     /// Retrieves the value at the given index.
     ///
@@ -447,15 +438,15 @@ where
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![1, 5, 3, 1991, 42];
-    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
+    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2).unwrap();
     /// let value = intvec.get(3);
-    /// assert_eq!(value, Some(1991));
+    /// assert_eq!(value, 1991);
     /// ```
     ///
     #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<u64> {
+    pub fn get(&self, index: usize) -> u64 {
         if index >= self.len {
-            return None;
+            panic!("Index {} is out of bounds", index);
         }
 
         let sample_index = index / self.k;
@@ -463,15 +454,15 @@ where
         let mut reader =
             BufBitReader::<LE, MemWordReader<u64, &Vec<u64>>>::new(MemWordReader::new(&self.data));
 
-        reader.set_bit_pos(start_bit as u64).ok()?;
+        reader.set_bit_pos(start_bit as u64).unwrap();
 
         let mut value = 0;
         let start_index = sample_index * self.k;
         let param = self.codec_param;
         for _ in start_index..=index {
-            value = C::decode(&mut reader, param).ok()?;
+            value = C::decode(&mut reader, param).unwrap();
         }
-        Some(value)
+        value
     }
 
     /// Returns the original vector of integers.
@@ -485,7 +476,7 @@ where
     /// use compressed_intvec::codecs::GammaCodec;
     ///
     /// let input = vec![43, 12, 5, 1991, 42];
-    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
+    /// let intvec = LEIntVec::<GammaCodec>::from(&input, 2).unwrap();
     /// let values = intvec.into_vec();
     /// assert_eq!(values, input);
     /// ```
@@ -538,12 +529,12 @@ where
 
 /// Convenience constructor for codecs with no extra runtime parameter.
 impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()>> LEIntVec<C> {
-    pub fn from(input: &[u64], k: usize) -> Self {
+    pub fn from(input: &[u64], k: usize) -> Result<Self, Box<dyn std::error::Error>> {
         Self::from_with_param(input, k, ())
     }
 }
 
-/// Iterator over the values stored in a `LEIntVec`.
+/// Iterator over the values stored in a [`LEIntVec`].
 ///
 /// This iterator decodes values on the fly using a bit‐stream reader.
 /// # Examples
@@ -555,7 +546,7 @@ impl<C: Codec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, Params = ()
 /// // Create a little-endian compressed vector using GammaCodec.
 /// // Note: Ensure your codec implements the required traits for iteration.
 /// let input = vec![10, 20, 30, 40, 50];
-/// let intvec = LEIntVec::<GammaCodec>::from(&input, 2);
+/// let intvec = LEIntVec::<GammaCodec>::from(&input, 2).unwrap();
 ///
 /// // Iterate over the compressed vector.
 /// for (i, value) in intvec.iter().enumerate() {

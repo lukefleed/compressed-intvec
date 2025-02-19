@@ -10,7 +10,7 @@ A Rust library for compressing vectors of `u64` integers using variable-length c
 
 - **Efficient Compression**: Leverage various codecs like Gamma, Delta, and Rice coding.
 - **Fast Random Access**: Achieve O(1) access with configurable sampling.
-- **Memory Analysis**: Integrate with [`mem-dbg`](https://crates.io/crates/mem-dbg) for memory profiling (optional feature).
+- **Memory Analysis**: Integrate with [`mem-dbg`](https://crates.io/crates/mem-dbg) for memory profiling.
 - **Flexible Codecs**: Select codecs based on data distribution for optimal compression.
 
 The sampling parameter determines how often full positions are stored to speed up access. Higher values reduce memory overhead but may increase access time. For example, `sampling_param = 32` is usually a good trade-off for large datasets.
@@ -65,7 +65,7 @@ for (i, val) in compressed.iter().enumerate() {
 | `ParamDeltaCodec`    | Parameterized variant of Delta codec using compile-time flags.                                                                                                                                             |
 | `ParamGammaCodec`    | Parameterized variant of Gamma codec using compile-time flags.                                                                                                                                             |
 
-For codecs that require extra parameters, we can create a compressed int-vec with the method `from_with_params`:
+For codecs that require extra parameters, we can create a compressed int-vec with the method `from_with_param`:
 
 ```rust
 use compressed_intvec::BEIntVec;
@@ -74,7 +74,7 @@ use compressed_intvec::codecs::RiceCodec;
 let vec = vec![1, 3, 6, 8, 13, 3];
 let rice_param = 3; // for example
 let sampling_param = 2;
-let compressed = BEIntVec::<RiceCodec>::from_with_params(&vec, sampling_param, rice_param);
+let compressed = BEIntVec::<RiceCodec>::from_with_param(&vec, sampling_param, rice_param).unwrap();
 ```
 
 Choosing the right codec is crucial for achieving optimal compression. The efficiency of a codec is highly dependent on the underlying data distribution. For example, Rice coding is usually effective for skewed distributions, while Minimal Binary coding is optimal for uniformly distributed data.
@@ -167,8 +167,8 @@ As shown, `MinimalBinaryCodec` is the most efficient for uniformly distributed d
 
 Benchmarks are provided to evaluate both the random access speed and space occupancy of compressed vectors.
 
-- **Random Access Benchmarks:** Located in random_access.rs, these benchmarks measure the time required to access individual elements.
-- **Space Occupancy Benchmarks:** Located in bench_size.rs, these benchmarks report the memory footprint of various codec configurations and compressed representations.
+- **Random Access Benchmarks:** These benchmarks measure the time required to access individual elements.
+- **Space Occupancy Benchmarks:** These benchmarks report the memory footprint of various codec configurations and compressed representations.
 
 To run the benchmarks, execute:
 

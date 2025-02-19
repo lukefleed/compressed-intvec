@@ -7,7 +7,7 @@
 //!
 //! ## Codecs Overview
 //!
-//! Refer to the [`codes`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/index.html) module for more information on the available codecs.
+//! Refer to the [`codes`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/index.html) module of [dsi-bitstream](https://docs.rs/dsi-bitstream) for more information on their implementation.
 
 use std::error::Error;
 

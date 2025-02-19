@@ -50,7 +50,7 @@ fn benchmark_random_access<T, C: Copy>(
     k: usize,
     param: C,
     build_vec: impl Fn(Vec<u64>, usize, C) -> T,
-    get: impl Fn(&T, usize) -> Option<u64>,
+    get: impl Fn(&T, usize) -> u64, // updated signature: get now returns u64
 ) {
     // Run Criterion benchmark
     c.bench_function(name, |b| {
@@ -58,7 +58,7 @@ fn benchmark_random_access<T, C: Copy>(
             let vec = build_vec(input.clone(), k, param);
             let indexes = generate_random_indexes(input.len(), input.len());
             for &i in &indexes {
-                black_box(get(&vec, i).unwrap());
+                black_box(get(&vec, i)); // removed .unwrap()
             }
         });
     });
@@ -68,7 +68,7 @@ fn benchmark_random_access<T, C: Copy>(
     let indexes = generate_random_indexes(input.len(), input.len());
     let start = Instant::now();
     for &i in &indexes {
-        black_box(get(&vec, i).unwrap());
+        black_box(get(&vec, i)); // removed .unwrap()
     }
     let elapsed = start.elapsed().as_secs_f64();
     results.push((name.to_string(), k, elapsed));
@@ -108,7 +108,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &GammaCodec,
             |data: Vec<u64>, k: usize, _codec: &GammaCodec| {
-                LEIntVec::<GammaCodec>::from_with_param(&data, k, ())
+                LEIntVec::<GammaCodec>::from_with_param(&data, k, ()).unwrap()
             },
             LEIntVec::<_>::get,
         );
@@ -120,7 +120,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &DeltaCodec,
             |data: Vec<u64>, k: usize, _codec: &DeltaCodec| {
-                LEIntVec::<DeltaCodec>::from_with_param(&data, k, ())
+                LEIntVec::<DeltaCodec>::from_with_param(&data, k, ()).unwrap()
             },
             LEIntVec::<_>::get,
         );
@@ -135,7 +135,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             exp_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                LEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param)
+                LEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param).unwrap()
             },
             LEIntVec::<_>::get,
         );
@@ -150,7 +150,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             rice_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                LEIntVec::<RiceCodec>::from_with_param(&data, k, param)
+                LEIntVec::<RiceCodec>::from_with_param(&data, k, param).unwrap()
             },
             LEIntVec::<_>::get,
         );
@@ -163,7 +163,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             16,
             |data: Vec<u64>, k: usize, param: u64| {
-                LEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param)
+                LEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param).unwrap()
             },
             LEIntVec::<_>::get,
         );
@@ -176,7 +176,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamDeltaCodec::<true, true>,
             |data: Vec<u64>, k: usize, _codec: &ParamDeltaCodec<true, true>| {
-                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, ())
+                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, ()).unwrap()
             },
             LEIntVec::<_>::get,
         );
@@ -188,7 +188,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamGammaCodec::<true>,
             |data: Vec<u64>, k: usize, _codec: &ParamGammaCodec<true>| {
-                LEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, ())
+                LEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, ()).unwrap()
             },
             LEIntVec::<_>::get,
         );
@@ -202,7 +202,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &GammaCodec,
             |data: Vec<u64>, k: usize, _codec: &GammaCodec| {
-                BEIntVec::<GammaCodec>::from_with_param(&data, k, ())
+                BEIntVec::<GammaCodec>::from_with_param(&data, k, ()).unwrap()
             },
             BEIntVec::<_>::get,
         );
@@ -214,7 +214,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &DeltaCodec,
             |data: Vec<u64>, k: usize, _codec: &DeltaCodec| {
-                BEIntVec::<DeltaCodec>::from_with_param(&data, k, ())
+                BEIntVec::<DeltaCodec>::from_with_param(&data, k, ()).unwrap()
             },
             BEIntVec::<_>::get,
         );
@@ -229,7 +229,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             exp_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                BEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param)
+                BEIntVec::<ExpGolombCodec>::from_with_param(&data, k, param).unwrap()
             },
             BEIntVec::<_>::get,
         );
@@ -244,7 +244,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             rice_k,
             |data: Vec<u64>, k: usize, param: usize| {
-                BEIntVec::<RiceCodec>::from_with_param(&data, k, param)
+                BEIntVec::<RiceCodec>::from_with_param(&data, k, param).unwrap()
             },
             BEIntVec::<_>::get,
         );
@@ -257,7 +257,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             16,
             |data: Vec<u64>, k: usize, param: u64| {
-                BEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param)
+                BEIntVec::<MinimalBinaryCodec>::from_with_param(&data, k, param).unwrap()
             },
             BEIntVec::<_>::get,
         );
@@ -270,7 +270,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamDeltaCodec::<true, true>,
             |data: Vec<u64>, k: usize, _codec: &ParamDeltaCodec<true, true>| {
-                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, ())
+                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(&data, k, ()).unwrap()
             },
             BEIntVec::<ParamDeltaCodec<true, true>>::get,
         );
@@ -282,7 +282,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             &ParamGammaCodec::<true>,
             |data: Vec<u64>, k: usize, _codec: &ParamGammaCodec<true>| {
-                BEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, ())
+                BEIntVec::<ParamGammaCodec<true>>::from_with_param(&data, k, ()).unwrap()
             },
             BEIntVec::<ParamGammaCodec<true>>::get,
         );

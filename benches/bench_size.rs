@@ -50,7 +50,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             (),
-            |data, k, param| LEIntVec::<GammaCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<GammaCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec GammaCodec",
         );
@@ -63,7 +63,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             (),
-            |data, k, param| LEIntVec::<DeltaCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<DeltaCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec DeltaCodec",
         );
@@ -79,7 +79,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             exp_param, // Use the calculated exp_param for ExpGolombCodec
-            |data, k, param| LEIntVec::<ExpGolombCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<ExpGolombCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec ExpGolombCodec",
         );
@@ -95,7 +95,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             rice_param,
-            |data, k, param| LEIntVec::<RiceCodec>::from_with_param(data, k, param),
+            |data, k, param| LEIntVec::<RiceCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec RiceCodec",
         );
@@ -108,7 +108,9 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             16,
-            |data, k, param| LEIntVec::<MinimalBinaryCodec>::from_with_param(data, k, param),
+            |data, k, param| {
+                LEIntVec::<MinimalBinaryCodec>::from_with_param(data, k, param).unwrap()
+            },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec MinimalBinaryCodec",
         );
@@ -122,7 +124,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             (), // ParamDeltaCodec has no extra runtime parameter
             |data, k, param| {
-                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param)
+                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param).unwrap()
             },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec ParamDeltaCodec",
@@ -136,7 +138,9 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             (), // ParamGammaCodec has no extra runtime parameter
-            |data, k, param| LEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param),
+            |data, k, param| {
+                LEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param).unwrap()
+            },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "LEIntVec ParamGammaCodec",
         );
@@ -149,7 +153,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             (), // GammaCodec uses no extra runtime parameter
-            |data, k, param| BEIntVec::<GammaCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<GammaCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec GammaCodec",
         );
@@ -162,7 +166,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             (), // DeltaCodec uses no extra runtime parameter
-            |data, k, param| BEIntVec::<DeltaCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<DeltaCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec DeltaCodec",
         );
@@ -178,7 +182,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             exp_param, // Use the calculated exp_param for ExpGolombCodec
-            |data, k, param| BEIntVec::<ExpGolombCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<ExpGolombCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec ExpGolombCodec",
         );
@@ -194,7 +198,7 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             rice_param,
-            |data, k, param| BEIntVec::<RiceCodec>::from_with_param(data, k, param),
+            |data, k, param| BEIntVec::<RiceCodec>::from_with_param(data, k, param).unwrap(),
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec RiceCodec",
         );
@@ -207,7 +211,9 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             16,
-            |data, k, param| BEIntVec::<MinimalBinaryCodec>::from_with_param(data, k, param),
+            |data, k, param| {
+                BEIntVec::<MinimalBinaryCodec>::from_with_param(data, k, param).unwrap()
+            },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec MinimalBinaryCodec",
         );
@@ -221,7 +227,7 @@ fn bench_all(c: &mut Criterion) {
             k,
             (), // ParamDeltaCodec has no extra runtime parameter
             |data, k, param| {
-                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param)
+                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param).unwrap()
             },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec ParamDeltaCodec",
@@ -235,7 +241,9 @@ fn bench_all(c: &mut Criterion) {
             &uniform,
             k,
             (), // ParamGammaCodec has no extra runtime parameter
-            |data, k, param| BEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param),
+            |data, k, param| {
+                BEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param).unwrap()
+            },
             |intvec| intvec.mem_size(SizeFlags::default()),
             "BEIntVec ParamGammaCodec",
         );
