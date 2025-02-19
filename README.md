@@ -22,7 +22,7 @@ The sampling parameter determines how often full positions are stored to speed u
 Let's consider the _universal_ code **Gamma** introduced by Elias in the 1960s. This code represents an integer as a unary prefix followed by the binary representation of the integer (thus the name universal, as for every integer `x` the length of the code is always $O(\log x)$ long, so just a constant factor longer than its binary form). So for example `9` will be encoded as `0001001`.
 
 ```rust
-use compressed_intvec::BEIntVec;
+use compressed_intvec::intvec::BEIntVec;
 use compressed_intvec::codecs::GammaCodec;
 
 let vec = vec![1, 3, 6, 8, 13, 3];
@@ -42,13 +42,13 @@ for (i, val) in compressed_be.iter().enumerate() {
 Or alternatively, you can use the `LEIntVec` for little-endian representation:
 
 ```rust
-use compressed_intvec::LEIntVec;
+use compressed_intvec::intvec::LEIntVec;
 use compressed_intvec::codecs::GammaCodec;
 
 let vec = vec![1, 3, 6, 8, 13, 3];
 let compressed_le = LEIntVec::<GammaCodec>::from(&vec, 2).unwrap();
 
-for (i, val) in compressed.iter().enumerate() {
+for (i, val) in compressed_le.iter().enumerate() {
     assert_eq!(val, vec[i]);
 }
 ```
@@ -70,7 +70,7 @@ for (i, val) in compressed.iter().enumerate() {
 For codecs that require extra parameters, we can create a compressed int-vec with the method `from_with_param`:
 
 ```rust
-use compressed_intvec::BEIntVec;
+use compressed_intvec::intvec::BEIntVec;
 use compressed_intvec::codecs::RiceCodec;
 
 let vec = vec![1, 3, 6, 8, 13, 3];
@@ -100,19 +100,19 @@ Both the little-endian and big-endian version of the compressed int-vec include 
     0 B ╰╴endian
 ```
 
-Consider now a vector of `u64` values uniformly distributed in the range `[0, u64::MAX)`
+Consider now a vector of `u64` values uniformly distributed in the range `[0, u64::MAX)` and see it's memory usage
 
 ```rust
+use rand::distr::{Distribution, Uniform};
+use rand::SeedableRng;
+use mem_dbg::{MemDbg, DbgFlags};
+
 fn generate_uniform_vec(size: usize, max: u64) -> Vec<u64> {
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
     let uniform = Uniform::new(0, max).unwrap();
     (0..size).map(|_| uniform.sample(&mut rng)).collect()
 }
-```
 
-The size of the vector before compression is measured as follows:
-
-```rust
 let input_vec = generate_uniform_vec(1000, u64::MAX);
 
 println!("Size of the standard Vec<u64>");
@@ -129,6 +129,22 @@ Size of the standard Vec<u64>
 Next, we compress the vector using both `MinimalBinaryCodec` and `DeltaCodec` using for both a sampling parameter of `32`:
 
 ```rust
+use compressed_intvec::intvec::BEIntVec;
+use compressed_intvec::codecs::{MinimalBinaryCodec, DeltaCodec};
+use mem_dbg::{MemDbg, DbgFlags};
+use rand::distr::{Distribution, Uniform};
+use rand::SeedableRng;
+
+fn generate_uniform_vec(size: usize, max: u64) -> Vec<u64> {
+    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+    let uniform = Uniform::new(0, max).unwrap();
+    (0..size).map(|_| uniform.sample(&mut rng)).collect()
+}
+
+let input_vec = generate_uniform_vec(1000, u64::MAX);
+println!("Size of the standard Vec<u64>");
+input_vec.mem_dbg(DbgFlags::empty());
+
 let minimal_intvec = BEIntVec::<MinimalBinaryCodec>::from_with_param(&input_vec, 32, 10).unwrap();
 let delta_intvec = BEIntVec::<DeltaCodec>::from(&input_vec, 32).unwrap();
 
@@ -142,6 +158,9 @@ delta_intvec.mem_dbg(DbgFlags::empty());
 The compression results are:
 
 ```bash
+Size of the standard Vec<u64>
+8024 B ⏺
+
 Size of the compressed IntVec with MinimalBinaryCodec
 832 B ⏺
 528 B ├╴data
