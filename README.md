@@ -4,13 +4,20 @@
 [![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
 [![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec)
 
-A Rust library that provides a compressed representation for vectors of unsigned 64-bit integers by utilizing several variable-length coding methods provided by the [dsi-bitstream](https://docs.rs/dsi-bitstream/) library. It is engineered to offer both efficient compression and fast random access to individual elements. To support fast random access, the library uses a sampling technique to balance decoding speed and memory footprint.
+A Rust library for compressing vectors of `u64` integers using variable-length coding from [dsi-bitstream](https://docs.rs/dsi-bitstream). Offers fast random access via sampling to balance speed and memory. Choose between big-endian (`BEIntVec`) or little-endian (`LEIntVec`) encoding.
 
-The compressed-intvec behaves like a standard Rust vector, allowing for efficient storage and retrieval of integers while minimizing memory usage through compression techniques. The library supports both big-endian (`BEIntVec`) and little-endian (`LEIntVec`) representations and offers a variety of codecs to choose from.
+## Features
+
+- **Efficient Compression**: Leverage various codecs like Gamma, Delta, and Rice coding.
+- **Fast Random Access**: Achieve O(1) access with configurable sampling.
+- **Memory Analysis**: Integrate with [`mem-dbg`](https://crates.io/crates/mem-dbg) for memory profiling (optional feature).
+- **Flexible Codecs**: Select codecs based on data distribution for optimal compression.
+
+The sampling parameter determines how often full positions are stored to speed up access. Higher values reduce memory overhead but may increase access time. For example, `sampling_param = 32` is usually a good trade-off for large datasets.
 
 ### A Quick Example
 
-Let's consider the _universal_ code **Gamma** introduced by Elias in the 1960s. This code represents an integer as a unary prefix followed by the binary representation of the integer (thus the name universal, as for every integer `x` the length of the code is always $O(\log x)$, so just a constant factor longer than its binary form). So for example `9` will be encoded as `0001001`.
+Let's consider the _universal_ code **Gamma** introduced by Elias in the 1960s. This code represents an integer as a unary prefix followed by the binary representation of the integer (thus the name universal, as for every integer `x` the length of the code is always $O(\log x)$ long, so just a constant factor longer than its binary form). So for example `9` will be encoded as `0001001`.
 
 ```rust
 use compressed_intvec::BEIntVec;
@@ -24,7 +31,7 @@ let compressed_be = BEIntVec::<GammaCodec>::from(&vec, sampling_param);
 
 assert_eq!(compressed_be.get(3), Some(8));
 
-for (i, val) in compressed.iter().enumerate() {
+for (i, val) in compressed_be.iter().enumerate() {
 assert_eq!(val, vec[i]);
 }
 
@@ -45,8 +52,6 @@ for (i, val) in compressed.iter().enumerate() {
 ```
 
 ## Available Codecs
-
-All the codecs are provided by the [dsi-bitstream](https://docs.rs/dsi-bitstream/) library. The following are implemented in the `compressed-intvec` library:
 
 | Codec Name           | Description                                                                                                                                                                                                |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -74,9 +79,13 @@ let compressed = BEIntVec::<RiceCodec>::from_with_params(&vec, sampling_param, r
 
 Choosing the right codec is crucial for achieving optimal compression. The efficiency of a codec is highly dependent on the underlying data distribution. For example, Rice coding is usually effective for skewed distributions, while Minimal Binary coding is optimal for uniformly distributed data.
 
+## Endianness
+
+Choose `BEIntVec` or `LEIntVec` based on data interoperability needs. Performance is equivalent; endianness affects byte order in compressed storage.
+
 ## Memory Analysis (and why choosing the right codec is important)
 
-Both the little-endian and big-endian version of the compressed int-vec include support for the [MemDbg/MemSize][https://docs.rs/mem-dbg/] traits from the [mem_dbg](https://crates.io/crates/mem-dbg) crate. For example, this is the output of `mem_dbg(DbgFlags::empty()` for a very large BeIntVec instance:
+Both the little-endian and big-endian version of the compressed int-vec include support for the [MemDbg/MemSize](https://docs.rs/mem-dbg/) traits from the [mem_dbg](https://crates.io/crates/mem-dbg) crate. For example, this is the output of `mem_dbg(DbgFlags::empty()` for a very large `BEIntVec` instance:
 
 ```bash
 11536 B ⏺
@@ -89,7 +98,7 @@ Both the little-endian and big-endian version of the compressed int-vec include 
     0 B ╰╴endian
 ```
 
-Consider a vector of `u64` values uniformly distributed in the range \([0, u64::MAX)\). The following function generates this vector:
+Consider now a vector of `u64` values uniformly distributed in the range `[0, u64::MAX)`
 
 ```rust
 fn generate_uniform_vec(size: usize, max: u64) -> Vec<u64> {
@@ -105,7 +114,7 @@ The size of the vector before compression is measured as follows:
 let input_vec = generate_uniform_vec(1000, u64::MAX);
 
 println!("Size of the standard Vec<u64>");
-let _ = input_vec.mem_dbg(DbgFlags::empty());
+input_vec.mem_dbg(DbgFlags::empty());
 ```
 
 This outputs:
@@ -115,7 +124,7 @@ Size of the standard Vec<u64>
 8024 B ⏺
 ```
 
-Next, we compress the vector using both `MinimalBinaryCodec` and `DeltaCodec`:
+Next, we compress the vector using both `MinimalBinaryCodec` and `DeltaCodec` using for both a sampling parameter of `32`:
 
 ```rust
 let minimal_intvec = BEIntVec::<MinimalBinaryCodec>::from_with_param(&input_vec, 32, 10);
@@ -152,7 +161,7 @@ Size of the compressed IntVec with DeltaCodec
    0 B ╰╴endian
 ```
 
-As shown, `MinimalBinaryCodec` is the most efficient for uniformly distributed data, reducing the size to 832 bytes—an order of magnitude smaller than the original vector. In contrast, `DeltaCodec` actually increases the size to 9584 bytes, as it is poorly suited for uniform distributions.
+As shown, `MinimalBinaryCodec` is the most efficient for uniformly distributed data, reducing the size to 832 bytes, an order of magnitude smaller than the original vector. In contrast, `DeltaCodec` actually increases the size to 9584 bytes, as it is poorly suited for uniform distributions.
 
 ## Benchmarks
 
@@ -173,13 +182,13 @@ The results are output to the terminal and also written to CSV files (e.g. `benc
 
 ![Space Occupancy](python/images/space/space_total_10k.svg)
 
-In the first graph, the input is a vector of 10k random elements uniformly distributed in the range `[0, 10k)`. Here, all codecs outperform the standard vector in terms of space occupancy, but the MinimalBinaryCodec clearly wins as it is specifically designed for this type of distribution. However, the other codecs also perform well because the range is small.
+In the first graph, the input is a vector of `10k` random elements uniformly distributed in the range `[0, 10k)`. Here, all codecs outperform the standard vector in terms of space occupancy, but the `MinimalBinaryCodec` clearly wins as it is specifically designed for this type of distribution. However, the other codecs also perform well because the range is small.
 
 ![Space Occupancy](python/images/space/space_total_u32max.svg)
 
-In the second graph, the input is the same vector, but the range is `[0, u32::MAX)` (viewed as u64). Here, we see that all codecs start to perform poorly, except for MinimalBinaryCodec, which continues to be the best. In particular, codecs like Gamma perform worse than the standard vector.
+In the second graph, the input is the same vector, but the range is `[0, u32::MAX)` (viewed as `u64`). Here, we see that all codecs start to perform poorly, except for `MinimalBinaryCodec`, which continues to be the best. In particular, codecs like Gamma perform worse than the standard vector.
 
-If we were to increase the range even further, all codecs except MinimalBinaryCodec would perform worse than the standard vector.
+If we were to increase the range even further, all codecs except `MinimalBinaryCodec` would perform worse than the standard vector.
 
 ### Random Access
 
