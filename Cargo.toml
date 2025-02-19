@@ -1,6 +1,6 @@
 [package]
 name = "compressed-intvec"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 authors = ["Luca Lombardo"]
 description = "A compressed integer vector with fast random access that stores values with instantaneous codes in a bitstream"

@@ -1,5 +1,3 @@
-//! # Compressed IntVec Module
-//!
 //! This module implements a compressed vector for storing unsigned 64-bit integers
 //! in an efficient manner. It leverages a codec to encode the integers into a compact
 //! bitstream and uses a sampling strategy to achieve fast random access.
@@ -43,8 +41,6 @@
 //!
 //! - **BEIntVec:** A big-endian version of the compressed vector.
 //!
-//!   Example:
-//!
 //!   ```rust
 //!   use compressed_intvec::intvec::BEIntVec;
 //!   use compressed_intvec::codecs::GammaCodec;
@@ -54,8 +50,6 @@
 //!   ```
 //!
 //! - **LEIntVec:** A little-endian version of the compressed vector.
-//!
-//!   Example:
 //!
 //!   ```rust
 //!   use compressed_intvec::intvec::LEIntVec;
@@ -120,7 +114,7 @@ where
     for<'a> BufBitReader<E, MemWordReader<u64, &'a Vec<u64>>>:
         GammaRead<E> + DeltaRead<E> + ZetaRead<E> + ZetaReadParam<E> + DeltaReadParam<E>,
 {
-    /// Constructs an `IntVec` from a slice of `u64` values using the provided codec parameters.
+    /// Constructs an [`IntVec`] from a slice of `u64` values using the provided codec parameters.
     ///
     /// This method encodes the input values using the specified codec. It also builds sampling
     /// information for efficient random access. The parameter `k` determines the sampling rate,
@@ -179,7 +173,7 @@ where
         })
     }
 
-    /// Constructs an `IntVec` from a slice of `u64` values using the default codec parameters.
+    /// Constructs an [`IntVec`] from a slice of `u64` values using the default codec parameters.
     ///
     /// This is a convenience method that calls `from_with_param` with `C::Params::default()`.
     ///
@@ -262,7 +256,7 @@ where
         value
     }
 
-    /// Consumes the `IntVec` and returns a vector containing all decompressed `u64` values.
+    /// Consumes the [`IntVec`] and returns a vector containing all decompressed `u64` values.
     ///
     /// This method sequentially decodes all the values from the compressed representation
     /// into a standard `Vec<u64>`.
@@ -323,7 +317,7 @@ where
         self.data.clone()
     }
 
-    /// Returns the number of elements encoded in the `IntVec`.
+    /// Returns the number of elements encoded in the [`IntVec`].
     ///
     /// # Returns
     ///
@@ -394,7 +388,7 @@ where
         self.samples.clone()
     }
 
-    /// Checks if the `IntVec` contains no encoded elements.
+    /// Checks if the [`IntVec`] contains no encoded elements.
     ///
     /// # Returns
     ///
@@ -414,7 +408,7 @@ where
         self.len == 0
     }
 
-    /// Returns an iterator over the decompressed values contained in the `IntVec`.
+    /// Returns an iterator over the decompressed values contained in the [`IntVec`].
     ///
     /// The iterator decodes each value in sequence and yields it.
     ///
@@ -451,9 +445,9 @@ where
     }
 }
 
-/// An iterator over the values of an `IntVec`.
+/// An iterator over the values of an [`IntVec`].
 ///
-/// The iterator holds a reference to the `IntVec` and uses a bit reader to decode each value on the fly.
+/// The iterator holds a reference to the [`IntVec`] and uses a bit reader to decode each value on the fly.
 ///
 /// # Examples
 ///
@@ -471,14 +465,28 @@ where
 /// assert_eq!(iter.next(), Some(6));
 /// assert_eq!(iter.next(), None);
 /// ```
+type IntVecWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
+
+/// An iterator for the [`IntVec`] structure.
+///
+/// This structure holds a reference to the compressed integer vector alongside a
+/// bit-buffered reader and the current index. It encapsulates the necessary
+/// components to manage and traverse the vector efficiently.
+///
+/// Fields:
+/// - `intvec`: A reference to an [`IntVec`] instance, parameterized over its element type,
+///   the associated writer type (`IntVecWriter<E>`), and compression format (`C`).
+/// - `reader`: An instance of `BufBitReader` configured with a memory word reader
+///   (`MemWordReader<u64, &'a Vec<u64>>`) and default read parameters (`DefaultReadParams`),
+///   used for extracting bit-level information from the underlying data.
+/// - `current_index`: A usize value tracking the current position within the integer vector.
 pub struct IntVecIter<'a, E, C>
 where
     E: Endianness,
-    C: Codec<E, BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>>,
-    dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<u64, Vec<u64>>>:
-        dsi_bitstream::traits::BitWrite<E>,
+    C: Codec<E, IntVecWriter<E>>,
+    IntVecWriter<E>: dsi_bitstream::traits::BitWrite<E>,
 {
-    intvec: &'a IntVec<E, BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>, C>,
+    intvec: &'a IntVec<E, IntVecWriter<E>, C>,
     reader: BufBitReader<E, MemWordReader<u64, &'a Vec<u64>>, DefaultReadParams>,
     current_index: usize,
 }
@@ -528,5 +536,8 @@ where
     }
 }
 
+/// Type alias for an [`IntVec`] with big-endian encoding and a default codec.
 pub type BEIntVec<C> = IntVec<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>, C>;
+
+/// Type alias for an [`IntVec`] with little-endian encoding and a default codec.
 pub type LEIntVec<C> = IntVec<LE, BufBitWriter<LE, MemWordWriterVec<u64, Vec<u64>>>, C>;
