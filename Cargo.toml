@@ -19,13 +19,14 @@ exclude = [".github/*"]
 
 [dependencies]
 dsi-bitstream = "0.4.2"
-mem_dbg = "0.1.8"
+mem_dbg = "0.1.8" 
 serde = { version = "1.0.217", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
 rand = "0.9.0"
 rand_distr = "0.5.0"
+qwt = "0.3.1"
 
 [[bench]]
 name = "bench_random_access"
@@ -33,6 +34,10 @@ harness = false
 
 [[bench]]
 name = "bench_size"
+harness = false
+
+[[bench]]
+name = "bench_bigeng"
 harness = false
 
 [profile.bench]
