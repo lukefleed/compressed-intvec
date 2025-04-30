@@ -42,6 +42,8 @@ pub trait Codec<E: Endianness, W: BitWrite<E>> {
             + DeltaReadParam<E>
             + GammaReadParam<E>
             + MinimalBinaryRead<E>;
+
+    fn len(value: u64, params: Self::Params) -> usize;
 }
 
 /// MinimalBinaryCodec: uses an upper bound as a runtime parameter.
@@ -64,6 +66,11 @@ impl<E: Endianness, W: MinimalBinaryWrite<E>> Codec<E, W> for MinimalBinaryCodec
     ) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_minimal_binary(upper_bound)?)
     }
+
+    #[inline(always)]
+    fn len(value: u64, upper_bound: u64) -> usize {
+        len_minimal_binary(value, upper_bound)
+    }
 }
 
 impl MinimalBinaryCodec {
@@ -85,6 +92,12 @@ impl MinimalBinaryCodec {
     {
         Ok(reader.read_minimal_binary(upper_bound)?)
     }
+
+    /// Returns the number of bits required to encode the value with the specified upper bound.
+    #[inline(always)]
+    pub fn len(value: u64, upper_bound: u64) -> usize {
+        len_minimal_binary(value, upper_bound)
+    }
 }
 
 /// GammaCodec: no extra runtime parameter.
@@ -103,6 +116,11 @@ impl<E: Endianness, W: GammaWrite<E>> Codec<E, W> for GammaCodec {
     #[inline(always)]
     fn decode<R: GammaRead<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_gamma()?)
+    }
+
+    #[inline(always)]
+    fn len(value: u64, _params: ()) -> usize {
+        len_gamma(value)
     }
 }
 
@@ -123,6 +141,12 @@ impl GammaCodec {
     {
         Ok(reader.read_gamma()?)
     }
+
+    /// Returns the number of bits required to encode the value using gamma coding.
+    #[inline(always)]
+    pub fn len(value: u64) -> usize {
+        len_gamma(value)
+    }
 }
 
 /// DeltaCodec: no extra runtime parameter.
@@ -142,6 +166,11 @@ impl<E: Endianness, W: DeltaWrite<E>> Codec<E, W> for DeltaCodec {
     fn decode<R: DeltaRead<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_delta()?)
     }
+
+    #[inline(always)]
+    fn len(value: u64, _params: ()) -> usize {
+        len_delta(value)
+    }
 }
 
 impl DeltaCodec {
@@ -160,6 +189,12 @@ impl DeltaCodec {
         R: DeltaRead<E>,
     {
         Ok(reader.read_delta()?)
+    }
+
+    /// Returns the number of bits required to encode the value using delta coding.
+    #[inline(always)]
+    pub fn len(value: u64) -> usize {
+        len_delta(value)
     }
 }
 
@@ -182,6 +217,11 @@ impl<E: Endianness, W: ExpGolombWrite<E>> Codec<E, W> for ExpGolombCodec {
     fn decode<R: ExpGolombRead<E>>(reader: &mut R, k: usize) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_exp_golomb(k)?)
     }
+
+    #[inline(always)]
+    fn len(value: u64, k: usize) -> usize {
+        len_exp_golomb(value, k)
+    }
 }
 
 impl ExpGolombCodec {
@@ -203,6 +243,12 @@ impl ExpGolombCodec {
     {
         Ok(reader.read_exp_golomb(k)?)
     }
+
+    /// Returns the number of bits required to encode the value using Exp‑Golomb coding with the specified parameter `k`.
+    #[inline(always)]
+    pub fn len(value: u64, k: usize) -> usize {
+        len_exp_golomb(value, k)
+    }
 }
 
 /// ZetaCodec: uses runtime parameter (k) with non‑parametric ζ functions.
@@ -221,6 +267,11 @@ impl<E: Endianness, W: ZetaWrite<E>> Codec<E, W> for ZetaCodec {
     #[inline(always)]
     fn decode<R: ZetaRead<E>>(reader: &mut R, k: u64) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_zeta(k)?)
+    }
+
+    #[inline(always)]
+    fn len(value: u64, k: u64) -> usize {
+        len_zeta(value, k)
     }
 }
 
@@ -243,6 +294,12 @@ impl ZetaCodec {
     {
         Ok(reader.read_zeta(k)?)
     }
+
+    /// Returns the number of bits required to encode the value using Zeta coding with parameter `k`.
+    #[inline(always)]
+    pub fn len(value: u64, k: u64) -> usize {
+        len_zeta(value, k)
+    }
 }
 
 /// RiceCodec: uses the Rice functions with a runtime parameter (log2_b).
@@ -261,6 +318,11 @@ impl<E: Endianness, W: RiceWrite<E>> Codec<E, W> for RiceCodec {
     #[inline(always)]
     fn decode<R: RiceRead<E>>(reader: &mut R, log2_b: usize) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_rice(log2_b)?)
+    }
+
+    #[inline(always)]
+    fn len(value: u64, log2_b: usize) -> usize {
+        len_rice(value, log2_b)
     }
 }
 
@@ -283,6 +345,12 @@ impl RiceCodec {
     {
         Ok(reader.read_rice(log2_b)?)
     }
+
+    /// Returns the number of bits required to encode the value using Rice coding with the specified `log2_b` parameter.
+    #[inline(always)]
+    pub fn len(value: u64, log2_b: usize) -> usize {
+        len_rice(value, log2_b)
+    }
 }
 
 /// ParamZetaCodec: uses a compile‑time flag for ζ functions.
@@ -293,16 +361,21 @@ pub struct ParamZetaCodec<const USE_TABLE: bool>;
 impl<E: Endianness, W: ZetaWriteParam<E>, const USE_TABLE: bool> Codec<E, W>
     for ParamZetaCodec<USE_TABLE>
 {
-    type Params = ();
+    type Params = u64;
 
     #[inline(always)]
-    fn encode(writer: &mut W, value: u64, _params: ()) -> Result<usize, Box<dyn Error>> {
-        Ok(writer.write_zeta3_param::<USE_TABLE>(value)?)
+    fn encode(writer: &mut W, value: u64, k: u64) -> Result<usize, Box<dyn Error>> {
+        Ok(writer.write_zeta_param::<USE_TABLE>(value, k)?)
     }
 
     #[inline(always)]
-    fn decode<R: ZetaReadParam<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
-        Ok(reader.read_zeta3_param::<USE_TABLE>()?)
+    fn decode<R: ZetaReadParam<E>>(reader: &mut R, k: u64) -> Result<u64, Box<dyn Error>> {
+        Ok(reader.read_zeta_param(k)?)
+    }
+
+    #[inline(always)]
+    fn len(value: u64, k: u64) -> usize {
+        len_zeta_param::<USE_TABLE>(value, k)
     }
 }
 
@@ -312,16 +385,23 @@ impl<const USE_TABLE: bool> ParamZetaCodec<USE_TABLE> {
     pub fn encode<E: Endianness, W: ZetaWriteParam<E>>(
         writer: &mut W,
         value: u64,
+        k: u64,
     ) -> Result<usize, Box<dyn Error>> {
-        Ok(writer.write_zeta3_param::<USE_TABLE>(value)?)
+        Ok(writer.write_zeta_param::<USE_TABLE>(value, k)?)
     }
     /// Decodes a value using the parameterized Zeta codec.
     #[inline(always)]
-    pub fn decode<E: Endianness, R>(reader: &mut R) -> Result<u64, Box<dyn Error>>
+    pub fn decode<E: Endianness, R>(reader: &mut R, k: u64) -> Result<u64, Box<dyn Error>>
     where
         R: ZetaReadParam<E>,
     {
-        Ok(reader.read_zeta3_param::<USE_TABLE>()?)
+        Ok(reader.read_zeta_param(k)?)
+    }
+
+    // Returns the number of bits required to encode the value using the parameterized Zeta codec.
+    #[inline(always)]
+    pub fn len(value: u64, k: u64) -> usize {
+        len_zeta_param::<USE_TABLE>(value, k)
     }
 }
 
@@ -348,6 +428,11 @@ impl<
     fn decode<R: DeltaReadParam<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_delta_param::<USE_DELTA_TABLE, USE_GAMMA_TABLE>()?)
     }
+
+    #[inline(always)]
+    fn len(value: u64, _params: ()) -> usize {
+        len_delta_param::<USE_DELTA_TABLE, USE_GAMMA_TABLE>(value)
+    }
 }
 
 impl<const USE_DELTA_TABLE: bool, const USE_GAMMA_TABLE: bool>
@@ -369,6 +454,12 @@ impl<const USE_DELTA_TABLE: bool, const USE_GAMMA_TABLE: bool>
     {
         Ok(reader.read_delta_param::<USE_DELTA_TABLE, USE_GAMMA_TABLE>()?)
     }
+
+    /// Returns the number of bits required to encode the value using the parameterized Delta codec.
+    #[inline(always)]
+    pub fn len(value: u64) -> usize {
+        len_delta_param::<USE_DELTA_TABLE, USE_GAMMA_TABLE>(value)
+    }
 }
 
 /// ParamGammaCodec: uses a compile‑time flag for table usage in gamma coding. For more information refer to the [`Gamma`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/gamma/index.html) module.
@@ -388,6 +479,11 @@ impl<E: Endianness, W: GammaWriteParam<E>, const USE_TABLE: bool> Codec<E, W>
     fn decode<R: GammaReadParam<E>>(reader: &mut R, _params: ()) -> Result<u64, Box<dyn Error>> {
         Ok(reader.read_gamma_param::<USE_TABLE>()?)
     }
+
+    #[inline(always)]
+    fn len(value: u64, _params: ()) -> usize {
+        len_gamma_param::<USE_TABLE>(value)
+    }
 }
 
 impl<const USE_TABLE: bool> ParamGammaCodec<USE_TABLE> {
@@ -406,5 +502,11 @@ impl<const USE_TABLE: bool> ParamGammaCodec<USE_TABLE> {
         R: GammaReadParam<E>,
     {
         Ok(reader.read_gamma_param::<USE_TABLE>()?)
+    }
+
+    /// Returns the number of bits required to encode the value using the parameterized Gamma codec.
+    #[inline(always)]
+    pub fn len(value: u64) -> usize {
+        len_gamma_param::<USE_TABLE>(value)
     }
 }

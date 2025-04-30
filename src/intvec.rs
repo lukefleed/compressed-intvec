@@ -240,7 +240,7 @@ where
         if index >= self.len {
             panic!("Index {} is out of bounds", index);
         }
-
+    
         let sample_index = index / self.k;
         let start_bit = self.samples[sample_index];
         let mut reader =
@@ -248,13 +248,18 @@ where
                 MemWordReader::new(&self.data),
             );
         reader.skip_bits(start_bit).unwrap();
-
-        let mut value = 0;
+    
         let start_index = sample_index * self.k;
-        for _ in start_index..=index {
-            value = C::decode(&mut reader, self.codec_param).unwrap();
+    
+        if start_index == index {
+            return C::decode(&mut reader, self.codec_param).unwrap();
         }
-        value
+    
+        for _ in start_index..index {
+            C::decode(&mut reader, self.codec_param).unwrap();
+        }
+        
+        C::decode(&mut reader, self.codec_param).unwrap()
     }
 
     /// Consumes the [`IntVec`] and returns a vector containing all decompressed `u64` values.
