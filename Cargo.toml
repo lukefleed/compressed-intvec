@@ -18,37 +18,33 @@ categories = ["data-structures", "compression", "algorithms"]
 exclude = [".github/*"]
 
 [dependencies]
-dsi-bitstream = "0.4.2"
-mem_dbg = "0.1.8" 
-serde = { version = "1.0.217", optional = true }
+dsi-bitstream = "0.5.0"
+mem_dbg = "0.3.0"
+rayon = { version = "1.10.0", optional = true }
+
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["html_reports"] }
-rand = "0.9.0"
 rand_distr = "0.5.0"
-qwt = "0.3.1"
-serde_json = "1.0.140"
-plotters = "0.3.7"
+csv = "1.3.1"
+rand = "0.9.0"
 
 [[bench]]
 name = "bench_random_access"
 harness = false
 
 [[bench]]
+name = "bench_parallel"
+harness = false
+required-features = ["parallel"]
+
+[[bench]]
 name = "bench_size"
-harness = false
-
-[[bench]]
-name = "bench_bigeng"
-harness = false
-
-[[bench]]
-name = "bench_against_qwt"
 harness = false
 
 [profile.bench]
 lto = true
 
 [features]
-default = []
-serde = ["dep:serde"]
+default = ["parallel"]
+parallel = ["rayon"]

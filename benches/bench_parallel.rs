@@ -53,10 +53,10 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 }
 
 /// The main benchmark function that orchestrates all tests.
-fn benchmark_random_access(c: &mut Criterion) {
+fn benchmark_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
     const NUM_ACCESSES: usize = 10_000;
-    const K_VALUES: [usize; 4] = [16, 32, 64, 128];
+    const K_VALUE: usize = 64; // Fixed k for this benchmark suite
 
     let distributions = [
         (Distribution::UniformLow, "UniformLow"),
@@ -65,13 +65,13 @@ fn benchmark_random_access(c: &mut Criterion) {
         (Distribution::PowerLaw, "PowerLaw"),
     ];
 
-    // Codecs that are dependent on the `k` parameter of the integer vector.
-    let k_dependent_codecs = [
+    let codecs_to_test = [
         ("Gamma", CodecSpec::Gamma),
         ("Delta", CodecSpec::Delta),
         ("Unary", CodecSpec::Unary),
         ("Rice", CodecSpec::Rice { log2_b: None }),
         ("Zeta", CodecSpec::Zeta { k: None }),
+        ("FixedLength", CodecSpec::FixedLength { num_bits: None }),
         ("Explicit_Omega", CodecSpec::Explicit(Codes::Omega)),
         ("Explicit_VByteLe", CodecSpec::Explicit(Codes::VByteLe)),
         ("Explicit_VByteBe", CodecSpec::Explicit(Codes::VByteBe)),
@@ -86,9 +86,6 @@ fn benchmark_random_access(c: &mut Criterion) {
         ),
     ];
 
-    // Codecs that are not dependent on `k`.
-    let k_independent_codecs = [("FixedLength", CodecSpec::FixedLength { num_bits: None })];
-
     // Prepare a vector of random indices for access tests.
     let mut rng = SmallRng::seed_from_u64(1337);
     let access_indices: Vec<usize> = (0..NUM_ACCESSES)
@@ -96,7 +93,7 @@ fn benchmark_random_access(c: &mut Criterion) {
         .collect();
 
     for (distribution, dist_name) in distributions {
-        let mut group = c.benchmark_group(format!("RandomAccess/{}", dist_name));
+        let mut group = c.benchmark_group(dist_name);
 
         // Configure the benchmark group settings.
         group
@@ -106,18 +103,8 @@ fn benchmark_random_access(c: &mut Criterion) {
 
         let data = distribution.generate(VECTOR_SIZE);
 
-        // --- Baseline benchmark on the original Vec<u64> ---
-        group.bench_function("Baseline/get", |b| {
-            b.iter(|| {
-                for &index in black_box(&access_indices) {
-                    // Accessing the original, uncompressed vector.
-                    black_box(data[index]);
-                }
-            })
-        });
-
-        // Benchmark k-dependent codecs
-        for (spec_name, codec_spec) in k_dependent_codecs {
+        for (spec_name, codec_spec) in codecs_to_test {
+            // Skip combinations known to cause issues.
             if matches!(
                 distribution,
                 Distribution::UniformHigh | Distribution::PowerLaw
@@ -136,41 +123,35 @@ fn benchmark_random_access(c: &mut Criterion) {
                 }
             }
 
-            for &k_value in &K_VALUES {
-                let intvec = LEIntVec::builder(&data)
-                    .k(k_value)
-                    .codec(codec_spec)
-                    .build()
-                    .expect("Failed to build IntVec");
-
-                group.bench_function(format!("{}/k={}/get", spec_name, k_value), |b| {
-                    b.iter(|| {
-                        for &index in black_box(&access_indices) {
-                            black_box(intvec.get(index));
-                        }
-                    })
-                });
-            }
-        }
-
-        // Benchmark k-independent codecs
-        for (spec_name, codec_spec) in k_independent_codecs {
-            // This codec is not dependent on k, so we build it once.
             let intvec = LEIntVec::builder(&data)
-                .k(K_VALUES[0]) // This k value is ignored by the builder.
+                .k(K_VALUE)
                 .codec(codec_spec)
                 .build()
                 .expect("Failed to build IntVec");
 
-            group.bench_function(format!("{}/get", spec_name), |b| {
+            // 1. Benchmark 'get' in a loop.
+            group.bench_function(format!("{}/get_loop", spec_name), |b| {
                 b.iter(|| {
                     for &index in black_box(&access_indices) {
                         black_box(intvec.get(index));
                     }
                 })
             });
-        }
 
+            // 2. Benchmark 'get_many' (sequential batch).
+            group.bench_function(format!("{}/get_many", spec_name), |b| {
+                b.iter(|| {
+                    let _ = black_box(intvec.get_many(black_box(&access_indices)));
+                })
+            });
+
+            // 3. Benchmark 'par_get_many' (parallel batch).
+            group.bench_function(format!("{}/par_get_many", spec_name), |b| {
+                b.iter(|| {
+                    let _ = black_box(intvec.par_get_many(black_box(&access_indices)));
+                })
+            });
+        }
         group.finish();
     }
 }
@@ -181,7 +162,7 @@ criterion_group!(
         .sample_size(10)
         .warm_up_time(Duration::from_millis(1))
         .measurement_time(Duration::from_secs(10));
-    targets = benchmark_random_access
+    targets = benchmark_access
 );
 
 criterion_main!(benches);

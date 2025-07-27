@@ -1,281 +1,241 @@
-use mem_dbg::{MemSize, SizeFlags};
-use rand::{
-    distr::{Distribution, Uniform},
-    SeedableRng,
-};
-use std::{fs::File, time::Duration};
-use std::{io::Write, u64};
+#![allow(clippy::all)]
+//! # Benchmark for Measuring Memory Space of `IntVec`.
+//!
+//! This utility generates `IntVec` instances with various configurations to measure
+//! their memory footprint. The configurations are aligned with `bench_random_access`.
+//! It is intended to be run as a benchmark: `cargo bench --bench bench_size`.
+//!
+//! ## Output
+//!
+//! A `size_results.csv` file is generated in the `bench_results/` directory.
 
 use compressed_intvec::{
-    codecs::{
-        DeltaCodec, ExpGolombCodec, GammaCodec, MinimalBinaryCodec, ParamDeltaCodec,
-        ParamGammaCodec, RiceCodec,
-    },
-    intvec::{BEIntVec, LEIntVec},
+    codec_spec::{resolve_codec, CodecSpec},
+    intvec::LEIntVec,
 };
 use criterion::{criterion_group, criterion_main, Criterion};
-use std::fs;
+use dsi_bitstream::{
+    codes::{len_rice, len_zeta_param},
+    prelude::*,
+    utils::sample_implied_distribution,
+};
+use mem_dbg::{MemSize, SizeFlags};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
+use std::{
+    collections::HashSet,
+    fmt::{Display, Formatter},
+    fs::{self, File},
+    io::Write,
+    sync::Once,
+};
 
-fn generate_uniform_vec(size: usize, max: u64) -> Vec<u64> {
-    let mut rng = rand::rngs::StdRng::seed_from_u64(42);
-    let uniform = Uniform::new(0, max).unwrap();
-    (0..size).map(|_| uniform.sample(&mut rng)).collect()
+// --- Data Generation Utilities ---
+
+/// Generates a vector with uniformly random values.
+fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
+    if max_val_exclusive == 0 {
+        return vec![0; size];
+    }
+    let mut rng = SmallRng::seed_from_u64(42);
+    (0..size)
+        .map(|_| rng.random_range(0..max_val_exclusive))
+        .collect()
 }
 
-fn benchmark_space<T, C: Copy>(
-    results: &mut Vec<(String, usize, usize)>,
-    input: &[u64],
+/// Generates a vector with a specific distribution based on a code's length function.
+fn generate_with_distribution(size: usize, len_fn: impl Fn(u64) -> usize) -> Vec<u64> {
+    let mut rng = SmallRng::seed_from_u64(42);
+    sample_implied_distribution(len_fn, &mut rng)
+        .take(size)
+        .collect()
+}
+
+/// Enum to define the data distributions for testing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Distribution {
+    UniformLow,
+    UniformHigh,
+    Geometric,
+    PowerLaw,
+}
+
+impl Distribution {
+    /// Generates a vector of data according to the distribution.
+    fn generate(&self, size: usize) -> Vec<u64> {
+        match self {
+            Distribution::UniformLow => generate_random_vec(size, 1_000),
+            Distribution::UniformHigh => generate_random_vec(size, 1 << 32),
+            Distribution::Geometric => generate_with_distribution(size, |v| len_rice(v, 4)),
+            Distribution::PowerLaw => {
+                generate_with_distribution(size, |v| len_zeta_param::<false>(v, 3))
+            }
+        }
+    }
+}
+
+/// Holds the results for a single space benchmark configuration.
+#[derive(Debug)]
+struct BenchResult {
+    name: String,
     k: usize,
-    codec_param: C,
-    build_vec: impl Fn(&[u64], usize, C) -> T,
-    size: impl Fn(&T) -> usize,
-    benchmark_name: &str,
-) {
-    let bench_label = format!("{}", benchmark_name);
-    let intvec = build_vec(input, k, codec_param);
-    let space = size(&intvec);
-    results.push((bench_label, k, space));
+    space_bytes: usize,
+    original_data_bytes: usize,
+    data_distribution: String,
 }
 
-fn bench_all(c: &mut Criterion) {
-    let input_size = 10_000;
-    let max_value = 10_000;
-    let uniform = generate_uniform_vec(input_size, max_value);
-    let ks = vec![4, 8, 16, 32, 64, 128];
-    let mut results = Vec::new();
-
-    // Benchmark LEIntVec codecs
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (),
-            |data, k, param| LEIntVec::<GammaCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "LEIntVec GammaCodec",
-        );
+impl Display for BenchResult {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "\"{}\",{},{},{},\"{}\"",
+            self.name, self.k, self.space_bytes, self.original_data_bytes, self.data_distribution
+        )
     }
+}
 
-    // Benchmark LEIntVec with DeltaCodec (no extra codec parameter).
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (),
-            |data, k, param| LEIntVec::<DeltaCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "LEIntVec DeltaCodec",
-        );
-    }
+// A static Once to ensure the measurement logic runs only one time.
+static BENCH_ONCE: Once = Once::new();
 
-    // Benchmark LEIntVec with ExpGolombCodec (using a runtime parameter calculated from the input).
-    for &k in &ks {
-        let exp_param = (uniform.iter().sum::<u64>() as f64 / uniform.len() as f64)
-            .log2()
-            .floor() as usize;
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            exp_param, // Use the calculated exp_param for ExpGolombCodec
-            |data, k, param| LEIntVec::<ExpGolombCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "LEIntVec ExpGolombCodec",
-        );
-    }
+/// Runs the complete space measurement suite.
+fn run_space_measurements() {
+    BENCH_ONCE.call_once(|| {
+        const VECTOR_SIZE: usize = 1_000_000;
+        let k_values = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024];
+        let distributions = [
+            Distribution::UniformLow,
+            Distribution::UniformHigh,
+            Distribution::Geometric,
+            Distribution::PowerLaw,
+        ];
+        let dsi_codecs_to_test = [
+            ("Gamma", CodecSpec::Gamma),
+            ("Delta", CodecSpec::Delta),
+            ("Unary", CodecSpec::Unary),
+            ("Rice_auto", CodecSpec::Rice { log2_b: None }),
+            ("Zeta_auto", CodecSpec::Zeta { k: None }),
+            ("Omega", CodecSpec::Explicit(Codes::Omega)),
+            ("VByteLe", CodecSpec::Explicit(Codes::VByteLe)),
+            ("VByteBe", CodecSpec::Explicit(Codes::VByteBe)),
+            ("Pi", CodecSpec::Explicit(Codes::Pi { k: 3 })),
+            ("Golomb", CodecSpec::Explicit(Codes::Golomb { b: 8 })),
+            ("ExpGolomb", CodecSpec::Explicit(Codes::ExpGolomb { k: 2 })),
+        ];
 
-    // Benchmark LEIntVec with RiceCodec (using a runtime parameter calculated from the input).
-    for &k in &ks {
-        let rice_param = (uniform.iter().sum::<u64>() as f64 / uniform.len() as f64)
-            .log2()
-            .floor() as usize;
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            rice_param,
-            |data, k, param| LEIntVec::<RiceCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "LEIntVec RiceCodec",
-        );
-    }
+        let mut all_results: Vec<BenchResult> = Vec::new();
 
-    // Benchmark LEIntVec with MinimalBinaryCodec.
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            16,
-            |data, k, param| {
-                LEIntVec::<MinimalBinaryCodec>::from_with_param(data, k, param).unwrap()
-            },
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "LEIntVec MinimalBinaryCodec",
-        );
-    }
+        for &distribution in &distributions {
+            let dist_name = format!("{:?}_{}", distribution, VECTOR_SIZE);
+            println!("\n--- Processing Distribution: {} ---", dist_name);
+            let data = distribution.generate(VECTOR_SIZE);
+            let original_size_bytes = data.mem_size(SizeFlags::default());
 
-    // Benchmark LEIntVec with ParamDeltaCodec.
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (), // ParamDeltaCodec has no extra runtime parameter
-            |data, k, param| {
-                LEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param).unwrap()
-            },
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "LEIntVec ParamDeltaCodec",
-        );
-    }
+            // Baseline: Vec<u64>
+            all_results.push(BenchResult {
+                name: "Vec<u64>".to_string(),
+                k: 0,
+                space_bytes: original_size_bytes,
+                original_data_bytes: original_size_bytes,
+                data_distribution: dist_name.clone(),
+            });
 
-    // Benchmark LEIntVec with ParamGammaCodec.
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (), // ParamGammaCodec has no extra runtime parameter
-            |data, k, param| {
-                LEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param).unwrap()
-            },
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "LEIntVec ParamGammaCodec",
-        );
-    }
+            // Baseline: FixedLength
+            let codec_spec = CodecSpec::FixedLength { num_bits: None };
+            let resolved_encoding = resolve_codec(&data, codec_spec.clone()).unwrap();
+            let name = format!("{:?}", resolved_encoding)
+                .replace([' ', '{', '}'], "")
+                .replace(':', "=");
+            let intvec = LEIntVec::builder(&data).codec(codec_spec).build().unwrap();
+            all_results.push(BenchResult {
+                name,
+                k: 1, // `k` is not used, but set to 1 for consistency.
+                space_bytes: intvec.mem_size(SizeFlags::default()),
+                original_data_bytes: original_size_bytes,
+                data_distribution: dist_name.clone(),
+            });
 
-    // Benchmark BEIntVec with GammaCodec (no extra codec parameter).
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (), // GammaCodec uses no extra runtime parameter
-            |data, k, param| BEIntVec::<GammaCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "BEIntVec GammaCodec",
-        );
-    }
+            // DSI Codecs
+            for &(spec_name, ref codec_spec) in &dsi_codecs_to_test {
+                if (matches!(
+                    distribution,
+                    Distribution::UniformHigh | Distribution::PowerLaw
+                ) && matches!(
+                    codec_spec,
+                    CodecSpec::Unary
+                        | CodecSpec::Rice { .. }
+                        | CodecSpec::Explicit(Codes::Golomb { .. })
+                )) || (matches!(distribution, Distribution::UniformLow)
+                    && matches!(codec_spec, CodecSpec::Unary))
+                {
+                    println!("- Skipping {} for distribution {}", spec_name, dist_name);
+                    continue;
+                }
 
-    // Benchmark BEIntVec with DeltaCodec (no extra codec parameter).
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (), // DeltaCodec uses no extra runtime parameter
-            |data, k, param| BEIntVec::<DeltaCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "BEIntVec DeltaCodec",
-        );
-    }
+                for &k in &k_values {
+                    // Resolve the codec to get its actual name and parameters.
+                    let resolved = resolve_codec(&data, codec_spec.clone()).unwrap();
+                    let name = format!("{:?}", resolved)
+                        .replace([' ', '{', '}'], "")
+                        .replace(':', "=");
 
-    // Benchmark BEIntVec with ExpGolombCodec (using a runtime parameter calculated from the input).
-    for &k in &ks {
-        let exp_param = (uniform.iter().sum::<u64>() as f64 / uniform.len() as f64)
-            .log2()
-            .floor() as usize;
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            exp_param, // Use the calculated exp_param for ExpGolombCodec
-            |data, k, param| BEIntVec::<ExpGolombCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "BEIntVec ExpGolombCodec",
-        );
-    }
+                    // Build the IntVec with the original spec.
+                    let intvec = LEIntVec::builder(&data)
+                        .k(k)
+                        .codec(codec_spec.clone())
+                        .build()
+                        .unwrap();
+                    println!("  - Measured {} (k={})", name, k);
 
-    // Benchmark BEIntVec with RiceCodec (using a runtime parameter calculated from the input).
-    for &k in &ks {
-        let rice_param = (uniform.iter().sum::<u64>() as f64 / uniform.len() as f64)
-            .log2()
-            .floor() as usize;
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            rice_param,
-            |data, k, param| BEIntVec::<RiceCodec>::from_with_param(data, k, param).unwrap(),
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "BEIntVec RiceCodec",
-        );
-    }
+                    // Store the result using the resolved name.
+                    all_results.push(BenchResult {
+                        name,
+                        k,
+                        space_bytes: intvec.mem_size(SizeFlags::default()),
+                        original_data_bytes: original_size_bytes,
+                        data_distribution: dist_name.clone(),
+                    });
+                }
+            }
+        }
 
-    // Benchmark BEIntVec with MinimalBinaryCodec.
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            16,
-            |data, k, param| {
-                BEIntVec::<MinimalBinaryCodec>::from_with_param(data, k, param).unwrap()
-            },
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "BEIntVec MinimalBinaryCodec",
-        );
-    }
+        // --- Write Results to CSV File ---
+        let output_dir = "bench_results";
+        fs::create_dir_all(output_dir).expect("Could not create benchmark results directory.");
+        let output_path = format!("{}/size_results.csv", output_dir);
+        let mut file = File::create(output_path).expect("Could not create results CSV file.");
+        writeln!(file, "name,k,space_bytes,original_bytes,distribution")
+            .expect("Could not write CSV header.");
 
-    // Benchmark BEIntVec with ParamDeltaCodec.
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (), // ParamDeltaCodec has no extra runtime parameter
-            |data, k, param| {
-                BEIntVec::<ParamDeltaCodec<true, true>>::from_with_param(data, k, param).unwrap()
-            },
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "BEIntVec ParamDeltaCodec",
-        );
-    }
+        // Use a HashSet to ensure that we only write unique rows to the CSV.
+        // This handles cases where different CodecSpecs resolve to the same underlying code.
+        let mut unique_keys = HashSet::new();
+        for result in all_results {
+            let key = (
+                result.name.clone(),
+                result.k,
+                result.data_distribution.clone(),
+            );
+            if unique_keys.insert(key) {
+                writeln!(file, "{}", result).expect("Could not write result row to CSV.");
+            }
+        }
+        println!("\nSpace measurement results written to bench_results/size_results.csv");
+    });
+}
 
-    // Benchmark BEIntVec with ParamGammaCodec.
-    for &k in &ks {
-        benchmark_space(
-            &mut results,
-            &uniform,
-            k,
-            (), // ParamGammaCodec has no extra runtime parameter
-            |data, k, param| {
-                BEIntVec::<ParamGammaCodec<true>>::from_with_param(data, k, param).unwrap()
-            },
-            |intvec| intvec.mem_size(SizeFlags::default()),
-            "BEIntVec ParamGammaCodec",
-        );
-    }
-
-    // Write the accumulated benchmark results to a CSV file.
-    let dir = "bench_results";
-    fs::create_dir_all(dir).expect("Cannot create benchmark results directory");
-    let file_path = format!("{}/bench_space.csv", dir);
-    let mut file = File::create(&file_path).expect("Cannot create CSV file");
-    writeln!(file, "name,k,space").expect("Error writing CSV header");
-    writeln!(
-        file,
-        "Standard Vec,0,{}",
-        uniform.mem_size(SizeFlags::default())
-    )
-    .expect("Error writing CSV line");
-    for (name, k, space) in results {
-        writeln!(file, "{},{},{}", name, k, space).expect("Error writing CSV line");
-    }
-
-    // Benchmark dummy per Criterion
-    c.bench_function("dummy", |b| b.iter(|| {}));
+// --- Criterion Runner Setup ---
+// This setup ensures that the space measurement logic is run as part of `cargo bench`,
+// making it consistent with the other benchmarks.
+fn criterion_benchmark_runner(c: &mut Criterion) {
+    let mut group = c.benchmark_group("SpaceMeasurementSuite");
+    // We only need one iteration to generate the file.
+    group.bench_function("GenerateSpaceCSV", |b| b.iter(run_space_measurements));
+    group.finish();
 }
 
 criterion_group! {
     name = benches;
-    config = Criterion::default()
-        .sample_size(10)  // Riduci ulteriormente il tempo
-        .warm_up_time(Duration::from_millis(1))
-        .measurement_time(Duration::from_secs(1));
-    targets = bench_all
+    // We only need a small sample size because the core logic is inside a `Once` block.
+    config = Criterion::default().sample_size(10);
+    targets = criterion_benchmark_runner
 }
 criterion_main!(benches);
