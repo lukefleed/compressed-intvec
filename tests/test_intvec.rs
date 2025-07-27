@@ -1,7 +1,7 @@
 //! Integration tests for `IntVec`.
 
 use compressed_intvec::prelude::*;
-use dsi_bitstream::prelude::{len_delta, len_gamma, Codes, BE, LE};
+use dsi_bitstream::prelude::{len_delta, len_gamma, BE, LE};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 // Import helper functions from the common module.
@@ -131,13 +131,7 @@ test_configuration!(
 
 // Zeros Vector
 test_configuration!(test_zeros_auto_le, LE, vec![0; 1000], 16, CodecSpec::Auto);
-test_configuration!(
-    test_zeros_unary_be,
-    BE,
-    vec![0; 1000],
-    16,
-    CodecSpec::Explicit(Codes::Unary)
-);
+test_configuration!(test_zeros_unary_be, BE, vec![0; 1000], 16, CodecSpec::Unary);
 test_configuration!(
     test_zeros_fixed_le,
     LE,
@@ -257,9 +251,19 @@ fn test_all_codecs_systematic() {
     let test_indices: Vec<usize> = (0..100).map(|_| rng.random_range(0..input.len())).collect();
     let expected_values: Vec<u64> = test_indices.iter().map(|&i| input[i]).collect();
 
+    // Expanded list to test all first-class codec variants.
     let codecs_to_test = vec![
         ("Gamma", CodecSpec::Gamma),
         ("Delta", CodecSpec::Delta),
+        ("Unary", CodecSpec::Unary),
+        ("Omega", CodecSpec::Omega),
+        ("VByteLe", CodecSpec::VByteLe),
+        ("VByteBe", CodecSpec::VByteBe),
+        ("Rice_fixed", CodecSpec::Rice { log2_b: Some(4) }),
+        ("Zeta_fixed", CodecSpec::Zeta { k: Some(3) }),
+        ("Golomb_fixed", CodecSpec::Golomb { b: Some(8) }),
+        ("Pi_fixed", CodecSpec::Pi { k: Some(3) }),
+        ("ExpGolomb_fixed", CodecSpec::ExpGolomb { k: Some(2) }),
         ("Auto", CodecSpec::Auto),
         (
             "FixedLength_auto",
@@ -311,17 +315,26 @@ fn test_from_iter_builder() {
     assert_eq!(intvec_fixed.clone().into_vec(), data);
 
     // --- Failure Cases: Automatic parameter selection ---
+    // The iterator-based builder cannot analyze the data, so codecs requiring
+    // auto-parameter selection must fail.
     let codecs_with_auto_params = vec![
         CodecSpec::Auto,
         CodecSpec::FixedLength { num_bits: None },
         CodecSpec::Rice { log2_b: None },
         CodecSpec::Zeta { k: None },
+        CodecSpec::Golomb { b: None },
+        CodecSpec::Pi { k: None },
+        CodecSpec::ExpGolomb { k: None },
     ];
     for codec in codecs_with_auto_params {
         let result = LEIntVec::from_iter_builder(data.clone().into_iter())
             .codec(codec)
             .build();
-        assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
+        assert!(
+            matches!(result, Err(IntVecError::InvalidParameters(_))),
+            "Expected failure for codec: {:?}",
+            codec
+        );
     }
 
     // --- Failure Case: Value too large for FixedLength ---

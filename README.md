@@ -14,7 +14,7 @@ A high-performance Rust library for compressed integer vectors with fast random 
 
 -   **Efficient Compression**: Utilizes a range of sophisticated bit-level codes, including Gamma (γ), Delta (δ), Rice, and Zeta (ζ), alongside optimal fixed-width encoding.
 -   **Fast Random Access**: Achieves O(1) access for fixed-width encoding and fast, tunable access for variable-length codes via a sampling mechanism.
--   **Smart Codec Selection**: Features an [`Auto`] mode that analyzes your data to pick the most space-efficient compression scheme automatically. No guesswork required.
+-   **Smart Codec Selection**: Features an [`Auto`] mode that analyzes your data to pick the most space-efficient compression scheme automatically. No guesswork required. Note that this introduces a small overhead during the initial build phase.
 -   **Signed Integer Support**: Provides [`SIntVec`], a specialized vector for `i64` data that uses ZigZag encoding to efficiently compress values centered around zero.
 -   **Parallel Processing**: Offers parallel iterators and random access methods ([`par_iter`], [`par_get_many`]) under the `parallel` feature flag to leverage multi-core systems.
 -   **Flexible Builders**: Construct vectors from slices with automatic parameter detection, or from iterators for streaming large datasets.
@@ -56,18 +56,23 @@ assert_eq!(sintvec.get(1), Some(-20));
 
 ## Available Codecs
 
-Choosing the right codec is key to maximizing compression. The [`CodecSpec`] enum allows you to either select one manually or let the library decide with [`CodecSpec::Auto`].
+Choosing the right codec is key to maximizing compression. The [`CodecSpec`] enum allows you to either select one manually or let the library decide with [`CodecSpec::Auto`]. Note that the `Auto` codec introduces a small overhead during the initial build phase, as it analyzes a sample (up to 10k elements) of the data to determine the best compression strategy. This is a one-time cost that pays off in reduced memory usage and improved access speed.
 
-| Codec Variant | Description & Encoding Strategy                                                                                                                                              | Optimal Data Distribution                                |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
-| **`Auto`**          | **Recommended default.** Analyzes the data to choose the best variable-length code, balancing build time and compression ratio.                                              | Agnostic; adapts to the input data.                      |
-| `FixedLength`       | Encodes each integer using a fixed number of bits. Provides O(1) random access with minimal overhead. The fastest but can be memory-inefficient for highly skewed data.         | **Uniformly distributed data** within a known range.     |
-| `Gamma` (γ)         | A universal, parameter-free code. Encodes `n` by representing its length in unary, followed by the value itself. Simple and effective for small numbers.                       | Data skewed towards small non-negative integers.         |
-| `Delta` (δ)         | A universal, parameter-free code. Encodes `n` by representing its length in γ-code, making it more efficient than γ for larger values.                                         | Data skewed towards small non-negative integers.         |
-| `Rice`              | A fast, tunable code. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored in binary).                                                        | Data with a geometric distribution (e.g., run-lengths).  |
-| `Zeta` (ζ)          | A tunable code for power-law data. Encodes `n` by breaking it into blocks of `k` bits and storing the number of blocks in unary.                                               | Word frequencies, node degrees in scale-free networks.   |
-| `Unary`             | The simplest possible code. Encodes `n` as `n` zero-bits followed by a one.                                                                                                  | Extremely skewed distributions (e.g., boolean flags).    |
-| `Explicit`          | An escape hatch to use any code from the [`dsi-bitstream::codes::Codes`][dsi-bitstream-codes] enum directly (e.g., `Omega` for recursive length encoding, `VByte` for byte-aligned values). | Advanced use cases requiring specific, unlisted codes.   |
+
+| Codec Variant | Description & Encoding Strategy | Optimal Data Distribution |
+| :--- | :--- | :--- |
+| **`Auto`** | **Recommended default.** Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
+| `FixedLength` | Encodes each integer using a fixed number of bits. Provides O(1) random access. The fastest but can be memory-inefficient for highly skewed data. | **Uniformly distributed data** within a known range. |
+| `Gamma` (γ) | A universal, parameter-free code. Encodes `n` by representing its length in unary, followed by the value itself. Simple and effective for small numbers. | Data skewed towards small non-negative integers. |
+| `Delta` (δ) | A universal, parameter-free code. Encodes `n` by representing its length in γ-code, making it more efficient than γ for larger values. | Data skewed towards small non-negative integers. |
+| `Rice` | A fast, tunable code. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored in binary). | Data with a geometric distribution (e.g., run-lengths). |
+| `Golomb` | A tunable code, more general than Rice, that splits `n` into a quotient and remainder. | Data with a geometric distribution. |
+| `Zeta` (ζ) | A tunable code for power-law data. Encodes `n` by breaking it into blocks of `k` bits and storing the number of blocks in unary. | Word frequencies, node degrees in scale-free networks. |
+| `VByteLe`/`Be`| A byte-aligned code that uses a continuation bit to store integers in a variable number of bytes. Very fast for values that fit in 1-4 bytes. | General-purpose integer data. |
+| `Omega` (ω) | A universal, recursive code that encodes the length of the number's binary representation. Extremely compact for very large numbers. | The implied distribution is essentially it is as close as possible to ≈ 1/x (as there is no code for that distribution). |
+| `Unary` | The simplest possible code. Encodes `n` as `n` zero-bits followed by a one. | Extremely skewed distributions (e.g., boolean flags). |
+| `Explicit` | An escape hatch to use any code from the [`dsi-bitstream::codes::Codes`][dsi-bitstream-codes] enum not directly listed here. | Advanced use cases requiring specific, unlisted codes. |
+
 
 
 ## Memory Analysis and Automated Codec Selection
@@ -82,7 +87,7 @@ use compressed_intvec::prelude::*;
 use mem_dbg::{DbgFlags, MemDbg};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
-/// Generates a vector with uniformly random values.
+// Generates a vector with uniformly random values.
 fn generate_random_vec(size: usize, max: u64) -> Vec<u64> {
     let mut rng = SmallRng::seed_from_u64(42);
     (0..size).map(|_| rng.random_range(0..max)).collect()
@@ -168,9 +173,7 @@ let intvec = LEIntVec::builder(&data).build().unwrap();
 // Create a single, reusable reader for all lookups.
 let mut reader = intvec.reader();
 
-// Perform multiple, non-sequential lookups efficiently.
-// This pattern is ideal for traversals where the next index depends on the
-// current value.
+// Perform multiple, non-sequential lookups efficiently. This is ideal when the indices depend on runtime conditions.
 assert_eq!(reader.get(500).unwrap(), Some(500));
 assert_eq!(reader.get(10).unwrap(), Some(10));
 assert_eq!(reader.get(9000).unwrap(), Some(9000));
@@ -242,10 +245,53 @@ The library offers two fundamental encoding families:
     -   **Performance**: This makes random access a true **O(1)** operation with minimal overhead.
     -   **When to Use It**: It is the optimal choice when your data is **uniformly distributed** within a known range. For example, random numbers between 0 and 1000 can all be stored in 10 bits each. This leads to efficient storage and the fastest possible access.
 
+    ```rust
+    use compressed_intvec::prelude::*;
+
+    let data: Vec<u64> = (0..1000).collect();
+    // Each number is < 1024, so fits in 10 bits
+    let intvec = LEIntVec::builder(&data)
+        .codec(CodecSpec::FixedLength {
+            num_bits: Some(10),
+        })
+        .build()
+        .unwrap();
+
+    assert_eq!(intvec.into_vec(), data);
+
+    // Otherwise, let the library choose the minimum number of bits required (with a small overhead at build time to find the maximum value in the data).
+    let intvec = LEIntVec::builder(&data)
+        .codec(CodecSpec::FixedLength { num_bits: None })
+        .build()
+        .unwrap();
+
+    assert_eq!(intvec.into_vec(), data);
+    ```
+
 2.  **Instantaneous Codes (Variable-Length):**
-    Codes like `Gamma`, `Delta`, and `Zeta` are *variable-length*. They achieve high compression by using fewer bits for smaller or more frequent integers and more bits for larger, rarer ones.
-    -   **The Challenge**: This efficiency comes at a cost. Because each element has a different bit-length, it is impossible to mathematically calculate the starting position of an arbitrary element.
+    Codes like `Gamma`, `Delta`, and `Zeta` are *variable-length*. They achieve high compression by using fewer bits for smaller or more frequent integers and more bits for larger, rarer ones. This efficiency comes at a cost. Because each element has a different bit-length, it is impossible to mathematically calculate the starting position of an arbitrary element. That's why we say these codes are **instantaneous**: you cannot decode a value without reading the entire preceding bitstream.
     -   **When to Use It**: These codes excel when data follows a **specific, skewed distribution** (e.g., a power-law or geometric distribution). Here the compression ratio can be significantly better than fixed-length encoding, but random access becomes more complex.
+
+
+    ```rust
+    use compressed_intvec::prelude::*;
+
+    let data: Vec<u64> = (0..1000).collect();
+
+    // We can use codecs from the dsi-bitstream that are parameter-dependent like Rice encoding.
+    let intvec = LEIntVec::builder(&data)
+        .codec(CodecSpec::Rice { log2_b: Some(4) })
+        .build()
+        .unwrap();
+    assert_eq!(intvec.into_vec(), data);
+
+    // Or codecs that are byte-aligned like VByte, for faster access.
+    let intvec = LEIntVec::builder(&data)
+        .codec(CodecSpec::VByteLe)
+        .build()
+        .unwrap();
+    assert_eq!(intvec.into_vec(), data);
+    ```
 
 ### Why Sampling is Necessary for Variable-Length Codes
 
@@ -302,7 +348,7 @@ compressed-intvec = { version = "0.4.0", features = ["parallel", "serde"] }
 
 
 [dsi-bitstream]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
-[dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/enum.Codes.html
+[dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/
 [Rayon]: https://docs.rs/rayon/latest/rayon/
 [`mem-dbg`]: https://docs.rs/mem-dbg/latest/mem_dbg/
 [`prelude`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/prelude/index.html

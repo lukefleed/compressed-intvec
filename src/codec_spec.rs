@@ -50,60 +50,76 @@ use mem_dbg::{CopyType, MemDbgImpl, MemSize, SizeFlags, True};
 /// [`IntVec`]: crate::intvec::IntVec
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodecSpec {
-    /// Use Elias γ-coding, a universal code from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library.
+    /// Use Elias γ-coding.
     ///
     /// The implied probability distribution is approximately `1 / (2*x^2)`.
     /// This code is parameter-free and is generally effective for data distributions
     /// skewed towards small values.
     Gamma,
-    /// Use Elias δ-coding, a universal code from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library.
+    /// Use Elias δ-coding. This is the default codec spec.
     ///
     /// The implied probability distribution is approximately `1 / (2*x*log(x)^2)`.
     /// Delta coding is also parameter-free and tends to be more efficient than
-    /// Gamma for larger integer values. This is the default codec spec.
+    /// Gamma for larger integer values.
     #[default]
     Delta,
-    /// Use Unary coding, a simple code from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library.
+    /// Use Unary coding.
     ///
-    /// Unary coding represents the number `n` with `n` zeros followed by a one.
-    /// It is only efficient for very small integers, particularly `0` and `1`.
+    /// Represents the number `n` with `n` zeros followed by a one. It is only
+    /// efficient for very small integers, particularly `0` and `1`.
     Unary,
-    /// Use Rice-coding, from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library.
+    /// Use Rice-coding.
     ///
-    /// This is a special case of Golomb coding where the parameter is a power of two,
-    /// making it very fast. It is suitable for geometrically distributed data.
+    /// A special case of Golomb coding suitable for geometrically distributed data.
     /// - If `log2_b` is `Some(val)`, uses the specified parameter.
-    /// - If `log2_b` is `None` (only on slice-based builder), an optimal
-    ///   parameter is estimated based on the average value of the input data.
+    /// - If `log2_b` is `None` (on slice-based builder), an optimal parameter
+    ///   is estimated from the data's average value.
     Rice { log2_b: Option<u8> },
-    /// Use Boldi-Vigna ζ-coding, from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library.
+    /// Use Boldi-Vigna ζ-coding.
     ///
     /// The implied probability distribution is approximately `1 / x^(1 + 1/k)`.
     /// This code is effective for power-law distributions.
     /// - If `k` is `Some(val)`, uses the specified parameter (`k > 0`).
-    /// - If `k` is `None` (only on slice-based builder), a default of `k=3` is used.
+    /// - If `k` is `None` (on slice-based builder), a default of `k=3` is used.
     Zeta { k: Option<u64> },
+    /// Use Golomb-coding.
+    ///
+    /// Suitable for geometrically distributed data.
+    /// - If `b` is `Some(val)`, uses the specified parameter (`b > 0`).
+    /// - If `b` is `None` (on slice-based builder), an optimal parameter
+    ///   is estimated from the data's average value.
+    Golomb { b: Option<u64> },
+    /// Use Elias-Fano ω-coding, a universal code for positive integers.
+    Omega,
+    /// Use an alternative universal code for positive integers.
+    /// - If `k` is `Some(val)`, uses the specified parameter (`k > 0`).
+    /// - If `k` is `None` (on slice-based builder), a default of `k=3` is used.
+    Pi { k: Option<u64> },
+    /// Use Elias-Fano Exponential-Golomb coding.
+    /// - If `k` is `Some(val)`, uses the specified parameter.
+    /// - If `k` is `None` (on slice-based builder), a default of `k=2` is used.
+    ExpGolomb { k: Option<u64> },
+    /// Use VByte encoding with Little-Endian byte order. Efficient for integers
+    /// that fit within a few bytes.
+    VByteLe,
+    /// Use VByte encoding with Big-Endian byte order.
+    VByteBe,
     /// Use fixed-width integer encoding.
     ///
-    /// This scheme is optimal for data that is uniformly distributed within a
-    /// known range, as it produces no wasted space.
-    /// - If `num_bits` is `Some(val)`, uses the specified number of bits for each integer.
-    /// - If `num_bits` is `None` (only on slice-based builder), the minimum number of
-    ///   bits required to represent the largest value in the input data is used.
+    /// Optimal for uniformly distributed data within a known range.
+    /// - If `num_bits` is `Some(val)`, uses the specified number of bits.
+    /// - If `num_bits` is `None` (on slice-based builder), the minimum bits
+    ///   required for the largest value in the data is used.
     FixedLength { num_bits: Option<u8> },
     /// Automatically select the best variable-length code based on the data.
     ///
-    /// This is the recommended default for the slice-based builder. It uses a
-    /// sophisticated heuristic to select the most space-efficient code (e.g., Gamma,
-    /// Delta, etc.) for the given data distribution.
-    ///
+    /// This is the recommended default for the slice-based builder.
     /// This option is **not** supported for the iterator-based builder.
     Auto,
-    /// Use an explicitly provided code from the [`dsi_bitstream::codes::Codes`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/index.html) enum.
+    /// Use an explicitly provided code from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library enum.
     ///
-    /// This is an escape hatch for advanced use cases, allowing for the use of codes
-    /// not directly enumerated in [`CodecSpec`] (like Omega or VByte) or for programmatic
-    /// selection of codes.
+    /// This is an escape hatch for advanced use cases or for codes not yet
+    /// directly enumerated in [`CodecSpec`].
     Explicit(Codes),
 }
 
@@ -168,13 +184,12 @@ impl MemDbgImpl for Encoding {}
 ///   minimum number of bits required to represent this value. A full scan is
 ///   necessary here to guarantee correctness.
 ///
-/// - **`CodecSpec::Rice { log2_b: None }`**: Rice coding is optimal for
-///   geometrically distributed data. This function computes the average of the
-///   `input` data to estimate the optimal `log2_b` parameter.
+/// - **`CodecSpec::Rice { log2_b: None }` / `CodecSpec::Golomb { b: None }`**:
+///   These codes are optimal for geometrically distributed data. This function
+///   computes the average of the `input` data to estimate the optimal parameter.
 ///
-/// - **`CodecSpec::Zeta { k: None }`**: No complex heuristic is used. It falls
-///   back to a reasonable default of `k=3`, which is often effective for the
-///   power-law-like distributions that ζ-codes are designed for.
+/// - **`CodecSpec::Zeta { k: None }`, `Pi { k: None }`, `ExpGolomb { k: None }`**:
+///   These fall back to reasonable default parameters (`k=3`, `k=3`, `k=2` respectively).
 ///
 /// - **`CodecSpec::Auto`**: This triggers the most sophisticated heuristic. It uses
 ///   a dynamic sampling strategy to balance analysis speed and accuracy:
@@ -185,15 +200,22 @@ impl MemDbgImpl for Encoding {}
 ///       by selecting values at regular intervals across the entire input slice.
 ///       This provides a high-quality, representative sample while ensuring the
 ///       analysis step remains extremely fast, regardless of input size.
-///   3.  Based on this analysis, it uses the [`CodesStats`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/utils/stats/struct.CodesStats.html) utility
+///   3.  Based on this analysis, it uses the [`CodesStats`] utility
 ///       to select the variable-length code predicted to be the most space-efficient.
 pub fn resolve_codec(input: &[u64], spec: CodecSpec) -> Result<Encoding, IntVecError> {
     match spec {
+        // Parameter-free codecs
         CodecSpec::Gamma => Ok(Encoding::Dsi(Codes::Gamma)),
         CodecSpec::Delta => Ok(Encoding::Dsi(Codes::Delta)),
         CodecSpec::Unary => Ok(Encoding::Dsi(Codes::Unary)),
+        CodecSpec::Omega => Ok(Encoding::Dsi(Codes::Omega)),
+        CodecSpec::VByteLe => Ok(Encoding::Dsi(Codes::VByteLe)),
+        CodecSpec::VByteBe => Ok(Encoding::Dsi(Codes::VByteBe)),
+
+        // Passthrough for advanced usage
         CodecSpec::Explicit(codes) => Ok(Encoding::Dsi(codes)),
 
+        // Codecs with optional parameters
         CodecSpec::Rice { log2_b } => {
             let final_log2_b = log2_b.unwrap_or_else(|| {
                 if input.is_empty() {
@@ -220,6 +242,45 @@ pub fn resolve_codec(input: &[u64], spec: CodecSpec) -> Result<Encoding, IntVecE
                 ));
             }
             Ok(Encoding::Dsi(Codes::Zeta {
+                k: final_k as usize,
+            }))
+        }
+
+        CodecSpec::Golomb { b } => {
+            let final_b = b.unwrap_or_else(|| {
+                if input.is_empty() {
+                    return 1;
+                }
+                let sum: u128 = input.iter().map(|&x| x as u128).sum();
+                let avg = sum as f64 / input.len() as f64;
+                // Heuristic for optimal Golomb parameter 'b'
+                (avg * 0.69).round().max(1.0) as u64
+            });
+            if final_b == 0 {
+                return Err(IntVecError::InvalidParameters(
+                    "Golomb parameter b cannot be zero".to_string(),
+                ));
+            }
+            Ok(Encoding::Dsi(Codes::Golomb {
+                b: final_b as usize,
+            }))
+        }
+
+        CodecSpec::Pi { k } => {
+            let final_k = k.unwrap_or(3);
+            if final_k == 0 {
+                return Err(IntVecError::InvalidParameters(
+                    "Pi parameter k cannot be zero".to_string(),
+                ));
+            }
+            Ok(Encoding::Dsi(Codes::Pi {
+                k: final_k as usize,
+            }))
+        }
+
+        CodecSpec::ExpGolomb { k } => {
+            let final_k = k.unwrap_or(2);
+            Ok(Encoding::Dsi(Codes::ExpGolomb {
                 k: final_k as usize,
             }))
         }
@@ -269,6 +330,8 @@ pub fn resolve_codec(input: &[u64], spec: CodecSpec) -> Result<Encoding, IntVecE
 
             let (best_code, _) = stats.best_code();
 
+            // This check ensures that the selected code is supported by the writer.
+            // It acts as a safeguard against future changes in dsi-bitstream.
             if FuncCodeWriter::<BE, BufBitWriter<BE, MemWordWriterVec<u64, Vec<u64>>>>::new(
                 best_code,
             )
@@ -276,6 +339,8 @@ pub fn resolve_codec(input: &[u64], spec: CodecSpec) -> Result<Encoding, IntVecE
             {
                 Ok(Encoding::Dsi(best_code))
             } else {
+                // Fallback to a safe, universally supported code if the best
+                // one is not available in the writer dispatch.
                 Ok(Encoding::Dsi(Codes::Delta))
             }
         }

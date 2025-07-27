@@ -163,7 +163,7 @@ impl<'a, E: Endianness> IntVecBuilder<'a, E> {
     /// use compressed_intvec::prelude::*;
     ///
     /// // All values are less than 256, so they fit in 8 bits.
-    /// let data: &[u64] = &[100, 200, 255, 0, 1];
+    /// let data: &[u64] = &[100, 200, 150, 255, 0];
     ///
     /// let intvec = LEIntVec::builder(data)
     ///     .codec(CodecSpec::FixedLength { num_bits: Some(8) })
@@ -175,7 +175,7 @@ impl<'a, E: Endianness> IntVecBuilder<'a, E> {
     /// assert_eq!(intvec.get(1), Some(200));
     ///
     /// // Building fails if a value does not fit.
-    /// let data_too_large: &[u64] = &[256]; // 256 requires 9 bits.
+    /// let data_too_large: &[u64] = &[100, 200, 300]; // 300 does not fit in 8 bits
     /// let result = LEIntVec::builder(data_too_large)
     ///     .codec(CodecSpec::FixedLength { num_bits: Some(8) })
     ///     .build();
@@ -365,7 +365,10 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> IntVecFromIterBuilder<E, I> {
     /// # Implementation Notes
     ///
     /// Similar to the slice-based builder, this method calls `shrink_to_fit`
-    /// on the underlying storage vector to ensure minimal memory usage.
+    /// on the underlying storage vector to ensure minimal memory usage. This
+    /// brings an additional cost of reallocation and copying, but is necessary
+    /// for a compressed data structure. However, this is a one-time cost
+    /// and does not affect the overall performance of the `IntVec` in typical use cases.
     pub fn build(self) -> Result<IntVec<E>, IntVecError>
     where
         IntVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
@@ -375,7 +378,10 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> IntVecFromIterBuilder<E, I> {
             CodecSpec::Auto
             | CodecSpec::FixedLength { num_bits: None }
             | CodecSpec::Rice { log2_b: None }
-            | CodecSpec::Zeta { k: None } => {
+            | CodecSpec::Zeta { k: None }
+            | CodecSpec::Golomb { b: None }
+            | CodecSpec::Pi { k: None }
+            | CodecSpec::ExpGolomb { k: None } => {
                 return Err(IntVecError::InvalidParameters("Automatic parameter selection is not supported for iterator-based construction. Please provide fixed parameters.".to_string()));
             }
             // For other codecs, we can resolve them with an empty slice as a dummy.

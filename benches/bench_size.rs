@@ -16,7 +16,6 @@ use compressed_intvec::{
 use criterion::{criterion_group, criterion_main, Criterion};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
-    prelude::*,
     utils::sample_implied_distribution,
 };
 use mem_dbg::{MemSize, SizeFlags};
@@ -113,12 +112,12 @@ fn run_space_measurements() {
             ("Unary", CodecSpec::Unary),
             ("Rice_auto", CodecSpec::Rice { log2_b: None }),
             ("Zeta_auto", CodecSpec::Zeta { k: None }),
-            ("Omega", CodecSpec::Explicit(Codes::Omega)),
-            ("VByteLe", CodecSpec::Explicit(Codes::VByteLe)),
-            ("VByteBe", CodecSpec::Explicit(Codes::VByteBe)),
-            ("Pi", CodecSpec::Explicit(Codes::Pi { k: 3 })),
-            ("Golomb", CodecSpec::Explicit(Codes::Golomb { b: 8 })),
-            ("ExpGolomb", CodecSpec::Explicit(Codes::ExpGolomb { k: 2 })),
+            ("Omega", CodecSpec::Omega),
+            ("VByteLe", CodecSpec::VByteLe),
+            ("VByteBe", CodecSpec::VByteBe),
+            ("Pi", CodecSpec::Pi { k: Some(3) }),
+            ("Golomb", CodecSpec::Golomb { b: Some(8) }),
+            ("ExpGolomb", CodecSpec::ExpGolomb { k: Some(2) }),
         ];
 
         let mut all_results: Vec<BenchResult> = Vec::new();
@@ -160,9 +159,7 @@ fn run_space_measurements() {
                     Distribution::UniformHigh | Distribution::PowerLaw
                 ) && matches!(
                     codec_spec,
-                    CodecSpec::Unary
-                        | CodecSpec::Rice { .. }
-                        | CodecSpec::Explicit(Codes::Golomb { .. })
+                    CodecSpec::Unary | CodecSpec::Rice { .. } | CodecSpec::Golomb { .. }
                 )) || (matches!(distribution, Distribution::UniformLow)
                     && matches!(codec_spec, CodecSpec::Unary))
                 {

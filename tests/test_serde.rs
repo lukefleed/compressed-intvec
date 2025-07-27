@@ -173,6 +173,29 @@ mod test_serde {
         CodecSpec::FixedLength { num_bits: None }
     );
 
+    // --- Added tests for newly promoted codecs ---
+    test_intvec_serde_roundtrip!(
+        test_intvec_vbyte_le,
+        LE,
+        generate_random_vec(500, 5000),
+        32,
+        CodecSpec::VByteLe
+    );
+    test_intvec_serde_roundtrip!(
+        test_intvec_omega_be,
+        BE,
+        generate_random_vec(500, 5000),
+        32,
+        CodecSpec::Omega
+    );
+    test_intvec_serde_roundtrip!(
+        test_intvec_golomb_le,
+        LE,
+        generate_random_vec(500, 5000),
+        32,
+        CodecSpec::Golomb { b: Some(10) }
+    );
+
     // --- SIntVec Test Suite ---
     test_sintvec_serde_roundtrip!(
         test_sintvec_empty_le,
@@ -194,5 +217,13 @@ mod test_serde {
         vec![-128, 0, 127], // Zigzag of -128 is 255. Fits in 8 bits.
         1,                  // k is ignored
         CodecSpec::FixedLength { num_bits: Some(8) }
+    );
+    // Added test for SIntVec with another codec
+    test_sintvec_serde_roundtrip!(
+        test_sintvec_vbyte_be,
+        BE,
+        generate_random_signed_vec(1000, 10_000),
+        32,
+        CodecSpec::VByteBe
     );
 }

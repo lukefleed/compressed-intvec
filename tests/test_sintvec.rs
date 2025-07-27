@@ -65,6 +65,59 @@ fn test_sintvec_with_fixed_length() {
 }
 
 #[test]
+fn test_sintvec_all_codecs_systematic() {
+    let data = generate_random_signed_vec(1000, 1000);
+    let mut rng = StdRng::seed_from_u64(42);
+    let test_indices: Vec<usize> = (0..100).map(|_| rng.random_range(0..data.len())).collect();
+    let expected_values: Vec<i64> = test_indices.iter().map(|&i| data[i]).collect();
+
+    let codecs_to_test = vec![
+        ("Gamma", CodecSpec::Gamma),
+        ("Delta", CodecSpec::Delta),
+        ("VByteLe", CodecSpec::VByteLe),
+        ("Zeta", CodecSpec::Zeta { k: Some(3) }),
+        (
+            "FixedLength_12bits",
+            CodecSpec::FixedLength { num_bits: Some(12) }, // A reasonable size for the data range
+        ),
+    ];
+
+    for (codec_name, codec_spec) in codecs_to_test {
+        let sintvec = LESIntVec::builder(&data)
+            .codec(codec_spec)
+            .build()
+            .unwrap_or_else(|e| panic!("Build failed for {}: {:?}", codec_name, e));
+
+        assert_eq!(
+            sintvec.iter().collect::<Vec<_>>(),
+            data,
+            "Iterator decompression failed for {}",
+            codec_name
+        );
+
+        for &idx in &test_indices {
+            assert_eq!(
+                sintvec.get(idx),
+                Some(data[idx]),
+                "get({}) failed for {}",
+                idx,
+                codec_name
+            );
+        }
+
+        #[cfg(feature = "parallel")]
+        {
+            let par_results = sintvec.par_get_many(&test_indices).unwrap();
+            assert_eq!(
+                par_results, expected_values,
+                "par_get_many failed for {}",
+                codec_name
+            );
+        }
+    }
+}
+
+#[test]
 fn test_sintvec_invalid_parameters() {
     let data = vec![-10, 20, 1000];
     // ZigZag of 1000 is 1999, which requires 11 bits.
@@ -77,9 +130,20 @@ fn test_sintvec_invalid_parameters() {
 #[test]
 fn test_sintvec_builder_rejects_auto_codecs() {
     let data = vec![-10, 20, 100];
-    let result = LESIntVec::builder(&data).codec(CodecSpec::Auto).build();
-    // The SIntVec builder uses the from_iter_builder internally, which rejects auto codecs.
-    assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
+    let codecs_with_auto_params = vec![
+        CodecSpec::Auto,
+        CodecSpec::FixedLength { num_bits: None },
+        CodecSpec::Rice { log2_b: None },
+        CodecSpec::Zeta { k: None },
+        CodecSpec::Golomb { b: None },
+        CodecSpec::Pi { k: None },
+        CodecSpec::ExpGolomb { k: None },
+    ];
+    for codec in codecs_with_auto_params {
+        let result = LESIntVec::builder(&data).codec(codec).build();
+        // The SIntVec builder uses the from_iter_builder internally, which rejects auto codecs.
+        assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
+    }
 }
 
 #[test]

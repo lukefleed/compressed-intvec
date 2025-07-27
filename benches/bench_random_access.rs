@@ -1,7 +1,6 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
-    prelude::Codes,
     utils::sample_implied_distribution,
 };
 use rand::{rngs::SmallRng, Rng, SeedableRng};
@@ -72,18 +71,12 @@ fn benchmark_random_access(c: &mut Criterion) {
         ("Unary", CodecSpec::Unary),
         ("Rice", CodecSpec::Rice { log2_b: None }),
         ("Zeta", CodecSpec::Zeta { k: None }),
-        ("Explicit_Omega", CodecSpec::Explicit(Codes::Omega)),
-        ("Explicit_VByteLe", CodecSpec::Explicit(Codes::VByteLe)),
-        ("Explicit_VByteBe", CodecSpec::Explicit(Codes::VByteBe)),
-        ("Explicit_Pi", CodecSpec::Explicit(Codes::Pi { k: 3 })),
-        (
-            "Explicit_Golomb",
-            CodecSpec::Explicit(Codes::Golomb { b: 8 }),
-        ),
-        (
-            "Explicit_ExpGolomb",
-            CodecSpec::Explicit(Codes::ExpGolomb { k: 2 }),
-        ),
+        ("Explicit_Omega", CodecSpec::Omega),
+        ("Explicit_VByteLe", CodecSpec::VByteLe),
+        ("Explicit_VByteBe", CodecSpec::VByteBe),
+        ("Explicit_Pi", CodecSpec::Pi { k: Some(3) }),
+        ("Explicit_Golomb", CodecSpec::Golomb { b: Some(8) }),
+        ("Explicit_ExpGolomb", CodecSpec::ExpGolomb { k: Some(2) }),
     ];
 
     // Codecs that are not dependent on `k`.
@@ -124,9 +117,7 @@ fn benchmark_random_access(c: &mut Criterion) {
             ) {
                 if matches!(
                     codec_spec,
-                    CodecSpec::Unary
-                        | CodecSpec::Rice { .. }
-                        | CodecSpec::Explicit(Codes::Golomb { .. })
+                    CodecSpec::Unary | CodecSpec::Rice { .. } | CodecSpec::Golomb { .. }
                 ) {
                     println!(
                         "\n- Skipping codec: {} for {} distribution",
