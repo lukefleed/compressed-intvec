@@ -69,6 +69,8 @@ mod iter;
 #[cfg(feature = "parallel")]
 mod parallel;
 mod reader;
+#[cfg(feature = "serde")]
+mod serde;
 
 pub use builder::{IntVecBuilder, IntVecFromIterBuilder};
 pub use iter::IntVecIter;
@@ -131,6 +133,7 @@ impl From<core::convert::Infallible> for IntVecError {
 /// An enum to hold sample offsets, dynamically choosing `u32` or `u64`
 /// to save space on smaller vectors. This is only used for bit-level encodings.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
 pub(crate) enum Samples {
     U32(Vec<u32>),
     U64(Vec<u64>),

@@ -268,9 +268,35 @@ Choosing a `k` between 16 and 64 is often a good balance for large datasets.
 
 The library provides [`LEIntVec`] (Little-Endian) and [`BEIntVec`] (Big-Endian) type aliases. While using the native endianness of your CPU is usually the fastest, the optimal choice can depend on the specific codec and hardware architecture. Benchmarking is the best way to determine the most performant option for your workload.
 
+## Cargo Features
+
+### `parallel` (Default)
+
+Enables parallel operations for full-vector decompression and batch lookups using the [Rayon] crate. This provides `par_iter()` and `par_get_many()` methods on `IntVec` and `SIntVec`. This feature is **enabled by default**. If you do not require parallel processing or wish to minimize dependencies, you can disable the default features in your `Cargo.toml`:
+
+```toml
+[dependencies]
+compressed-intvec = { version = "0.4.0", default-features = false }
+```
+
+### `serde`
+
+Enables serialization and deserialization for `IntVec` and `SIntVec` by implementing the `Serialize` and `Deserialize` traits from the [Serde] framework. This allows compressed vectors to be efficiently stored or transmitted. This feature is **optional** and must be explicitly enabled:
+
+```toml
+[dependencies]
+compressed-intvec = { version = "0.4.0", features = ["serde"] }
+```
+
+You can also enable multiple features. For example, to use both `serde` and `parallel` support (which is the default configuration plus `serde`):
+
+```toml
+[dependencies]
+compressed-intvec = { version = "0.4.0", features = ["parallel", "serde"] }
+```
 ## TODO For Future Releases
 
-* [ ] Add [`serde`](https://docs.rs/serde/latest/serde/) (maybe also [`ε-serde`](https://crates.io/crates/epserde)) serialization and deserialization.
+* [ ] Add [`ε-serde`](https://crates.io/crates/epserde) support.
 * [ ] Add SIMD optimizations for faster decoding in [`CodecSpec::FixedLength`] and [`CodecSpec::VByte`].
 
 
@@ -296,3 +322,4 @@ The library provides [`LEIntVec`] (Little-Endian) and [`BEIntVec`] (Big-Endian) 
 [`CodecSpec::Zeta`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Zeta
 [`CodecSpec::FixedLength`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.FixedLength
 [`CodecSpec::VByte`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.VByte
+[Serde]: https://serde.rs/

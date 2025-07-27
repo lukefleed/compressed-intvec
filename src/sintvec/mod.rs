@@ -240,3 +240,39 @@ pub type BESIntVec = SIntVec<BE>;
 /// assert_eq!(sintvec.get(1), Some(-20));
 /// ```
 pub type LESIntVec = SIntVec<LE>;
+
+#[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
+mod serde_impls {
+    use super::{Endianness, IntVec, SIntVec};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    impl<E: Endianness> Serialize for SIntVec<E>
+    where
+        IntVec<E>: Serialize,
+    {
+        /// Serializes the `SIntVec` by delegating to its inner `IntVec`.
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            // Since SIntVec is a transparent wrapper, we just serialize the inner field.
+            self.inner.serialize(serializer)
+        }
+    }
+
+    impl<'de, E: Endianness> Deserialize<'de> for SIntVec<E>
+    where
+        IntVec<E>: Deserialize<'de>,
+    {
+        /// Deserializes the `SIntVec` by deserializing its inner `IntVec`.
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            // Deserialize the inner IntVec and wrap it in a new SIntVec.
+            let inner = IntVec::<E>::deserialize(deserializer)?;
+            Ok(SIntVec { inner })
+        }
+    }
+}
