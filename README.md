@@ -232,13 +232,7 @@ If you need to disable this feature to reduce dependencies, you can do so in you
 compressed-intvec = { version = "0.4.0", default-features = false }
 ```
 
-## Core Concepts
-
-### The Trade-off: Instantaneous Codes and Random Access
-
-The core challenge stems from how different encoding strategies store data.
-
-#### Instantaneous Codes vs. Fixed-Length Encoding
+## Instantaneous Codes vs. Fixed-Length Encoding
 
 The library offers two fundamental encoding families:
 
@@ -274,6 +268,12 @@ Choosing a `k` between 16 and 64 is often a good balance for large datasets.
 
 The library provides [`LEIntVec`] (Little-Endian) and [`BEIntVec`] (Big-Endian) type aliases. While using the native endianness of your CPU is usually the fastest, the optimal choice can depend on the specific codec and hardware architecture. Benchmarking is the best way to determine the most performant option for your workload.
 
+## TODO For Future Releases
+
+* [ ] Add [`serde`](https://docs.rs/serde/latest/serde/) (maybe also [`ε-serde`](https://crates.io/crates/epserde)) serialization and deserialization.
+* [ ] Add SIMD optimizations for faster decoding in [`CodecSpec::FixedLength`] and [`CodecSpec::VByte`].
+
+
 [dsi-bitstream]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 [dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/enum.Codes.html
 [Rayon]: https://docs.rs/rayon/latest/rayon/
@@ -295,3 +295,4 @@ The library provides [`LEIntVec`] (Little-Endian) and [`BEIntVec`] (Big-Endian) 
 [`CodecSpec::Delta`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Delta
 [`CodecSpec::Zeta`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Zeta
 [`CodecSpec::FixedLength`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.FixedLength
+[`CodecSpec::VByte`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.VByte
