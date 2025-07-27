@@ -22,7 +22,7 @@ A high-performance Rust library for compressed integer vectors with fast random 
 
 ## Quick Example
 
-Getting started is simple with the builder pattern and the provided [`prelude`].
+This example demonstrates how to use the library to compress and access unsigned integers and signed integers efficiently.
 
 ```rust
 use compressed_intvec::prelude::*;
@@ -56,8 +56,7 @@ assert_eq!(sintvec.get(1), Some(-20));
 
 ## Available Codecs
 
-Choosing the right codec is key to maximizing compression. The [`CodecSpec`] enum allows you to either select one manually or let the library decide with `CodecSpec::Auto`.
-
+Choosing the right codec is key to maximizing compression. The [`CodecSpec`] enum allows you to either select one manually or let the library decide with [`CodecSpec::Auto`].
 
 | Codec Variant | Description & Encoding Strategy                                                                                                                                              | Optimal Data Distribution                                |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
@@ -75,7 +74,7 @@ Choosing the right codec is key to maximizing compression. The [`CodecSpec`] enu
 
 The library integrates [`mem-dbg`] to provide detailed memory layout analysis, which is essential for verifying the effectiveness of different compression strategies. This allows for empirical validation of codec choices.
 
-The following example demonstrates the utility of `CodecSpec::Auto` by comparing its result against a generic codec choice for a vector of 10,000 random integers.
+The following example demonstrates the utility of [`CodecSpec::Auto`] by comparing its result against a generic codec choice for a vector of 10,000 random integers.
 
 
 ```rust
@@ -145,16 +144,16 @@ Codec used for Auto encoding: Dsi(Zeta { k: 10 })
 ```
 The analysis of the output is as follows:
 - The uncompressed `Vec<u64>` occupies **80.02 KB**.
-- `CodecSpec::Gamma` reduces the size to **47.59 KB**, a 40.5% reduction.
-- `CodecSpec::Auto` further reduces the size to **28.84 KB**, achieving a 64% total reduction.
+- [`CodecSpec::Gamma`] reduces the size to **47.59 KB**, a 40.5% reduction.
+- [`CodecSpec::Auto`] further reduces the size to **28.84 KB**, achieving a 64% total reduction.
 
-The final line of the output indicates that the `Auto` spec analyzed the data's distribution and selected `Zeta` coding with `k=10` as the most space-efficient strategy for this dataset. This capability allows the library to adapt its compression strategy to the data, and the `mem_dbg` integration provides the means to directly inspect and validate the outcome.
+The final line of the output indicates that the `Auto` spec analyzed the data's distribution and selected `Zeta` coding with `k=10` as the most space-efficient strategy for this dataset. This capability allows the library to adapt its compression strategy to the data, and the [`mem_dbg`] integration provides the means to directly inspect and validate the outcome.
 
 ## High-Performance Access Patterns
 
 While [`get`] is convenient for single, isolated lookups, calling it repeatedly in a loop is inefficient. For performance-critical scenarios involving multiple lookups, the library provides optimized methods that avoid the primary bottleneck: the repeated creation of internal bitstream readers.
 
-### Dynamic Lookups with a Reusable `IntVecReader`
+### Dynamic Lookups with a Reusable [`IntVecReader`]
 
 Each call to `intvec.get()` creates and subsequently discards a new bitstream reader, incurring a small but significant setup overhead. When lookups are performed in a loop, this overhead accumulates and can degrade performance.
 
@@ -177,7 +176,7 @@ assert_eq!(reader.get(10).unwrap(), Some(10));
 assert_eq!(reader.get(9000).unwrap(), Some(9000));
 ```
 
-### Efficient Batch Access with `get_many`
+### Efficient Batch Access with [`get_many`]
 
 When you have a predefined set of indices to retrieve, the [`get_many`] method is the most efficient sequential approach.
 
@@ -202,7 +201,7 @@ let values = intvec.get_many(indices_to_get).unwrap();
 assert_eq!(values, vec![500, 10, 9000, 1000, 2000]);
 ```
 
-### Parallel Access with `par_get_many`
+### Parallel Access with [`par_get_many`]
 
 The `parallel` feature, which is **enabled by default**, provides access to [`par_get_many`]. This method uses the [Rayon] crate to parallelize lookups across multiple CPU cores.
 
@@ -291,3 +290,8 @@ The library provides [`LEIntVec`] (Little-Endian) and [`BEIntVec`] (Big-Endian) 
 [`get_many`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/intvec/struct.IntVec.html#method.get_many
 [`par_iter`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/intvec/struct.IntVec.html#method.par_iter
 [`par_get_many`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/intvec/struct.IntVec.html#method.par_get_many
+[`CodecSpec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Auto
+[`CodecSpec::Gamma`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Gamma
+[`CodecSpec::Delta`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Delta
+[`CodecSpec::Zeta`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Zeta
+[`CodecSpec::FixedLength`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.FixedLength

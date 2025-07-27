@@ -24,7 +24,7 @@
 //! The primary user-facing API for this module is the [`CodecSpec`] enum. It
 //! provides a high-level interface for specifying the desired compression
 //! strategy, allowing for:
-//! - Direct selection of a parameter-free codec (e.g., [`Gamma`]).
+//! - Direct selection of a parameter-free codec (e.g., `Gamma`).
 //! - Explicit parameterization of tunable codecs (e.g., `Zeta { k: Some(3) }`).
 //! - Automatic parameter selection, where the library analyzes the data to find
 //!   the optimal configuration (e.g., `Auto` or `FixedLength { num_bits: None }`).
@@ -33,7 +33,6 @@
 //! [`Encoding`] variant that the [`IntVec`] can use for its internal operations.
 //!
 //! [`IntVec`]: crate::intvec::IntVec
-//! [`Gamma`]: CodecSpec::Gamma
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
 use crate::intvec::IntVecError;
@@ -47,6 +46,8 @@ use mem_dbg::{CopyType, MemDbgImpl, MemSize, SizeFlags, True};
 /// This enum allows for either explicitly setting the parameters for codes
 /// like Rice and Zeta, or requesting that [`IntVec`] automatically selects
 /// suitable parameters based on the data distribution during construction.
+///
+/// [`IntVec`]: crate::intvec::IntVec
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodecSpec {
     /// Use Elias γ-coding, a universal code from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library.

@@ -1,4 +1,4 @@
-//! # `IntVec`: A Compressed Vector for `u64` Integers.
+//! # A compressed, randomly accessible vector of `u64` integers.
 //!
 //! This module provides the core implementation of [`IntVec`], a data structure
 //! designed for space-efficient storage and fast random access of `u64` integer
@@ -9,13 +9,13 @@
 //! ## Core Functionality
 //!
 //! - **Compression**: Employs codecs like Gamma (γ), Delta (δ), and Zeta (ζ) for
-//!   skewed data, and a highly efficient `FixedLength` encoding for uniform data with a small range
+//!   skewed data, and a highly efficient [`FixedLength`] encoding for uniform data with a small range
 //! - **Random Access**: For variable-length codes, it uses a sampling mechanism
 //!   to provide fast random access. The sampling rate, `k`, determines the
-//!   trade-off between access speed and memory overhead. For `FixedLength`
+//!   trade-off between access speed and memory overhead. For [`FixedLength`]
 //!   encoding, access is a true O(1) operation.
 //! - **Flexible Construction**: Provides a builder API that can construct an
-//!   `IntVec` from a slice (with automatic codec selection) or an iterator (for
+//!   [`IntVec`] from a slice (with automatic codec selection) or an iterator (for
 //!   large datasets, requiring manual parameter specification).
 //! - **High-Performance Lookups**: Offers optimized methods for various access
 //!   patterns, including a reusable [`IntVecReader`] for dynamic lookups, and
@@ -51,6 +51,7 @@
 //! [`Endianness`]: dsi_bitstream::prelude::Endianness
 //! [`get_many`]: IntVec::get_many
 //! [`par_get_many`]: IntVec::par_get_many
+//! [`FixedLength`]: crate::codec_spec::CodecSpec::FixedLength
 use super::codec_spec::{resolve_codec, CodecSpec, Encoding};
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
@@ -185,12 +186,12 @@ impl MemSize for Samples {
 
 /// A compressed, randomly accessible vector of `u64` integers.
 ///
-/// `IntVec` uses instantaneous codes from the [`dsi-bitstream`] crate to compress a
+/// [`IntVec`] uses instantaneous codes from the [`dsi-bitstream`] crate to compress a
 /// vector of `u64` integers. To provide efficient random access, it stores sample
 /// points of the underlying bitstream at regular intervals, defined by the sampling
 /// rate `k`. This creates a trade-off: a smaller `k` results in faster random
 /// access but higher memory overhead, while a larger `k` reduces memory usage at
-/// the cost of slower access. For `FixedLength` encoding, no samples are needed
+/// the cost of slower access. For [`FixedLength`] encoding, no samples are needed
 /// as access is already O(1).
 ///
 /// The most convenient way to create an [`IntVec`] is through its [builder](IntVec::builder),
@@ -222,16 +223,18 @@ impl MemSize for Samples {
 /// assert_eq!(intvec.get(1), Some(200));
 /// assert_eq!(intvec.get(2), Some(0));
 /// ```
+///
 /// [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
+/// [`FixedLength`]: crate::codec_spec::CodecSpec::FixedLength
 #[derive(Debug, Clone, MemDbg, MemSize)]
 pub struct IntVec<E: Endianness> {
     /// The raw compressed data, stored as a `Vec<u64>`.
     pub(super) data: Vec<u64>,
     /// Bit offsets of sampled elements. This is `Some` for bit-level encodings
-    /// and `None` for `FixedLength` encoding.
+    /// and `None` for [`FixedLength`] encoding.
     pub(super) samples: Option<Samples>,
     /// The sampling rate `k`, which determines the interval between samples.
-    /// This is `Some` for bit-level encodings and `None` for `FixedLength`.
+    /// This is `Some` for bit-level encodings and `None` for [`FixedLength`].
     pub(super) k: Option<usize>,
     /// The number of elements in the vector.
     pub(super) len: usize,
@@ -323,7 +326,7 @@ where
     /// # Performance
     ///
     /// If you have a predefined slice of indices to access, it is recommended
-    /// to use [`get_many`](Self::get_many) or [`par_get_many`](Self::par_get_many) instead. Note that `par_get_many` may be slower than `get_many` for small vectors due to the overhead of parallelization.
+    /// to use [`get_many`](Self::get_many) or [`par_get_many`](Self::par_get_many) instead. Note that [`par_get_many`](Self::par_get_many) may be slower than [`get_many`](Self::get_many) for small vectors due to the overhead of parallelization.
     ///
     /// # Example
     /// ```rust
@@ -424,7 +427,7 @@ where
     ///
     /// This method is optimized for batched random access. For bit-level encodings,
     /// it sorts the requested indices and decodes the elements in a single forward
-    /// pass, minimizing seeks and redundant decoding. For `FixedLength` encoding,
+    /// pass, minimizing seeks and redundant decoding. For [`FixedLength`] encoding,
     /// it reads each element directly.
     ///
     /// # Arguments
@@ -447,6 +450,7 @@ where
     /// let values = intvec.get_many(&access_indices).unwrap();
     /// assert_eq!(values, vec![0, 999, 500, 250]);
     /// ```
+    /// [`FixedLength`]: crate::codec_spec::CodecSpec::FixedLength
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<u64>, IntVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
@@ -570,7 +574,9 @@ where
     ///
     /// # Returns
     /// - `Some(usize)`: The sampling rate `k` for bit-level encodings.
-    /// - `None`: If `FixedLength` encoding was used, as it does not require sampling.
+    /// - `None`: If [`FixedLength`] encoding was used, as it does not require sampling.
+    ///
+    /// [`FixedLength`]: crate::codec_spec::CodecSpec::FixedLength
     pub fn get_sampling_rate(&self) -> Option<usize> {
         self.k
     }
@@ -578,10 +584,13 @@ where
     /// Returns the number of sample points stored in the vector.
     ///
     /// For bit-level encodings, this is approximately `len / k`.
-    /// For `FixedLength` encoding, this will be `0`.
+    /// For [`FixedLength`] encoding, this will be `0`.
     ///
     /// # Returns
-    /// - `usize`: The number of sample points, or `0` for `FixedLength` encoding.
+    /// - `usize`: The number of sample points, or `0` for [`FixedLength`] encoding.
+    ///
+    /// [`FixedLength`]: crate::codec_spec::CodecSpec::FixedLength
+    ///
     pub fn get_num_samples(&self) -> usize {
         self.samples.as_ref().map_or(0, |s| s.len())
     }

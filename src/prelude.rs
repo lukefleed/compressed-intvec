@@ -1,4 +1,4 @@
-//! A "prelude" for `compressed-intvec`.
+//! A prelude for `compressed-intvec`.
 //!
 //! This prelude is automatically imported when you use `use compressed_intvec::prelude::*;`.
 //! It exports all the most common types and traits.
