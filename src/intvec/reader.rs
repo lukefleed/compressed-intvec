@@ -1,7 +1,22 @@
-//! A stateful, reusable reader for `IntVec`.
+//! # `IntVec` Stateful Reader
 //!
-//! This module provides `IntVecReader`, which is designed for scenarios requiring
-//! multiple, non-sequential lookups where the indices are determined dynamically.
+//! This module provides [`IntVecReader`], a stateful, reusable reader for an
+//! [`IntVec`]. It is designed to optimize random access performance in scenarios
+//! where lookup indices are determined dynamically.
+//!
+//! A standard call to [`IntVec::get`] is convenient but inefficient for repeated
+//! lookups, as each call creates and discards an internal bitstream reader. The
+//! `IntVecReader` solves this by maintaining a persistent reader instance,
+//! amortizing the setup cost across multiple `get` operations.
+//!
+//! This pattern is ideal for traversals where the next lookup index depends on
+//! the result of the previous one. For predefined batch lookups, [`IntVec::get_many`]
+//! and [`IntVec::par_get_many`] remain the preferred, more optimized alternatives.
+//!
+//! [`IntVec`]: super::IntVec
+//! [`IntVec::get`]: super::IntVec::get
+//! [`IntVec::get_many`]: super::IntVec::get_many
+//! [`IntVec::par_get_many`]: super::IntVec::par_get_many
 
 use super::{Encoding, IntVec, IntVecBitReader, IntVecError};
 use dsi_bitstream::{

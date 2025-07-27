@@ -1,4 +1,23 @@
-//! Builders for `IntVec`.
+//! # `IntVec` Builders
+//!
+//! This module provides the builder implementations for constructing an [`IntVec`].
+//! It offers two distinct builder types to accommodate different use cases:
+//!
+//! 1.  **[`IntVecBuilder`] (from slice `&[u64]`):**
+//!     This is the recommended and most flexible builder. Since it has access
+//!     to the entire dataset upfront, it can perform a pre-analysis pass to
+//!     automatically determine the most space-efficient codec and parameters.
+//!     This is ideal when the data fits comfortably in memory.
+//!
+//! 2.  **[`IntVecFromIterBuilder`] (from `Iterator<Item = u64>`):**
+//!     This builder is designed for scenarios where data is generated on-the-fly
+//!     or is too large to be materialized into a `Vec<u64>`. It processes the
+//!     data in a streaming fashion, which is highly memory-efficient. However,
+//!     this comes with a limitation: **it cannot perform automatic parameter
+//!     selection**. The user must provide a fully specified [`CodecSpec`].
+//!
+//! Both builders use a fluent API to configure parameters like the sampling
+//! rate `k` and the desired [`CodecSpec`].
 
 use super::{resolve_codec, CodecSpec, Encoding, IntVec, IntVecBitWriter, IntVecError, Samples};
 use dsi_bitstream::{

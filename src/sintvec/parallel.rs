@@ -1,7 +1,26 @@
-//! Parallel implementations for `SIntVec`, enabled by the `parallel` feature flag.
+//! # `SIntVec` Parallel Implementations
 //!
-//! This module provides parallel equivalents for iterating and accessing elements
-//! in an `SIntVec`, leveraging the Rayon library to exploit multi-core architectures.
+//! This module provides parallel implementations for [`SIntVec`] operations,
+//! enabled by the `parallel` feature flag. These methods are built on top of the
+//! parallel implementations of the inner [`IntVec`] and leverage the [Rayon]
+//! library to exploit parallelism in access patterns.
+//!
+//! ## Implementation
+//!
+//! Both [`par_iter`] and [`par_get_many`] are implemented as lightweight
+//! wrappers around their [`IntVec`] counterparts. They delegate the heavy
+//! lifting of parallel decompression and access to the inner `IntVec` and then
+//! apply the inverse ZigZag transformation ([`ToInt`]) to the resulting `u64`
+//! values. Since this transformation is a trivial bitwise operation, the
+//! performance characteristics and trade-offs of these methods are identical
+//! to those of the underlying `IntVec`'s parallel methods.
+//!
+//! [Rayon]: https://docs.rs/rayon/latest/rayon/
+//! [`SIntVec`]: crate::sintvec::SIntVec
+//! [`IntVec`]: crate::intvec::IntVec
+//! [`par_iter`]: crate::sintvec::SIntVec::par_iter
+//! [`par_get_many`]: crate::sintvec::SIntVec::par_get_many
+//! [`ToInt`]: dsi_bitstream::prelude::ToInt
 
 use super::{IntVecError, SIntVec};
 use dsi_bitstream::prelude::{Endianness, ToInt};
@@ -55,19 +74,19 @@ where
 
     /// Retrieves multiple signed integers in parallel.
     ///
-    /// This method leverages the parallel `par_get_many` of the inner `IntVec`
+    /// This method leverages the parallel [`IntVec::par_get_many`] of the inner [`IntVec`]
     /// to fetch the compressed data and then transforms the results back to
     /// signed integers.
     ///
     /// # Implementation Notes
     /// The decompression and random access work is performed in parallel by the
-    /// inner `IntVec`. Once the `u64` (ZigZag-encoded) values are retrieved, this
+    /// inner [`IntVec`]. Once the `u64` (ZigZag-encoded) values are retrieved, this
     /// method performs a fast, sequential pass to apply the inverse ZigZag
     /// transformation. This final conversion step is extremely lightweight and
     /// does not typically impact overall performance.
     ///
     /// The performance trade-offs of this method are therefore identical to those
-    /// of the underlying [`IntVec::par_get_many`](crate::intvec::IntVec::par_get_many).
+    /// of the underlying [`IntVec::par_get_many`]. It is most beneficial for
     ///
     /// # Example
     /// ```rust
@@ -85,6 +104,9 @@ where
     /// // The results are returned in the same order as the requested indices.
     /// assert_eq!(values, vec![-10, -30, 50]);
     /// ```
+    ///
+    /// [`IntVec`]: crate::intvec::IntVec
+    /// [`IntVec::par_get_many`]: crate::intvec::IntVec::par_get_many
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<i64>, IntVecError> {
         let unsigned_values = self.inner.par_get_many(indices)?;
         // This conversion is fast and can be done sequentially after parallel fetch.

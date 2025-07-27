@@ -1,8 +1,23 @@
-//! Sequential iterator over the decompressed values of an `IntVec`.
+//! # `IntVec` Sequential Iterator
 //!
-//! This module provides the `IntVecIter` struct, which allows for efficient,
-//! forward-only iteration over the elements of a compressed `IntVec`,
-//! decompressing them on the fly.
+//! This module provides [`IntVecIter`], an iterator for performing efficient,
+//! sequential decompression of an [`IntVec`]. The iterator is designed for
+//! forward-only scans, decompressing values from the underlying bitstream on
+//! the fly.
+//!
+//! ## Performance
+//!
+//! The iterator is optimized for sequential access by pre-configuring the
+//! decoding logic (either for variable-length codes or fixed-width reads)
+//! upon creation. This avoids redundant decision-making within the `next()`
+//! method's hot loop.
+//!
+//! For full-vector decompression, `intvec.iter().collect::<Vec<_>>()` is often
+//! more performant than its parallel counterpart ([`par_iter`]) because it avoids
+//! thread management overhead and benefits from better CPU cache locality,
+//! especially when the decoding logic itself is not computationally intensive.
+//!
+//! [`par_iter`]: crate::intvec::IntVec::par_iter
 
 use super::{IntVec, IntVecBitReader};
 use crate::codec_spec::Encoding;

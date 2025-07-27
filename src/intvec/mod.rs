@@ -1,5 +1,56 @@
-//! Contains the core implementation of the `IntVec` struct and its main methods.
-
+//! # `IntVec`: A Compressed Vector for `u64` Integers.
+//!
+//! This module provides the core implementation of [`IntVec`], a data structure
+//! designed for space-efficient storage and fast random access of `u64` integer
+//! sequences. It achieves compression by leveraging a variety of instantaneous
+//! codes from the [`dsi-bitstream`] crate, which encode integers into a
+//! variable-length bitstream.
+//!
+//! ## Core Functionality
+//!
+//! - **Compression**: Employs codecs like Gamma (γ), Delta (δ), and Zeta (ζ) for
+//!   skewed data, and a highly efficient `FixedLength` encoding for uniform data with a small range
+//! - **Random Access**: For variable-length codes, it uses a sampling mechanism
+//!   to provide fast random access. The sampling rate, `k`, determines the
+//!   trade-off between access speed and memory overhead. For `FixedLength`
+//!   encoding, access is a true O(1) operation.
+//! - **Flexible Construction**: Provides a builder API that can construct an
+//!   `IntVec` from a slice (with automatic codec selection) or an iterator (for
+//!   large datasets, requiring manual parameter specification).
+//! - **High-Performance Lookups**: Offers optimized methods for various access
+//!   patterns, including a reusable [`IntVecReader`] for dynamic lookups, and
+//!   efficient batch methods like [`get_many`] and [`par_get_many`].
+//!
+//! The main struct, [`IntVec`], is generic over [`Endianness`], allowing
+//! to choose between Little-Endian ([`LEIntVec`]) and Big-Endian ([`BEIntVec`])
+//! representations to optimize for specific hardware architectures.
+//!
+//! ## Example
+//!
+//! ```rust
+//! use compressed_intvec::prelude::*;
+//!
+//! // A small vector of integers to be compressed.
+//! let data: &[u64] = &[40, 200, 0, 50, 13, 90, 1023];
+//!
+//! // Use the builder to create an IntVec.
+//! // `CodecSpec::Auto` will analyze the data and select the best codec.
+//! let intvec = LEIntVec::builder(data)
+//!     .k(2) // Use a small sampling rate for this vector.
+//!     .codec(CodecSpec::Auto)
+//!     .build()
+//!.unwrap();
+//!
+//! // Verify the length and access some elements.
+//! assert_eq!(intvec.len(), data.len());
+//! assert_eq!(intvec.get(1), Some(200));
+//! assert_eq!(intvec.get(6), Some(1023));
+//! ```
+//!
+//! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
+//! [`Endianness`]: dsi_bitstream::prelude::Endianness
+//! [`get_many`]: IntVec::get_many
+//! [`par_get_many`]: IntVec::par_get_many
 use super::codec_spec::{resolve_codec, CodecSpec, Encoding};
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
@@ -142,7 +193,7 @@ impl MemSize for Samples {
 /// the cost of slower access. For `FixedLength` encoding, no samples are needed
 /// as access is already O(1).
 ///
-/// The most convenient way to create an `IntVec` is through its [builder](IntVec::builder),
+/// The most convenient way to create an [`IntVec`] is through its [builder](IntVec::builder),
 /// which allows for easy configuration of the sampling rate and compression codec,
 /// including automatic parameter selection.
 ///
@@ -171,6 +222,7 @@ impl MemSize for Samples {
 /// assert_eq!(intvec.get(1), Some(200));
 /// assert_eq!(intvec.get(2), Some(0));
 /// ```
+/// [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 #[derive(Debug, Clone, MemDbg, MemSize)]
 pub struct IntVec<E: Endianness> {
     /// The raw compressed data, stored as a `Vec<u64>`.
@@ -199,11 +251,11 @@ impl<E> IntVec<E>
 where
     E: Endianness,
 {
-    /// Returns a builder for creating an `IntVec` from a slice (`&[u64]`).
+    /// Returns a builder for creating an [`IntVec`] from a slice (`&[u64]`).
     ///
-    /// This is the most common and flexible way to create an `IntVec`.
+    /// This is the most common and flexible way to create an [`IntVec`].
     /// The builder can automatically select the best codec parameters by analyzing
-    /// the data if `CodecSpec::Auto` is used.
+    /// the data if [`CodecSpec::Auto`] is used.
     ///
     /// # Example
     /// ```rust
@@ -225,14 +277,14 @@ where
         IntVecBuilder::new(input)
     }
 
-    /// Returns a builder for creating an `IntVec` from an iterator.
+    /// Returns a builder for creating an [`IntVec`] from an iterator.
     ///
     /// This builder is designed for scenarios where the data is generated on-the-fly
     /// or is too large to fit into memory as a `Vec<u64>`.
     ///
     /// # Limitations
     /// This builder **requires** that codec parameters be specified manually.
-    /// Automatic parameter selection (`CodecSpec::Auto` or `None` variants)
+    /// Automatic parameter selection ([`CodecSpec::Auto`] or `None` variants)
     /// is not supported because the builder cannot pre-analyze the data.
     ///
     /// # Example
@@ -260,13 +312,13 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Creates a stateful, reusable `IntVecReader` for this vector.
+    /// Creates a stateful, reusable [`IntVecReader`] for this vector.
     ///
     /// A reader maintains its own internal state, including a bitstream reader instance.
-    /// This makes it suitable for scenarios where multiple, non-sequential `get`
+    /// This makes it suitable for scenarios where multiple, non-sequential [`get`]
     /// operations are needed, and the indices are determined on-the-fly (e.g., in a
     /// loop where the next lookup depends on the result of the previous one).
-    /// Using a shared reader avoids the overhead of creating a new one for each `get` call.
+    /// Using a shared reader avoids the overhead of creating a new one for each [`get`] call.
     ///
     /// # Performance
     ///
@@ -287,6 +339,8 @@ where
     /// assert_eq!(reader.get(3).unwrap(), Some(40));
     /// assert_eq!(reader.get(0).unwrap(), Some(10));
     /// ```
+    ///
+    /// [`get`]: Self::get
     pub fn reader(&self) -> IntVecReader<E> {
         IntVecReader::new(self)
     }
@@ -294,7 +348,7 @@ where
     /// Retrieves the element at the specified index.
     ///
     /// This method provides random access to the compressed data. The exact mechanism
-    /// and performance depend on the compression scheme used to create the `IntVec`.
+    /// and performance depend on the compression scheme used to create the [`IntVec`].
     ///
     /// # Implementation Notes
     ///
@@ -337,7 +391,7 @@ where
     ///
     /// - **Dynamic Access**: If lookup indices are generated on-the-fly (e.g.,
     ///   the next lookup depends on the result of the previous one), create a single,
-    ///   reusable [`IntVecReader`] via the [`reader()`](Self::reader) method. Calling `get`
+    ///   reusable [`IntVecReader`] via the [`reader()`](Self::reader) method. Calling [`get`]
     ///   on this reader instance amortizes its setup cost across all lookups.
     ///
     /// # Returns
@@ -356,6 +410,8 @@ where
     /// // An out-of-bounds index returns None.
     /// assert_eq!(intvec.get(99), None);
     /// ```
+    ///
+    /// [`get`]: Self::get
     pub fn get(&self, index: usize) -> Option<u64> {
         if index >= self.len {
             return None;
@@ -376,7 +432,7 @@ where
     ///
     /// # Returns
     /// A `Result` containing a `Vec<u64>` with the retrieved values in the same
-    /// order as the input `indices`, or an `IntVecError` if any index is out of bounds.
+    /// order as the input `indices`, or an [`IntVecError`] if any index is out of bounds.
     ///
     /// # Example
     /// ```rust
@@ -557,7 +613,7 @@ where
     }
 }
 
-/// A type alias for an [`IntVec`] with Big-Endian (`BE`) bitstream encoding.
+/// A type alias for an [`IntVec`] with Big-Endian ([`BE`]) bitstream encoding.
 ///
 /// Big-endian is the byte order used in many networking protocols and on certain
 /// CPU architectures. The choice of endianness can impact performance.
@@ -583,7 +639,7 @@ where
 /// ```
 pub type BEIntVec = IntVec<BE>;
 
-/// A type alias for an [`IntVec`] with Little-Endian (`LE`) bitstream encoding.
+/// A type alias for an [`IntVec`] with Little-Endian ([`LE`]) bitstream encoding.
 ///
 /// Little-endian is the native byte order for most modern commodity CPUs,
 /// including x86 and ARM, which can often lead to the best performance for

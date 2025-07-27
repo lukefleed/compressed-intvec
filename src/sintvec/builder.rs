@@ -1,4 +1,25 @@
-//! Builder for creating a compressed signed integer vector, [`SIntVec`].
+//! # `SIntVec` Builder
+//!
+//! This module provides [`SIntVecBuilder`], a builder for creating a compressed
+//! signed integer vector, [`SIntVec`].
+//!
+//! ## Implementation
+//!
+//! The builder operates by creating an iterator that applies the ZigZag
+//! transformation ([`ToNat`]) to each `i64` element on the fly. This stream of
+//! `u64` values is then passed directly to the underlying iterator-based
+//! builder of [`IntVec`], which handles the actual compression. This streaming
+//! approach is highly memory-efficient as it avoids materializing the
+//! intermediate unsigned vector.
+//!
+//! ## Limitations
+//!
+//! A key consequence of this design is that the builder **does not support
+//! automatic parameter selection**. Because the data is processed as a stream,
+//! the builder cannot perform a pre-analysis pass to determine optimal codec
+//! parameters. Users must therefore provide a fully specified [`CodecSpec`].
+//!
+//! [`ToNat`]: dsi_bitstream::prelude::ToNat
 
 use super::{IntVec, IntVecError, SIntVec};
 use crate::codec_spec::CodecSpec;

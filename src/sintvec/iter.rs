@@ -1,7 +1,18 @@
-//! Sequential iterator over the decompressed values of an `SIntVec`.
+//! # `SIntVec` Sequential Iterator
 //!
-//! This module provides `SIntVecIter`, which allows for efficient,
-//! forward-only iteration over the elements of a compressed `SIntVec`.
+//! This module provides [`SIntVecIter`], an iterator for performing efficient,
+//! sequential decompression of a signed integer vector.
+//!
+//! ## Implementation
+//!
+//! The iterator is implemented as a lightweight wrapper around the underlying
+//! [`IntVecIter`]. It fetches the compressed `u64` values from the inner
+//! iterator and applies the inverse ZigZag transformation ([`ToInt`]) on the
+//! fly to restore the original `i64` values. This approach ensures that the
+//! performance characteristics are nearly identical to those of the `IntVec`
+//! iterator, as the `to_int` operation has negligible overhead.
+//!
+//! [`ToInt`]: dsi_bitstream::prelude::ToInt
 
 use super::SIntVec;
 use crate::intvec::IntVecIter;

@@ -194,12 +194,12 @@ let intvec = LEIntVec::builder(&data)
     .unwrap();
 
 // Indices can be in any order.
-let indices_to_get = &;
+let indices_to_get = &[500, 10, 9000, 1000, 2000];
 
 // get_many efficiently retrieves all values in one pass.
 let values = intvec.get_many(indices_to_get).unwrap();
 
-assert_eq!(values, vec!);
+assert_eq!(values, vec![500, 10, 9000, 1000, 2000]);
 ```
 
 ### Parallel Access with `par_get_many`
@@ -218,12 +218,12 @@ let intvec = LEIntVec::builder(&data)
     .build()
     .unwrap();
 
-let indices_to_get = &;
+let indices_to_get = &[500, 10, 9000, 1000, 2000];
 
 // par_get_many retrieves all values in parallel.
 let parallel_values = intvec.par_get_many(indices_to_get).unwrap();
 
-assert_eq!(parallel_values, vec!);
+assert_eq!(parallel_values, vec![500, 10, 9000, 1000, 2000]);
 ```
 
 If you need to disable this feature to reduce dependencies, you can do so in your `Cargo.toml`:

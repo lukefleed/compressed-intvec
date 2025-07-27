@@ -1,32 +1,40 @@
 //! # Codec Specification and Strategy Selection
 //!
-//! This module is central to the `compressed-intvec` library, providing the tools
-//! to select and configure the optimal compression strategy for a given dataset.
-//! The effectiveness of a compression algorithm is highly dependent on the statistical
-//! properties of the data it is applied to. For instance, a dataset of small,
-//! non-negative integers will compress best with a different algorithm than a dataset
-//! of large, uniformly distributed integers.
+//! This module defines the mechanisms for selecting and configuring the
+//! compression strategy for an [`IntVec`]. The choice of codec is critical, as
+//! its effectiveness is highly dependent on the statistical properties of the
+//! data being compressed.
 //!
-//! This module defines two main types of encodings:
+//! ## Encoding Strategies
 //!
-//! 1.  **Variable-length, bit-level codes**: These are instantaneous codes sourced
-//!     from the [dsi-bitstream](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/) library.
-//!     They are designed for compressing integers by using shorter bit sequences for
-//!     more frequent values (typically small numbers). This category includes codes
-//!     like Gamma (γ), Delta (δ), and Zeta (ζ).
+//! The library supports two fundamental encoding families:
 //!
-//! 2.  **Fixed-width integer encoding**: This strategy uses the same number of bits
-//!     for every integer. It is optimal for data that is uniformly distributed
-//!     within a known range.
+//! 1.  **Variable-Length Instantaneous Codes**: Sourced from the [`dsi-bitstream`]
+//!     crate, these codes (e.g., Gamma, Delta, Zeta) are designed to compress
+//!     integers by using shorter bit sequences for more frequent values, making
+//!     them ideal for skewed data distributions.
 //!
-//! The [`CodecSpec`] enum is the primary interface for users to specify their desired
-//! strategy. It allows for direct selection of a codec, explicit parameterization,
-//! or automatic selection where the library analyzes the data and chooses a
-//! suitable configuration.
+//! 2.  **Fixed-Width Integer Encoding**: This strategy uses the same number of
+//!     bits for every integer. It is optimal for data that is uniformly
+//!     distributed within a known range, providing the fastest possible random
+//!     access.
 //!
-//! **Note:** PForDelta is currently not supported via this specification mechanism
-//! because it's not integrated into the `dsi_bitstream::codes::Codes` enum used
-//! by the underlying dispatch system.
+//! ## The [`CodecSpec`] Enum
+//!
+//! The primary user-facing API for this module is the [`CodecSpec`] enum. It
+//! provides a high-level interface for specifying the desired compression
+//! strategy, allowing for:
+//! - Direct selection of a parameter-free codec (e.g., [`Gamma`]).
+//! - Explicit parameterization of tunable codecs (e.g., `Zeta { k: Some(3) }`).
+//! - Automatic parameter selection, where the library analyzes the data to find
+//!   the optimal configuration (e.g., `Auto` or `FixedLength { num_bits: None }`).
+//!
+//! The [`resolve_codec`] function translates a user's [`CodecSpec`] into a concrete
+//! [`Encoding`] variant that the [`IntVec`] can use for its internal operations.
+//!
+//! [`IntVec`]: crate::intvec::IntVec
+//! [`Gamma`]: CodecSpec::Gamma
+//! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
 use crate::intvec::IntVecError;
 use dsi_bitstream::dispatch::FuncCodeWriter;
@@ -37,7 +45,7 @@ use mem_dbg::{CopyType, MemDbgImpl, MemSize, SizeFlags, True};
 /// Specifies the compression codec and its parameters for an [`IntVec`].
 ///
 /// This enum allows for either explicitly setting the parameters for codes
-/// like Rice and Zeta, or requesting that `IntVec` automatically selects
+/// like Rice and Zeta, or requesting that [`IntVec`] automatically selects
 /// suitable parameters based on the data distribution during construction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CodecSpec {
@@ -93,7 +101,7 @@ pub enum CodecSpec {
     /// Use an explicitly provided code from the [`dsi_bitstream::codes::Codes`](https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/index.html) enum.
     ///
     /// This is an escape hatch for advanced use cases, allowing for the use of codes
-    /// not directly enumerated in `CodecSpec` (like Omega or VByte) or for programmatic
+    /// not directly enumerated in [`CodecSpec`] (like Omega or VByte) or for programmatic
     /// selection of codes.
     Explicit(Codes),
 }
@@ -130,11 +138,11 @@ impl MemSize for Encoding {
 // leaf in the memory layout tree.
 impl MemDbgImpl for Encoding {}
 
-/// Resolves a user-provided `CodecSpec` into a concrete `Encoding` variant.
+/// Resolves a user-provided [`CodecSpec`] into a concrete [`Encoding`] variant.
 ///
 /// This function is the core of the codec selection mechanism. It translates the
 /// user's high-level request (the `spec`) into a fully-parameterized, concrete
-/// `Encoding` that can be used for compression.
+/// [`Encoding`] that can be used for compression.
 ///
 /// If the `spec` includes requests for automatic parameter selection (e.g.,
 /// `CodecSpec::Auto` or variants with `None` parameters), this function analyzes
@@ -143,15 +151,15 @@ impl MemDbgImpl for Encoding {}
 /// # Arguments
 /// * `input`: The data slice used to determine optimal parameters for automatic
 ///   selection. This is ignored for specs with fully-fixed parameters.
-/// * `spec`: The `CodecSpec` indicating the desired codec and parameter settings.
+/// * `spec`: The [`CodecSpec`] indicating the desired codec and parameter settings.
 ///
 /// # Returns
-/// A `Result` containing the concrete `Encoding` variant or an
+/// A `Result` containing the concrete [`Encoding`] variant or an
 /// [`IntVecError::InvalidParameters`] if the configuration is invalid.
 ///
 /// # Heuristics and Justification for Automatic Selection
 ///
-/// When a `CodecSpec` variant with `None` parameters or `CodecSpec::Auto` is
+/// When a [`CodecSpec`] variant with `None` parameters or [`CodecSpec::Auto`] is
 /// provided, this function uses data-driven heuristics.
 ///
 /// - **`CodecSpec::FixedLength { num_bits: None }`**: The function scans the

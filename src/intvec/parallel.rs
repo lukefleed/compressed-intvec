@@ -1,9 +1,32 @@
-//! Parallel implementations for `IntVec`, enabled by the `parallel` feature flag.
+//! # Parallel Implementations
 //!
-//! This module provides parallel equivalents of `iter` and `get_many` using the
-//! Rayon library. These methods are designed to leverage multi-core architectures
-//! to speed up data decompression, though their effectiveness depends on the
-//! specific workload and compression scheme.
+//! This module provides parallel implementations for [`IntVec`] operations,
+//! enabled by the `parallel` feature flag. These methods are built on top of the
+//! [Rayon] library and are designed to leverage multi-core architectures to
+//! accelerate data decompression and access.
+//!
+//! ## Provided Functionality
+//!
+//! - [`par_iter`]: A parallel iterator for full-vector decompression. This can
+//!   provide significant speedups for computationally intensive codecs but may
+//!   be outperformed by the sequential [iterator][`IntVec::iter`] for simpler codecs where memory
+//!   bandwidth is the limiting factor.
+//!
+//! - [`par_get_many`]: A method for parallel batch lookups. It parallelizes the
+//!   retrieval of elements at specified indices, trading some redundant work
+//!   for higher throughput on multi-core systems.
+//!
+//! The effectiveness of these parallel methods depends on the workload, the
+//! chosen compression scheme ([`CodecSpec`]), and the underlying hardware. They are most
+//! beneficial for large datasets where the computational cost of decoding is
+//! a significant factor.
+//!
+//! [Rayon]: https://docs.rs/rayon/latest/rayon/
+//! [`IntVec`]: crate::intvec::IntVec
+//! [`par_iter`]: crate::intvec::IntVec::par_iter
+//! [`par_get_many`]: crate::intvec::IntVec::par_get_many
+//! [`IntVec::iter`]: crate::intvec::IntVec::iter
+//! [`CodecSpec`]: crate::codec_spec::CodecSpec
 
 use super::{Encoding, IntVec, IntVecBitReader, IntVecError};
 use dsi_bitstream::{

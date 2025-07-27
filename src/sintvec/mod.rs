@@ -1,6 +1,6 @@
 //! A compressed, randomly accessible vector of signed `i64` integers.
 //!
-//! This module provides `SIntVec`, a specialized vector for compressing signed
+//! This module provides [`SIntVec`], a specialized vector for compressing signed
 //! integer data.
 //!
 //! # The Challenge of Compressing Signed Integers
@@ -13,7 +13,7 @@
 //!
 //! # ZigZag Encoding
 //!
-//! To solve this, `SIntVec` uses a bijective mapping known as **ZigZag encoding**
+//! To solve this, [`SIntVec`] uses a bijective mapping known as **ZigZag encoding**
 //! to transform the signed integers into unsigned integers before compression. This
 //! transformation maps integers close to zero (both positive and negative) to small
 //! positive integers, making them highly compressible. The mapping is as follows:
@@ -27,7 +27,7 @@
 //! |       2        |      4       |
 //! |      ...       |     ...      |
 //!
-//! This transformation is handled transparently by `SIntVec`. All compression,
+//! This transformation is handled transparently by [`SIntVec`]. All compression,
 //! storage, and random access logic is then delegated to an inner [`IntVec`].
 
 use crate::codec_spec::Encoding;
@@ -46,13 +46,13 @@ pub use iter::SIntVecIter;
 
 /// A compressed, randomly accessible vector of signed `i64` integers.
 ///
-/// `SIntVec` acts as a wrapper around [`IntVec`] that transparently handles the
+/// [`SIntVec`] acts as a wrapper around [`IntVec`] that transparently handles the
 /// encoding of signed integers (`i64`) into unsigned integers (`u64`) using
 /// the ZigZag transformation. This allows for efficient compression of typical
 /// signed integer distributions, where values are often clustered around zero.
 ///
 /// All compression logic and storage are delegated to the inner [`IntVec`].
-/// `SIntVec` simply provides a convenient API that accepts and returns `i64` values.
+/// [`SIntVec`] simply provides a convenient API that accepts and returns `i64` values.
 ///
 /// # Limitations
 ///
@@ -90,7 +90,7 @@ where
         + dsi_bitstream::dispatch::CodesRead<E>
         + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
 {
-    /// Returns a builder for creating an `SIntVec` from a slice (`&[i64]`).
+    /// Returns a builder for creating an [`SIntVec`] from a slice (`&[i64]`).
     ///
     /// This builder requires that codec parameters be specified manually because
     /// it transforms the data on-the-fly and cannot perform a pre-analysis pass.
@@ -116,7 +116,7 @@ where
     /// Retrieves the signed integer at the specified index.
     ///
     /// This method retrieves the underlying compressed `u64` value from the inner
-    /// `IntVec` and then applies the inverse ZigZag transformation to restore the
+    /// [`IntVec`] and then applies the inverse ZigZag transformation to restore the
     /// original `i64` value.
     ///
     /// # Example
@@ -136,7 +136,7 @@ where
 
     /// Returns an iterator over the decompressed `i64` values.
     ///
-    /// The iterator wraps the inner `IntVec`'s iterator and applies the inverse
+    /// The iterator wraps the inner [`IntVec`]'s iterator and applies the inverse
     /// ZigZag transformation to each value on the fly.
     ///
     /// # Example
@@ -154,13 +154,13 @@ where
     }
 
     /// Returns the number of elements in the vector.
-    /// This is delegated to the inner `IntVec`.
+    /// This is delegated to the inner [`IntVec`].
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if the vector contains no elements.
-    /// This is delegated to the inner `IntVec`.
+    /// This is delegated to the inner [`IntVec`].
     ///
     /// # Example
     /// ```rust
@@ -175,19 +175,19 @@ where
     }
 
     /// Returns the underlying `Encoding` used for compression.
-    /// This is delegated to the inner `IntVec`.
+    /// This is delegated to the inner [`IntVec`].
     pub fn encoding(&self) -> Encoding {
         self.inner.encoding()
     }
 
     /// Returns the sampling rate `k` used during encoding, if applicable.
-    /// This is delegated to the inner `IntVec`.
+    /// This is delegated to the inner [`IntVec`].
     pub fn get_sampling_rate(&self) -> Option<usize> {
         self.inner.get_sampling_rate()
     }
 }
 
-/// A type alias for an [`SIntVec`] with Big-Endian (`BE`) bitstream encoding.
+/// A type alias for an [`SIntVec`] with Big-Endian ([`BE`]) bitstream encoding.
 ///
 /// Big-endian is a byte order used in many networking protocols and on certain
 /// CPU architectures (e.g., PowerPC, MIPS). The choice of endianness can have
@@ -217,7 +217,7 @@ where
 /// ```
 pub type BESIntVec = SIntVec<BE>;
 
-/// A type alias for an [`SIntVec`] with Little-Endian (`LE`) bitstream encoding.
+/// A type alias for an [`SIntVec`] with Little-Endian ([`LE`]) bitstream encoding.
 ///
 /// Little-endian is the native byte order for most modern commodity CPUs,
 /// including x86 and ARM architectures. For this reason, it often leads to the
