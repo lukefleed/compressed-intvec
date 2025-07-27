@@ -47,6 +47,27 @@
 //! assert_eq!(intvec.get(6), Some(1023));
 //! ```
 //!
+//! Or alternatively, we can use a fixed-length encoding:
+//!
+//! ```rust
+//! use compressed_intvec::prelude::*;
+//!
+//! // A small vector of integers to be compressed.
+//! let data: &[u64] = &[40, 200, 0, 50, 13, 90, 1023];
+//!
+//! // Use the builder to create an IntVec with fixed-length encoding.
+//! // Using `None` for `num_bits` will automatically select the best bit width (in this case, 10 bits).
+//! let intvec = LEIntVec::builder(data)
+//!    .codec(CodecSpec::FixedLength { num_bits: None })
+//!    .build()
+//!    .unwrap();
+//!
+//! // Verify the length and access some elements.
+//! assert_eq!(intvec.len(), data.len());
+//! assert_eq!(intvec.get(1), Some(200));
+//! assert_eq!(intvec.get(6), Some(1023));
+//! ```
+//!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 //! [`Endianness`]: dsi_bitstream::prelude::Endianness
 //! [`get_many`]: IntVec::get_many

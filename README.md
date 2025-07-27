@@ -1,4 +1,4 @@
-# Compressed-IntVec: High-Performance Compressed Integer Vectors
+# Compressed Integer Vectors
 
 [![crates.io](https://img.shields.io/crates/v/compressed-intvec.svg)](https://crates.io/crates/compressed-intvec)
 [![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
@@ -298,6 +298,7 @@ compressed-intvec = { version = "0.4.0", features = ["parallel", "serde"] }
 
 * [ ] Add [`ε-serde`](https://crates.io/crates/epserde) support.
 * [ ] Add SIMD optimizations for faster decoding in [`CodecSpec::FixedLength`] and [`CodecSpec::VByte`].
+* [ ] Optionally give the possibility to compress with Elias Fano the samples vector. However, this will introduce an computational overhead for the [`get`] method for a small gain in compression ratio that I don't think is worth it.
 
 
 [dsi-bitstream]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
