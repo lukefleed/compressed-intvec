@@ -298,10 +298,10 @@ The library offers two fundamental encoding families:
 To solve the random access problem for instantaneous codes, `compressed-intvec` uses a **sampling mechanism**.
 
 -   **How it Works**: During construction, the library stores the bit position of every `k`-th element in a separate lookup table (the `samples` array). To retrieve the value at a given `index`, the accessor performs the following steps:
-    1.  It identifies the closest preceding sample point by calculating `sample_index = index / k`.
-    2.  It looks up the bit offset of that sample point.
-    3.  It seeks the internal bitstream reader to that offset.
-    4.  It decodes elements sequentially from that point until it reaches the target `index`.
+    *  It identifies the closest preceding sample point by calculating `sample_index = index / k`.
+    *  It looks up the bit offset of that sample point.
+    *  It seeks the internal bitstream reader to that offset.
+    *  It decodes elements sequentially from that point until it reaches the target `index`.
 
 This is where the `k` parameter becomes critical:
 
@@ -344,7 +344,7 @@ compressed-intvec = { version = "0.4.0", features = ["parallel", "serde"] }
 
 * [ ] Add [`ε-serde`](https://crates.io/crates/epserde) support.
 * [ ] Add SIMD optimizations for faster decoding in [`CodecSpec::FixedLength`] and [`CodecSpec::VByte`].
-* [ ] Optionally give the possibility to compress with Elias Fano the samples vector. However, this will introduce an computational overhead for the [`get`] method for a small gain in compression ratio that I don't think is worth it.
+* [ ] Consider adding optional Elias–Fano compression for the samples vector. This could further reduce memory usage, but would increase computational overhead for the [`get`] method. The trade-off may not justify the relatively small compression gain.
 
 
 [dsi-bitstream]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
@@ -368,5 +368,5 @@ compressed-intvec = { version = "0.4.0", features = ["parallel", "serde"] }
 [`CodecSpec::Delta`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Delta
 [`CodecSpec::Zeta`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.Zeta
 [`CodecSpec::FixedLength`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.FixedLength
-[`CodecSpec::VByte`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.VByte
+[`CodecSpec::VByte`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.VByteLe
 [Serde]: https://serde.rs/
