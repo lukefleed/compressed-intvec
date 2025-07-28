@@ -15,7 +15,7 @@ keywords = [
     "integer-encoding",
 ]
 categories = ["data-structures", "compression", "algorithms"]
-exclude = [".github/*"]
+exclude = [".github/*", "images/*"]
 
 [dependencies]
 dsi-bitstream = "0.5.0"
