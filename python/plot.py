@@ -164,7 +164,6 @@ def save_plots(fig, base_name):
         return
 
     distributions = [button['label'] for button in fig.layout.updatemenus[0].buttons]
-    main_title = fig.layout.title.text.split('<br>')[0] # Get main title part
 
     for dist in distributions:
         static_fig = go.Figure(fig)
@@ -188,7 +187,7 @@ def save_plots(fig, base_name):
         # Remove the "Select Data Distribution" annotation
         static_fig.layout.annotations = [ann for ann in static_fig.layout.annotations if "Select Data" not in ann.text]
         subtitle = format_distribution_subtitle(dist)
-        static_fig.update_layout(title_text=f"{main_title}<br>{subtitle}")
+        static_fig.update_layout(title_text=f"{fig.layout.title.text}<br>{subtitle}")
 
         base_filename = os.path.join(single_distr_dir, f"{base_name}_{dist}")
         html_path = f"{base_filename}.html"
@@ -287,9 +286,6 @@ def plot_size():
         print(f"Error: File not found at {BENCH_SIZE_CSV}"); return
 
     df = pd.read_csv(BENCH_SIZE_CSV).drop_duplicates()
-    # Clean up distribution names from CSV (e.g., "Geometric_1000000" -> "Geometric")
-    df["distribution"] = df["distribution"].str.rsplit('_', n=1).str[0]
-
     df["space_kb"] = df["space_bytes"] / 1024
     df["codec_display_name"] = df["name"].apply(format_codec_name)
     # Standardize baseline names and assign k=0 for plotting
