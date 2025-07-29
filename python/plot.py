@@ -8,9 +8,7 @@ import plotly.graph_objects as go
 # --- Configuration ---
 CRITERION_DIR = "target/criterion"
 OUTPUT_DIR = "images"
-# This benchmark will continue to use its CSV file as requested.
 BENCH_SIZE_CSV = "bench_results/size_results.csv"
-# This constant is from the Rust benchmark code and is used for plot titles.
 VECTOR_SIZE = 1_000_000
 
 # --- Data Parsing from Criterion JSON ---
@@ -44,7 +42,6 @@ def parse_random_access_results():
 
         dist_path = os.path.join(base_path, ra_dir)
         for root, _, files in os.walk(dist_path):
-            # Only read from the 'base' directory to avoid duplicates from 'new'
             if "estimates.json" in files and root.endswith(os.path.join('base')):
                 benchmark_id = os.path.basename(os.path.dirname(root))
                 name, k = None, 0
@@ -99,7 +96,6 @@ def parse_parallel_results():
     for dist in dist_dirs:
         dist_path = os.path.join(base_path, dist)
         for root, _, files in os.walk(dist_path):
-            # Only read from the 'base' directory to avoid duplicates from 'new'
             if "estimates.json" in files and root.endswith(os.path.join('base')):
                 benchmark_id = os.path.basename(os.path.dirname(root))
                 method_found, codec_name = None, None
@@ -159,7 +155,6 @@ def save_plots(fig, base_name):
     single_distr_dir = os.path.join(benchmark_output_dir, "single_distr")
     os.makedirs(single_distr_dir, exist_ok=True)
 
-    # Save the main interactive HTML plot
     interactive_path = os.path.join(benchmark_output_dir, f"{base_name}_interactive.html")
     print(f"  Saving interactive plot to {interactive_path}")
     fig.write_html(interactive_path)
@@ -172,13 +167,24 @@ def save_plots(fig, base_name):
 
     for dist in distributions:
         static_fig = go.Figure(fig)
+
+        # Manually set visibility for traces in the static figure
         for trace in static_fig.data:
-            trace.visible = (hasattr(trace, 'customdata') and trace.customdata is not None and dist in trace.customdata)
+            is_visible = False
+            # Check if customdata exists and is not empty
+            if hasattr(trace, 'customdata') and trace.customdata is not None and len(trace.customdata) > 0:
+                # Check if the target distribution is in the customdata list
+                if dist in trace.customdata:
+                    is_visible = True
+            trace.visible = is_visible
+
+        # Manually set visibility for shapes (e.g., hlines)
         if static_fig.layout.shapes:
              for shape in static_fig.layout.shapes:
-                shape.visible = (hasattr(shape, 'name') and shape.name is not None and dist in shape.name)
+                shape.visible = hasattr(shape, 'name') and shape.name is not None and dist in shape.name
 
         static_fig.layout.updatemenus = None
+        # Remove the "Select Data Distribution" annotation
         static_fig.layout.annotations = [ann for ann in static_fig.layout.annotations if "Select Data" not in ann.text]
         subtitle = format_distribution_subtitle(dist)
         static_fig.update_layout(title_text=f"{fig.layout.title.text}<br>{subtitle}")
@@ -190,69 +196,74 @@ def save_plots(fig, base_name):
         try:
             svg_path = f"{base_filename}.svg"
             print(f"  Saving static plot to {svg_path}")
-            static_fig.write_image(svg_path)
+            # Ensure static images are saved with the same large aspect ratio
+            static_fig.write_image(svg_path, width=1600, height=900)
         except ValueError as e:
             print(f"    Could not save SVG for {dist}: {e}. Ensure 'kaleido' is installed.")
 
     print(f"Finished processing for {base_name}.")
 
+
 # --- Plotting Logic ---
 
-def create_figure_from_dataframe(df, plot_params):
-    """Creates a Plotly figure with a dropdown menu from a processed dataframe."""
+def create_line_plot_figure(df, plot_params):
+    """Creates a Plotly figure with line plots and a dropdown menu."""
     distributions = sorted(df["distribution"].unique())
     fig = go.Figure()
 
+    default_dist_name = "Geometric" if "Geometric" in distributions else (distributions[0] if distributions else None)
+    active_index = distributions.index(default_dist_name) if default_dist_name else 0
+
     for dist in distributions:
         df_dist = df[df["distribution"] == dist]
-        sampled_df = df_dist[df_dist["k"] > 1]
+        is_visible = (dist == default_dist_name)
 
+        # Plot sampled data (k > 0)
+        sampled_df = df_dist[df_dist["k"] > 0]
         dist_codecs = sorted(sampled_df["codec_display_name"].unique())
-
         for codec_name in dist_codecs:
             df_plot = sampled_df[sampled_df["codec_display_name"] == codec_name].sort_values("k")
             fig.add_trace(go.Scatter(
                 x=df_plot["k"], y=df_plot[plot_params["y_col"]], mode="lines+markers",
-                name=codec_name, customdata=[dist] * len(df_plot), visible=False,
+                name=codec_name, customdata=[dist] * len(df_plot), visible=is_visible,
                 hovertemplate=plot_params["hover_template"].format(codec_name=codec_name),
-                legendgroup=dist,
             ))
 
-        baselines = [
+        # Plot baselines (k = 0)
+        baseline_df = df_dist[df_dist["k"] == 0]
+        baselines_to_draw = [
             {"name": "Uncompressed Vec<u64>", "dash": "dash", "color": "black"},
             {"name": "Fixed Length", "dash": "dot", "color": "red"}
         ]
-        for baseline in baselines:
-            series = df_dist[df_dist["codec_display_name"].str.contains(baseline["name"], na=False)]
+        for baseline in baselines_to_draw:
+            series = baseline_df[baseline_df["codec_display_name"] == baseline["name"]]
             if not series.empty:
                 y_val = series[plot_params["y_col"]].iloc[0]
                 fig.add_hline(y=y_val, line_dash=baseline["dash"], line_color=baseline["color"],
-                              name=f"{baseline['name']}_{dist}", visible=False)
+                              name=f"baseline_{baseline['name']}_{dist}", visible=is_visible)
                 fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines", name=baseline["name"],
                                          line=dict(color=baseline["color"], dash=baseline["dash"]),
-                                         visible=False, customdata=[dist], legendgroup=dist))
+                                         visible=is_visible, customdata=[dist]))
 
     fig.update_layout(
-        width=1000, height=800,
+        width=1600, height=900,
         title_text=plot_params["title"],
         xaxis_title="Sampling Rate (k)", yaxis_title=plot_params["yaxis_title"],
         legend_title_text="Codec Type", hovermode="x unified", xaxis=dict(type='category'),
-        annotations=[dict(text="Select Data Distribution:", showarrow=False, x=0, y=1.08, xref="paper", yref="paper", align="left")]
+        annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
+                          xref="paper", yref="paper", xanchor='right', yanchor='bottom', align="right")]
     )
 
-    buttons = [dict(
-            label=dist, method="update",
-            args=[
-                {"visible": [(dist in trace.customdata if hasattr(trace, 'customdata') and trace.customdata else False) for trace in fig.data]},
-                {"shapes": [dict(visible=(dist in shape.name if hasattr(shape, 'name') and shape.name else False)) for shape in fig.layout.shapes]}
-            ]
-        ) for dist in distributions]
+    buttons = []
+    for dist in distributions:
+        visibility_arg = [(dist in trace.customdata if hasattr(trace, 'customdata') and trace.customdata is not None else False) for trace in fig.data]
+        shapes_arg = [dict(visible=(dist in shape.name if hasattr(shape, 'name') and shape.name is not None else False)) for shape in fig.layout.shapes]
+        buttons.append(dict(label=dist, method="update", args=[{"visible": visibility_arg}, {"shapes": shapes_arg}]))
 
-    fig.update_layout(updatemenus=[dict(buttons=buttons, direction="down", showactive=True, x=0, xanchor="left", y=1.15, yanchor="top")])
-
-    if distributions:
-        fig.update_traces(visible=True, selector=dict(customdata=[distributions[0]]))
-        fig.update_shapes(visible=True, selector=dict(name__contains=distributions[0]))
+    fig.update_layout(updatemenus=[dict(
+        buttons=buttons, direction="down", showactive=True, active=active_index,
+        x=1, xanchor="right", y=1.1, yanchor="top"
+    )])
 
     return fig
 
@@ -265,7 +276,10 @@ def plot_size():
     df = pd.read_csv(BENCH_SIZE_CSV).drop_duplicates()
     df["space_kb"] = df["space_bytes"] / 1024
     df["codec_display_name"] = df["name"].apply(format_codec_name)
-    df.loc[df["codec_display_name"].str.contains("Fixed Length", na=False), "codec_display_name"] = "Fixed Length"
+    # Standardize baseline names
+    df.loc[df["codec_display_name"] == "Fixed Length", "k"] = 0
+    df.loc[df["codec_display_name"] == "Uncompressed Vec<u64>", "k"] = 0
+
 
     plot_params = {
         "y_col": "space_kb",
@@ -274,7 +288,7 @@ def plot_size():
         "hover_template": "<b>{codec_name}</b><br>k=%{{x}}<br>Space=%{{y:.1f}} KB<extra></extra>",
     }
 
-    fig = create_figure_from_dataframe(df, plot_params)
+    fig = create_line_plot_figure(df, plot_params)
     save_plots(fig, "size")
 
 def plot_random_access():
@@ -286,7 +300,6 @@ def plot_random_access():
 
     df["access_elapsed_ms"] = df["access_elapsed_seconds"] * 1000
     df["codec_display_name"] = df["name"].apply(format_codec_name)
-    df.loc[df["codec_display_name"].str.contains("Fixed Length", na=False), "codec_display_name"] = "Fixed Length"
 
     plot_params = {
         "y_col": "access_elapsed_ms",
@@ -294,7 +307,7 @@ def plot_random_access():
         "yaxis_title": "Time for 10,000 Accesses (ms)",
         "hover_template": "<b>{codec_name}</b><br>k=%{{x}}<br>Time=%{{y:.2f}} ms<extra></extra>",
     }
-    fig = create_figure_from_dataframe(df, plot_params)
+    fig = create_line_plot_figure(df, plot_params)
     save_plots(fig, "random_access")
 
 def plot_parallel():
@@ -306,18 +319,23 @@ def plot_parallel():
 
     df["elapsed_ms"] = df["elapsed_seconds"] * 1000
     df["codec_display_name"] = df["codec"].apply(format_codec_name)
-
     distributions = sorted(df["distribution"].unique())
+
+    default_dist_name = "Geometric" if "Geometric" in distributions else (distributions[0] if distributions else None)
+    active_index = distributions.index(default_dist_name) if default_dist_name else 0
+
     fig = go.Figure()
 
     for dist in distributions:
         df_dist = df[df["distribution"] == dist].copy()
+        is_visible = (dist == default_dist_name)
 
         baseline_times = df_dist[df_dist["method"] == "get_loop"].set_index("codec_display_name")["elapsed_ms"]
         df_dist["baseline_ms"] = df_dist["codec_display_name"].map(baseline_times)
 
         df_dist["speedup"] = (df_dist["baseline_ms"] / df_dist["elapsed_ms"]).round(2)
         methods_to_plot = ["get_loop", "get_many", "par_get_many"]
+
         for method in methods_to_plot:
             df_m = df_dist[df_dist["method"] == method].sort_values("codec_display_name")
             fig.add_trace(go.Bar(
@@ -325,25 +343,30 @@ def plot_parallel():
                 y=df_m["elapsed_ms"],
                 name=method,
                 customdata=[dist] * len(df_m),
-                visible=False,
+                visible=is_visible,
                 text=df_m.apply(lambda r: f"{r['speedup']:.2f}x" if r['method'] != 'get_loop' else "", axis=1),
                 textposition='outside',
                 hovertemplate="<b>%{x}</b><br>%{data.name}<br>Time: %{y:.2f} ms<br>Speedup: %{text}<extra></extra>"
             ))
 
     fig.update_layout(
-        width=1200, height=800, barmode='group',
+        width=1600, height=900, barmode='group',
         title_text="Access Method Performance Comparison",
         xaxis_title="Codec", yaxis_title="Time for 10,000 Accesses (ms)",
         legend_title_text="Access Method",
-        annotations=[dict(text="Select Data Distribution:", showarrow=False, x=0, y=1.08, xref="paper", yref="paper", align="left")]
+        annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
+                          xref="paper", yref="paper", xanchor='right', yanchor='bottom', align="right")]
     )
 
-    buttons = [dict(label=d, method="update", args=[{"visible": [d in t.customdata for t in fig.data]}]) for d in distributions]
-    fig.update_layout(updatemenus=[dict(buttons=buttons, direction="down", showactive=True, x=0, xanchor="left", y=1.15, yanchor="top")])
-
-    if distributions:
-        fig.update_traces(visible=True, selector=dict(customdata=[distributions[0]]))
+    buttons = [dict(label=d, method="update", args=[{"visible": [d in t.customdata if hasattr(t, 'customdata') else False for t in fig.data]}]) for d in distributions]
+    fig.update_layout(updatemenus=[dict(
+        buttons=buttons,
+        direction="down",
+        showactive=True,
+        active=active_index,
+        x=1, xanchor="right",
+        y=1.1, yanchor="top"
+    )])
 
     save_plots(fig, "parallel")
 
@@ -359,6 +382,8 @@ if __name__ == "__main__":
     if not any([args.random_access, args.size, args.parallel, args.all]):
         parser.print_help()
     else:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+
         if args.random_access or args.all:
             plot_random_access()
         if args.size or args.all:
