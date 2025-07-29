@@ -118,7 +118,7 @@ def parse_parallel_results():
 def format_codec_name(name):
     """Converts a raw codec name to a human-readable format."""
     if name == "Baseline": return "Uncompressed Vec<u64>"
-    if name == "FixedLength": return "Fixed Length"
+    if name == "FixedLength" or (isinstance(name, str) and name.startswith("Fixednum")): return "Fixed Length"
     if isinstance(name, str) and name.startswith("Explicit_"):
         name = name.replace("Explicit_", "")
         if name == "VByteLe": return "VByte (LE)"
@@ -175,7 +175,7 @@ def save_plots(fig, base_name):
         try:
             svg_path = f"{base_filename}.svg"
             print(f"  Saving static plot to {svg_path}")
-            static_fig.write_image(svg_path, width=1600, height=900)
+            static_fig.write_image(svg_path, width=1400, height=787)
         except ValueError as e:
             print(f"    Could not save SVG for {dist}: {e}. Ensure 'kaleido' is installed.")
 
@@ -225,10 +225,12 @@ def create_line_plot_figure(df, plot_params):
     main_title = plot_params["title"]
 
     fig.update_layout(
-        width=1600, height=900,
+        width=1400, height=787,
         title_text=f"{main_title}<br>{default_subtitle}",
-        xaxis_title="Sampling Rate (k)", yaxis_title=plot_params["yaxis_title"],
-        legend_title_text="Codec Type", hovermode="x unified", xaxis=dict(type='category'),
+        xaxis=dict(title="Sampling Rate (k)", type='category'),
+        yaxis=dict(title=plot_params["yaxis_title"]),
+        legend_title_text="Codec Type", hovermode="x unified",
+        margin=dict(r=250),
         annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
                           xref="paper", yref="paper", xanchor='right', yanchor='bottom')]
     )
@@ -270,11 +272,9 @@ def plot_size():
         df_dist = df[df["clean_distribution"] == dist]
         is_visible = (dist == default_dist_name)
 
-        # Separate baselines from other data using name prefixes
         baselines_df = df_dist[df_dist['name'].str.startswith("Vec") | df_dist['name'].str.startswith("Fixed")]
         sampled_df = df_dist.drop(baselines_df.index)
 
-        # Plot k > 0 data as lines
         for codec_name in sorted(sampled_df["name"].unique()):
             df_plot = sampled_df[sampled_df["name"] == codec_name].sort_values("k")
             fig.add_trace(go.Scatter(
@@ -283,13 +283,12 @@ def plot_size():
                 hovertemplate="<b>" + codec_name + "</b><br>k=%{x}<br>Space=%{y:.1f} KB<extra></extra>",
             ))
 
-        # Plot baselines as horizontal lines
         for _, row in baselines_df.iterrows():
             codec_name = row['name']
             y_val = row['space_kb']
             if codec_name.startswith("Vec"):
                 style = {"dash": "dash", "color": "black", "name": "Uncompressed Vec<u64>"}
-            else: # Starts with "Fixed"
+            else:
                 style = {"dash": "dot", "color": "red", "name": codec_name}
 
             fig.add_hline(y=y_val, line_dash=style["dash"], line_color=style["color"],
@@ -302,10 +301,12 @@ def plot_size():
     default_subtitle = format_distribution_subtitle(default_dist_name) if default_dist_name else ""
 
     fig.update_layout(
-        width=1600, height=900,
+        width=1400, height=787,
         title_text=f"{main_title}<br>{default_subtitle}",
-        xaxis_title="Sampling Rate (k)", yaxis_title="Total Space Usage (KB)",
-        legend_title_text="Codec Type", hovermode="x unified", xaxis=dict(type='category'),
+        xaxis=dict(title="Sampling Rate (k)", type='category'),
+        yaxis=dict(title="Total Space Usage (KB)"),
+        legend_title_text="Codec Type", hovermode="x unified",
+        margin=dict(r=250),
         annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
                           xref="paper", yref="paper", xanchor='right', yanchor='bottom')]
     )
@@ -337,7 +338,6 @@ def plot_random_access():
     df["access_elapsed_ms"] = df["access_elapsed_seconds"] * 1000
     df["codec_display_name"] = df["name"].apply(format_codec_name)
 
-    # Standardize baselines by marking with k=0
     df.loc[df["codec_display_name"] == "Fixed Length", "k"] = 0
     df.loc[df["codec_display_name"] == "Uncompressed Vec<u64>", "k"] = 0
 
@@ -390,10 +390,12 @@ def plot_parallel():
     main_title = "Access Method Performance Comparison"
 
     fig.update_layout(
-        width=1600, height=900, barmode='group',
+        width=1400, height=787, barmode='group',
         title_text=f"{main_title}<br>{default_subtitle}",
-        xaxis_title="Codec", yaxis_title="Time for 10,000 Accesses (ms)",
+        xaxis=dict(title="Codec"),
+        yaxis=dict(title="Time for 10,000 Accesses (ms)"),
         legend_title_text="Access Method",
+        margin=dict(r=250),
         annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
                           xref="paper", yref="paper", xanchor='right', yanchor='bottom')]
     )
