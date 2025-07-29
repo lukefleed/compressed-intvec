@@ -183,75 +183,6 @@ def save_plots(fig, base_name):
 
 # --- Plotting Logic ---
 
-def create_line_plot_figure(df, plot_params):
-    """Creates a Plotly figure with line plots and a dropdown menu."""
-    distributions = sorted(df["distribution"].unique())
-    fig = go.Figure()
-
-    default_dist_name = "Geometric" if "Geometric" in distributions else (distributions[0] if distributions else None)
-    active_index = distributions.index(default_dist_name) if default_dist_name else 0
-
-    for dist in distributions:
-        df_dist = df[df["distribution"] == dist]
-        is_visible = (dist == default_dist_name)
-
-        # Plot k > 0 data as lines
-        sampled_df = df_dist[df_dist["k"] > 0]
-        for codec_name in sorted(sampled_df["codec_display_name"].unique()):
-            df_plot = sampled_df[sampled_df["codec_display_name"] == codec_name].sort_values("k")
-            fig.add_trace(go.Scatter(
-                x=df_plot["k"], y=df_plot[plot_params["y_col"]], mode="lines+markers",
-                name=codec_name, customdata=[dist], visible=is_visible,
-                hovertemplate=plot_params["hover_template"].format(codec_name=codec_name),
-            ))
-
-        # Plot k == 0 data as horizontal baselines
-        baseline_df = df_dist[df_dist["k"] == 0]
-        baselines = [
-            {"name": "Uncompressed Vec<u64>", "dash": "dash", "color": "black"},
-            {"name": "Fixed Length", "dash": "dot", "color": "red"}
-        ]
-        for baseline in baselines:
-            series = baseline_df[baseline_df["codec_display_name"] == baseline["name"]]
-            if not series.empty:
-                y_val = series[plot_params["y_col"]].iloc[0]
-                fig.add_hline(y=y_val, line_dash=baseline["dash"], line_color=baseline["color"],
-                              name=f"{baseline['name']}_{dist}", visible=is_visible)
-                fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines", name=baseline["name"],
-                                         line=dict(color=baseline["color"], dash=baseline["dash"]),
-                                         visible=is_visible, customdata=[dist]))
-
-    default_subtitle = format_distribution_subtitle(default_dist_name) if default_dist_name else ""
-    main_title = plot_params["title"]
-
-    fig.update_layout(
-        width=1400, height=787,
-        title_text=f"{main_title}<br>{default_subtitle}",
-        xaxis=dict(title="Sampling Rate (k)", type='category'),
-        yaxis=dict(title=plot_params["yaxis_title"]),
-        legend_title_text="Codec Type", hovermode="x unified",
-        margin=dict(r=250),
-        annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
-                          xref="paper", yref="paper", xanchor='right', yanchor='bottom')]
-    )
-
-    buttons = []
-    for dist in distributions:
-        visibility_arg = [dist in trace.customdata for trace in fig.data]
-        shapes_arg = [dict(visible=(dist in shape.name)) for shape in fig.layout.shapes]
-        new_subtitle = format_distribution_subtitle(dist)
-        buttons.append(dict(label=dist, method="update", args=[
-            {"visible": visibility_arg},
-            {"shapes": shapes_arg, "title.text": f"{main_title}<br>{new_subtitle}"}
-        ]))
-
-    fig.update_layout(updatemenus=[dict(
-        buttons=buttons, direction="down", showactive=True, active=active_index,
-        x=1, xanchor="right", y=1.1, yanchor="top"
-    )])
-
-    return fig
-
 def plot_size():
     """Generates plots for memory size benchmark results using dedicated logic."""
     print("Processing size benchmarks...")
@@ -303,7 +234,7 @@ def plot_size():
     fig.update_layout(
         width=1400, height=787,
         title_text=f"{main_title}<br>{default_subtitle}",
-        xaxis=dict(title="Sampling Rate (k)", type='category'),
+        xaxis=dict(title="Sampling Rate (k)"),
         yaxis=dict(title="Total Space Usage (KB)"),
         legend_title_text="Codec Type", hovermode="x unified",
         margin=dict(r=250),
@@ -329,7 +260,7 @@ def plot_size():
     save_plots(fig, "size")
 
 def plot_random_access():
-    """Generates plots for random access benchmark results."""
+    """Generates plots for random access benchmark results using a slowdown factor."""
     print("Processing random access benchmarks...")
     df = parse_random_access_results()
     if df.empty:
@@ -338,16 +269,86 @@ def plot_random_access():
     df["access_elapsed_ms"] = df["access_elapsed_seconds"] * 1000
     df["codec_display_name"] = df["name"].apply(format_codec_name)
 
-    df.loc[df["codec_display_name"] == "Fixed Length", "k"] = 0
-    df.loc[df["codec_display_name"] == "Uncompressed Vec<u64>", "k"] = 0
+    distributions = sorted(df["distribution"].unique())
 
-    plot_params = {
-        "y_col": "access_elapsed_ms",
-        "title": "Random Access Performance vs. Sampling Rate (k)",
-        "yaxis_title": "Time for 10,000 Accesses (ms)",
-        "hover_template": "<b>{codec_name}</b><br>k=%{{x}}<br>Time=%{{y:.2f}} ms<extra></extra>",
-    }
-    fig = create_line_plot_figure(df, plot_params)
+    # Calculate slowdown factor for each distribution
+    for dist in distributions:
+        baseline_time_series = df[(df["distribution"] == dist) & (df["codec_display_name"] == "Uncompressed Vec<u64>")]
+        if not baseline_time_series.empty:
+            baseline_time = baseline_time_series["access_elapsed_seconds"].iloc[0]
+            df.loc[df["distribution"] == dist, "slowdown"] = df["access_elapsed_seconds"] / baseline_time
+        else:
+            df.loc[df["distribution"] == dist, "slowdown"] = float('nan')
+
+    fig = go.Figure()
+
+    default_dist_name = "Geometric" if "Geometric" in distributions else (distributions[0] if distributions else None)
+    active_index = distributions.index(default_dist_name) if default_dist_name else 0
+
+    for dist in distributions:
+        df_dist = df[df["distribution"] == dist].copy()
+        is_visible = (dist == default_dist_name)
+
+        # Separate baselines from other codecs
+        baselines_df = df_dist[df_dist["codec_display_name"].isin(["Uncompressed Vec<u64>", "Fixed Length"])]
+        sampled_df = df_dist[~df_dist["codec_display_name"].isin(["Uncompressed Vec<u64>", "Fixed Length"])]
+
+        # Plot sampled data (curves)
+        for codec_name in sorted(sampled_df["codec_display_name"].unique()):
+            df_plot = sampled_df[sampled_df["codec_display_name"] == codec_name].sort_values("k")
+            fig.add_trace(go.Scatter(
+                x=df_plot["k"], y=df_plot["slowdown"], mode="lines+markers",
+                name=codec_name, customdata=[dist], visible=is_visible,
+                text=[f"{t:.2f} ms" for t in df_plot["access_elapsed_ms"]],
+                hovertemplate=("<b>" + codec_name + "</b><br>" +
+                               "k=%{x}<br>" +
+                               "Slowdown: %{y:.1f}x<br>" +
+                               "Absolute Time: %{text}<extra></extra>")
+            ))
+
+        # Plot baselines (horizontal lines)
+        # 1. Uncompressed Vec is always at y=1
+        fig.add_hline(y=1, line_dash="dash", line_color="black", name=f"Uncompressed Vec<u64>_{dist}", visible=is_visible)
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines", name="Uncompressed Vec<u64>",
+                                 line=dict(color="black", dash="dash"), visible=is_visible, customdata=[dist]))
+
+        # 2. Fixed Length has a calculated slowdown
+        fixed_series = baselines_df[baselines_df["codec_display_name"] == "Fixed Length"]
+        if not fixed_series.empty:
+            y_val = fixed_series["slowdown"].iloc[0]
+            fig.add_hline(y=y_val, line_dash="dot", line_color="red", name=f"Fixed Length_{dist}", visible=is_visible)
+            fig.add_trace(go.Scatter(x=[None], y=[None], mode="lines", name="Fixed Length",
+                                     line=dict(color="red", dash="dot"), visible=is_visible, customdata=[dist]))
+
+    main_title = "Random Access Slowdown vs. Sampling Rate (k)"
+    default_subtitle = format_distribution_subtitle(default_dist_name) if default_dist_name else ""
+
+    fig.update_layout(
+        width=1400, height=787,
+        title_text=f"{main_title}<br>{default_subtitle}",
+        xaxis=dict(title="Sampling Rate (k)"),
+        yaxis=dict(title="Slowdown Factor (Log Scale, relative to Uncompressed Vec)", type='log'),
+        legend_title_text="Codec Type", hovermode="x unified",
+        margin=dict(r=250),
+        annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
+                          xref="paper", yref="paper", xanchor='right', yanchor='bottom')]
+    )
+
+    buttons = []
+    for dist in distributions:
+        visibility_arg = [dist in trace.customdata for trace in fig.data]
+        shapes_arg = [dict(visible=(dist in shape.name)) for shape in fig.layout.shapes]
+        new_subtitle = format_distribution_subtitle(dist)
+        buttons.append(dict(label=dist, method="update", args=[
+            {"visible": visibility_arg},
+            {"shapes": shapes_arg, "title.text": f"{main_title}<br>{new_subtitle}"}
+        ]))
+
+    fig.update_layout(updatemenus=[dict(
+        buttons=buttons, direction="down", showactive=True, active=active_index,
+        x=1, xanchor="right", y=1.1, yanchor="top"
+    )])
+
     save_plots(fig, "random_access")
 
 def plot_parallel():
