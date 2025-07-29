@@ -164,6 +164,7 @@ def save_plots(fig, base_name):
         return
 
     distributions = [button['label'] for button in fig.layout.updatemenus[0].buttons]
+    main_title = fig.layout.title.text.split('<br>')[0] # Get main title part
 
     for dist in distributions:
         static_fig = go.Figure(fig)
@@ -187,7 +188,7 @@ def save_plots(fig, base_name):
         # Remove the "Select Data Distribution" annotation
         static_fig.layout.annotations = [ann for ann in static_fig.layout.annotations if "Select Data" not in ann.text]
         subtitle = format_distribution_subtitle(dist)
-        static_fig.update_layout(title_text=f"{fig.layout.title.text}<br>{subtitle}")
+        static_fig.update_layout(title_text=f"{main_title}<br>{subtitle}")
 
         base_filename = os.path.join(single_distr_dir, f"{base_name}_{dist}")
         html_path = f"{base_filename}.html"
@@ -245,9 +246,13 @@ def create_line_plot_figure(df, plot_params):
                                          line=dict(color=baseline["color"], dash=baseline["dash"]),
                                          visible=is_visible, customdata=[dist]))
 
+    # Set initial title with subtitle for default distribution
+    default_subtitle = format_distribution_subtitle(default_dist_name) if default_dist_name else ""
+    main_title = plot_params["title"]
+
     fig.update_layout(
         width=1600, height=900,
-        title_text=plot_params["title"],
+        title_text=f"{main_title}<br>{default_subtitle}",
         xaxis_title="Sampling Rate (k)", yaxis_title=plot_params["yaxis_title"],
         legend_title_text="Codec Type", hovermode="x unified", xaxis=dict(type='category'),
         annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
@@ -258,7 +263,15 @@ def create_line_plot_figure(df, plot_params):
     for dist in distributions:
         visibility_arg = [(dist in trace.customdata if hasattr(trace, 'customdata') and trace.customdata is not None else False) for trace in fig.data]
         shapes_arg = [dict(visible=(dist in shape.name if hasattr(shape, 'name') and shape.name is not None else False)) for shape in fig.layout.shapes]
-        buttons.append(dict(label=dist, method="update", args=[{"visible": visibility_arg}, {"shapes": shapes_arg}]))
+        new_subtitle = format_distribution_subtitle(dist)
+        buttons.append(dict(
+            label=dist,
+            method="update",
+            args=[
+                {"visible": visibility_arg},
+                {"shapes": shapes_arg, "title.text": f"{main_title}<br>{new_subtitle}"}
+            ]
+        ))
 
     fig.update_layout(updatemenus=[dict(
         buttons=buttons, direction="down", showactive=True, active=active_index,
@@ -274,12 +287,14 @@ def plot_size():
         print(f"Error: File not found at {BENCH_SIZE_CSV}"); return
 
     df = pd.read_csv(BENCH_SIZE_CSV).drop_duplicates()
+    # Clean up distribution names from CSV (e.g., "Geometric_1000000" -> "Geometric")
+    df["distribution"] = df["distribution"].str.rsplit('_', n=1).str[0]
+
     df["space_kb"] = df["space_bytes"] / 1024
     df["codec_display_name"] = df["name"].apply(format_codec_name)
-    # Standardize baseline names
+    # Standardize baseline names and assign k=0 for plotting
     df.loc[df["codec_display_name"] == "Fixed Length", "k"] = 0
     df.loc[df["codec_display_name"] == "Uncompressed Vec<u64>", "k"] = 0
-
 
     plot_params = {
         "y_col": "space_kb",
@@ -349,16 +364,31 @@ def plot_parallel():
                 hovertemplate="<b>%{x}</b><br>%{data.name}<br>Time: %{y:.2f} ms<br>Speedup: %{text}<extra></extra>"
             ))
 
+    # Set initial title with subtitle for default distribution
+    default_subtitle = format_distribution_subtitle(default_dist_name) if default_dist_name else ""
+    main_title = "Access Method Performance Comparison"
+
     fig.update_layout(
         width=1600, height=900, barmode='group',
-        title_text="Access Method Performance Comparison",
+        title_text=f"{main_title}<br>{default_subtitle}",
         xaxis_title="Codec", yaxis_title="Time for 10,000 Accesses (ms)",
         legend_title_text="Access Method",
         annotations=[dict(text="Select Data Distribution:", showarrow=False, x=1, y=1.15,
                           xref="paper", yref="paper", xanchor='right', yanchor='bottom', align="right")]
     )
 
-    buttons = [dict(label=d, method="update", args=[{"visible": [d in t.customdata if hasattr(t, 'customdata') else False for t in fig.data]}]) for d in distributions]
+    buttons = []
+    for d in distributions:
+        new_subtitle = format_distribution_subtitle(d)
+        buttons.append(dict(
+            label=d,
+            method="update",
+            args=[
+                {"visible": [d in t.customdata if hasattr(t, 'customdata') else False for t in fig.data]},
+                {"title.text": f"{main_title}<br>{new_subtitle}"}
+            ]
+        ))
+
     fig.update_layout(updatemenus=[dict(
         buttons=buttons,
         direction="down",
