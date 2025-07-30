@@ -6,6 +6,6 @@
 pub use crate::codec_spec::{CodecSpec, Encoding};
 pub use crate::intvec::{
     BEIntVec, IntVec, IntVecBuilder, IntVecError, IntVecFromIterBuilder, IntVecIter, IntVecReader,
-    LEIntVec,
+    IntVecSeqReader, LEIntVec,
 };
 pub use crate::sintvec::{BESIntVec, LESIntVec, SIntVec, SIntVecBuilder, SIntVecIter};

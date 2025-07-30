@@ -68,6 +68,11 @@
 //! assert_eq!(intvec.get(6), Some(1023));
 //! ```
 //!
+//! ## Tip for Efficient Access
+//!
+//! Use `k` as a power of two! It's faster when accessing sequentially close indices.
+//! Values like 16 and 32 usually provide a good balance between memory usage and access speed.
+//!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 //! [`Endianness`]: dsi_bitstream::prelude::Endianness
 //! [`get_many`]: IntVec::get_many
@@ -90,12 +95,14 @@ mod iter;
 #[cfg(feature = "parallel")]
 mod parallel;
 mod reader;
+mod seq_reader;
 #[cfg(feature = "serde")]
 mod serde;
 
 pub use builder::{IntVecBuilder, IntVecFromIterBuilder};
 pub use iter::IntVecIter;
 pub use reader::IntVecReader;
+pub use seq_reader::IntVecSeqReader;
 
 /// Defines the set of errors that can occur in `IntVec` operations.
 #[derive(Debug)]
@@ -372,6 +379,40 @@ where
         IntVecReader::new(self)
     }
 
+    /// Creates a stateful, reusable [`IntVecSeqReader`] for this vector.
+    ///
+    /// A sequential reader is optimized for access patterns that are sequential
+    /// or have a high degree of locality (e.g., `get(100)`, `get(101)`, `get(105)`).
+    /// It maintains an internal state of the current decoding position and avoids
+    /// costly seeks when the next requested index is near the current one.
+    ///
+    /// # Performance
+    ///
+    /// This reader is the engine behind [`get_many_from_iter`] and is ideal for
+    /// dynamic access patterns that are mostly forward-moving. For batch access
+    /// on a known slice of indices, [`get_many`] is still preferred as it can
+    /// pre-sort the indices for maximum efficiency.
+    ///
+    /// # Example
+    /// ```rust
+    /// use compressed_intvec::prelude::*;
+    /// let data: &[u64] = &[10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    /// let intvec = LEIntVec::builder(data).k(4).build().unwrap();
+    ///
+    /// let mut seq_reader = intvec.seq_reader();
+    ///
+    /// // Sequential access is very fast.
+    /// assert_eq!(seq_reader.get(1).unwrap(), Some(20));
+    /// assert_eq!(seq_reader.get(2).unwrap(), Some(30)); // No seek needed.
+    ///
+    /// // A large jump will trigger a seek, but subsequent access is fast again.
+    /// assert_eq!(seq_reader.get(8).unwrap(), Some(90));
+    /// assert_eq!(seq_reader.get(9).unwrap(), Some(100)); // No seek needed.
+    /// ```
+    pub fn seq_reader(&self) -> IntVecSeqReader<E> {
+        IntVecSeqReader::new(self)
+    }
+
     /// Retrieves the element at the specified index.
     ///
     /// This method provides random access to the compressed data. The exact mechanism
@@ -428,8 +469,12 @@ where
     /// # Example
     /// ```rust
     /// use compressed_intvec::prelude::*;
-    /// let data: &[u64] = &[10, 20, 30, 40];
-    /// let intvec = LEIntVec::builder(data).build().unwrap();
+    /// let data: &[u64] = &[10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
+    /// let intvec = LEIntVec::builder(data)
+    ///     .codec(CodecSpec::Auto)
+    ///     .k(4)
+    ///     .build()
+    ///     .unwrap();
     ///
     /// // Retrieve a single element.
     /// assert_eq!(intvec.get(2), Some(30));
@@ -451,7 +496,9 @@ where
     ///
     /// This method is optimized for batched random access. For bit-level encodings,
     /// it sorts the requested indices and decodes the elements in a single forward
-    /// pass, minimizing seeks and redundant decoding. For [`FixedLength`] encoding,
+    /// pass, performing a seek only when crossing a sample block boundary. This
+    /// minimizes seeks and redundant decoding, making it highly performant for
+    /// accessing clustered or sorted indices. For [`FixedLength`] encoding,
     /// it reads each element directly.
     ///
     /// # Arguments
@@ -469,10 +516,10 @@ where
     ///     .build()
     ///     .unwrap();
     ///
-    /// let access_indices = [0, 999, 500, 250];
+    /// let access_indices = &[0, 1, 2, 3, 4, 5, 999];
     ///
-    /// let values = intvec.get_many(&access_indices).unwrap();
-    /// assert_eq!(values, vec![0, 999, 500, 250]);
+    /// let values = intvec.get_many(access_indices).unwrap();
+    /// assert_eq!(values, vec![0, 1, 2, 3, 4, 5, 999]);
     /// ```
     /// [`FixedLength`]: crate::codec_spec::CodecSpec::FixedLength
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<u64>, IntVecError> {
@@ -490,39 +537,34 @@ where
 
         match self.encoding {
             Encoding::Dsi(code) => {
-                // With bit-level  encoding, k and samples are guaranteed to be Some.
-                let k = self.k.unwrap();
-                let samples = self.samples.as_ref().unwrap();
                 let mut indexed_indices: Vec<(usize, usize)> = indices
                     .iter()
                     .enumerate()
                     .map(|(i, &idx)| (idx, i))
                     .collect();
                 indexed_indices.par_sort_unstable_by_key(|&(idx, _)| idx);
-                let mut reader = self.reader();
-                let code_reader = FuncCodeReader::new(code)
-                    .map_err(|e| IntVecError::CodecDispatch(e.to_string()))?;
-                let mut current_decoded_index = 0;
 
-                for &(target_index, original_position) in &indexed_indices {
-                    let sample_index = target_index / k;
-                    let start_bit = samples.get(sample_index).unwrap();
-                    let start_sample_index = sample_index * k;
+                let k = self.k.unwrap();
 
-                    if current_decoded_index > target_index
-                        || sample_index * k > current_decoded_index
-                    {
-                        reader.reader.set_bit_pos(start_bit)?;
-                        current_decoded_index = start_sample_index;
-                    }
-
-                    for _ in current_decoded_index..target_index {
-                        code_reader.read(&mut reader.reader)?;
-                    }
-
-                    let value = code_reader.read(&mut reader.reader)?;
-                    results[original_position] = value;
-                    current_decoded_index = target_index + 1;
+                // SMART DISPATCH: Check if `k` is a power of two to enable a fast path.
+                // This allows us to replace slow division operations with fast bit-shifts.
+                if k.is_power_of_two() {
+                    let k_exp = k.trailing_zeros();
+                    self.get_many_dsi_inner(
+                        code,
+                        &indexed_indices,
+                        &mut results,
+                        |idx| idx >> k_exp,     // block_of closure
+                        |block| block << k_exp, // start_of_block closure
+                    )?;
+                } else {
+                    self.get_many_dsi_inner(
+                        code,
+                        &indexed_indices,
+                        &mut results,
+                        |idx| idx / k,     // block_of closure
+                        |block| block * k, // start_of_block closure
+                    )?;
                 }
             }
             Encoding::Fixed { num_bits } => {
@@ -533,6 +575,108 @@ where
                     results[i] = reader.reader.read_bits(num_bits)?;
                 }
             }
+        }
+
+        Ok(results)
+    }
+
+    /// Inner helper function for DSI-based `get_many` to avoid code duplication.
+    ///
+    /// This function is generic over two closures, `block_of` and `start_of_block`,
+    /// which abstract the arithmetic for calculating sample block boundaries.
+    /// The compiler monomorphizes this function, creating two specialized versions at
+    /// compile time: one that uses fast bit-shifts (for power-of-two `k`) and
+    /// one that uses standard division/multiplication, with zero runtime overhead.
+    ///
+    /// # Arguments
+    /// * `code`: The DSI code to use for decoding.
+    /// * `indexed_indices`: The sorted list of (target_index, original_position).
+    /// * `results`: The mutable slice to store the results in.
+    /// * `block_of`: A closure that takes an index and returns its sample block index.
+    /// * `start_of_block`: A closure that takes a block index and returns the first element index of that block.
+    fn get_many_dsi_inner<F1, F2>(
+        &self,
+        code: Codes,
+        indexed_indices: &[(usize, usize)],
+        results: &mut [u64],
+        block_of: F1,
+        start_of_block: F2,
+    ) -> Result<(), IntVecError>
+    where
+        F1: Fn(usize) -> usize,
+        F2: Fn(usize) -> usize,
+    {
+        let samples = self.samples.as_ref().unwrap();
+        let mut reader = self.reader();
+        let code_reader =
+            FuncCodeReader::new(code).map_err(|e| IntVecError::CodecDispatch(e.to_string()))?;
+
+        let mut current_decoded_index: usize = 0;
+
+        for &(target_index, original_position) in indexed_indices {
+            // The condition for seeking is if the target is before our current
+            // position (can happen with duplicate indices from unstable sort)
+            // OR if the target is in a different sample block.
+            if target_index < current_decoded_index
+                || block_of(target_index) != block_of(current_decoded_index.saturating_sub(1))
+            {
+                let target_sample_block = block_of(target_index);
+                let start_bit = samples.get(target_sample_block).unwrap();
+                reader.reader.set_bit_pos(start_bit)?;
+                current_decoded_index = start_of_block(target_sample_block);
+            }
+
+            for _ in current_decoded_index..target_index {
+                code_reader.read(&mut reader.reader)?;
+            }
+            let value = code_reader.read(&mut reader.reader)?;
+            results[original_position] = value;
+            current_decoded_index = target_index + 1;
+        }
+
+        Ok(())
+    }
+
+    /// Retrieves multiple elements from an iterator of indices.
+    ///
+    /// This method is a convenient wrapper that uses an [`IntVecSeqReader`] to
+    /// efficiently process indices from a streaming source. It is optimized for
+    /// iterators that yield indices in a mostly-forward-moving sequence.
+    ///
+    /// # Arguments
+    /// * `indices`: An iterator that yields the indices to retrieve.
+    ///
+    /// # Returns
+    /// A `Result` containing a `Vec<u64>` with the retrieved values, or an
+    /// [`IntVecError`] if any index is out of bounds or a decoding error occurs.
+    ///
+    /// # Example
+    /// ```rust
+    /// use compressed_intvec::prelude::*;
+    /// let intvec = LEIntVec::from_iter_builder(0..1000u64)
+    ///     .codec(CodecSpec::Gamma)
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// // Retrieve values from a range iterator.
+    /// let values = intvec.get_many_from_iter(900..905).unwrap();
+    /// assert_eq!(values, vec![900, 901, 902, 903, 904]);
+    /// ```
+    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<u64>, IntVecError>
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let indices_iter = indices.into_iter();
+        let (lower_bound, _) = indices_iter.size_hint();
+        let mut results = Vec::with_capacity(lower_bound);
+
+        let mut seq_reader = self.seq_reader();
+
+        for index in indices_iter {
+            let value = seq_reader
+                .get(index)?
+                .ok_or(IntVecError::IndexOutOfBounds(index))?;
+            results.push(value);
         }
 
         Ok(results)

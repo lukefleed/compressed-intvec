@@ -143,27 +143,29 @@ where
 
     /// Retrieves multiple elements in parallel.
     ///
-    /// This method provides parallel random access to a slice of indices.
+    /// This method provides parallel random access to a slice of indices. It is
+    /// optimized for scenarios with a large number of lookups on multi-core systems.
     ///
     /// # Implementation Notes
     ///
-    /// This method uses a simple and robust parallelization strategy: it parallelizes
-    /// the lookups over the provided `indices` slice. Each thread takes a subset of
-    /// the indices and calls the sequential [`get`](super::IntVec::get) method for each one.
+    /// This method parallelizes lookups over the provided `indices` slice. To
+    /// avoid the high cost of creating a new bitstream reader for every single
+    /// lookup, it uses [`rayon::for_each_with`] to create a single, reusable
+    /// [`IntVecReader`] for each thread. This reader is then used for all lookups
+    /// assigned to that thread, amortizing the setup cost.
     ///
-    /// This approach differs significantly from the sequential
-    /// [`get_many`](super::IntVec::get_many), which sorts the indices to perform a
-    /// single, monotonic forward pass. The parallel version avoids this sorting and
-    /// synchronization overhead, but it may perform *redundant decoding*. For example,
-    /// if two different threads request indices that fall within the same sample
-    /// block, that block will be decoded twice.
+    /// This approach differs from the sequential [`get_many`](super::IntVec::get_many),
+    /// which sorts the indices to perform a single, monotonic forward scan. The parallel
+    /// version avoids this sorting and synchronization overhead, but it may perform
+    /// *redundant decoding* if multiple threads request indices within the same
+    /// sample block.
     ///
     /// # Performance
     ///
-    /// This trade-off is often favorable on multi-core systems. The throughput gained
-    /// from parallelism can outweigh the cost of redundant work, especially when the
-    /// number of requested indices is large and they are distributed randomly across
-    /// the vector.
+    /// This trade-off (work amplification vs. massive parallelism) is often
+    /// favorable on multi-core systems. The throughput gained from parallelism
+    /// can outweigh the cost of redundant work, especially when the number of
+    /// requested indices is large and they are distributed randomly across the vector.
     ///
     /// # Example
     /// ```rust
@@ -176,14 +178,19 @@ where
     ///     .unwrap();
     ///
     /// // Retrieve multiple elements in parallel.
-    /// let indices = vec![0, 100, 200, 300, 400, 500];
+    /// let indices = vec![0, 100, 200, 300, 400, 500, 600, 700, 800, 900];
     /// let results = intvec.par_get_many(&indices).unwrap();
     ///
     /// // Verify the results.
+    /// assert_eq!(results.len(), indices.len());
     /// for (i, &index) in indices.iter().enumerate() {
-    ///     assert_eq!(results[i], intvec.get(index).unwrap());
+    ///    assert_eq!(results[i], intvec.get(index).unwrap());
     /// }
+    ///
     /// ```
+    ///
+    /// [`IntVecReader`]: super::IntVecReader
+    /// [`rayon::for_each_with`]: https://docs.rs/rayon/latest/rayon/iter/trait.ParallelIterator.html#method.for_each_with
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<u64>, IntVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
@@ -197,13 +204,15 @@ where
 
         let mut results = vec![0; indices.len()];
 
-        results
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(original_pos, res_val)| {
+        results.par_iter_mut().enumerate().for_each_with(
+            self,
+            |reader, (original_pos, res_val)| {
                 let target_index = indices[original_pos];
-                *res_val = self.get(target_index).unwrap();
-            });
+                // The `get` on the reader is fallible, but we pre-checked bounds,
+                // and other errors are unlikely, so we unwrap for performance.
+                *res_val = reader.get(target_index).unwrap();
+            },
+        );
 
         Ok(results)
     }

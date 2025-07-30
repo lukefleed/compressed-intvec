@@ -45,6 +45,18 @@ required-features = ["parallel"]
 name = "bench_size"
 harness = false
 
+[[bench]]
+name = "bench_k_power_of_two"
+harness = false
+
+[[bench]]
+name = "bench_access_patterns"
+harness = false
+
+[[bench]]
+name = "bench_iter_access"
+harness = false
+
 [profile.bench]
 lto = true
 

@@ -344,3 +344,86 @@ fn test_from_iter_builder() {
         .build();
     assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
 }
+
+macro_rules! test_get_many_optimizations {
+    ($test_name:ident, $k:expr) => {
+        #[test]
+        fn $test_name() {
+            let k_val = $k;
+            let data_size = k_val * 10;
+            let data = generate_random_vec(data_size, 1_000_000);
+            let intvec = LEIntVec::builder(&data).k(k_val).build().unwrap();
+
+            // Test case 1: Indices tightly clustered within a single sample block
+            let clustered_indices = vec![k_val + 2, k_val + 3, k_val + 5];
+            let expected1: Vec<u64> = clustered_indices.iter().map(|&i| data[i]).collect();
+            let result1 = intvec.get_many(&clustered_indices).unwrap();
+            assert_eq!(
+                result1, expected1,
+                "get_many failed for clustered indices with k={}",
+                k_val
+            );
+
+            // Test case 2: Indices crossing sample block boundaries
+            let cross_block_indices = vec![k_val - 1, k_val, k_val + 1, 2 * k_val - 1, 2 * k_val];
+            let expected2: Vec<u64> = cross_block_indices.iter().map(|&i| data[i]).collect();
+            let result2 = intvec.get_many(&cross_block_indices).unwrap();
+            assert_eq!(
+                result2, expected2,
+                "get_many failed for cross-block indices with k={}",
+                k_val
+            );
+
+            // Test case 3: Unordered indices with duplicates
+            let unordered_indices = vec![3 * k_val, k_val / 2, 3 * k_val];
+            let expected3: Vec<u64> = unordered_indices.iter().map(|&i| data[i]).collect();
+            let result3 = intvec.get_many(&unordered_indices).unwrap();
+            assert_eq!(
+                result3, expected3,
+                "get_many failed for unordered indices with k={}",
+                k_val
+            );
+
+            // Test case 4: Using get_many_from_iter with a range
+            let range = (data_size / 2)..(data_size / 2 + 10);
+            let expected4: Vec<u64> = range.clone().map(|i| data[i]).collect();
+            let result4 = intvec.get_many_from_iter(range).unwrap();
+            assert_eq!(
+                result4, expected4,
+                "get_many_from_iter failed for range with k={}",
+                k_val
+            );
+        }
+    };
+}
+
+// Test with k being a power of two (fast path)
+test_get_many_optimizations!(test_get_many_k_power_of_two, 16);
+
+// Test with k NOT being a power of two (fallback path)
+test_get_many_optimizations!(test_get_many_k_not_power_of_two, 24);
+
+#[test]
+fn test_seq_reader_stateful_access() {
+    let k = 16;
+    let data_size = k * 5;
+    let data = generate_random_vec(data_size, 1_000_000);
+    let intvec = LEIntVec::builder(&data).k(k).build().unwrap();
+
+    let mut seq_reader = intvec.seq_reader();
+
+    // 1. Forward access within a block
+    assert_eq!(seq_reader.get(2).unwrap(), Some(data[2]));
+    assert_eq!(seq_reader.get(5).unwrap(), Some(data[5])); // Should be fast
+
+    // 2. Forward access crossing a block
+    assert_eq!(seq_reader.get(k + 1).unwrap(), Some(data[k + 1]));
+
+    // 3. Backward access, forcing a seek
+    assert_eq!(seq_reader.get(3).unwrap(), Some(data[3]));
+
+    // 4. Multiple sequential reads
+    for i in 3..10 {
+        assert_eq!(seq_reader.get(i).unwrap(), Some(data[i]));
+    }
+}

@@ -31,7 +31,7 @@
 //! storage, and random access logic is then delegated to an inner [`IntVec`].
 
 use crate::codec_spec::Encoding;
-use crate::intvec::{IntVec, IntVecError};
+use crate::intvec::{IntVec, IntVecError, IntVecSeqReader};
 use dsi_bitstream::prelude::{Endianness, ToInt, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 
@@ -52,7 +52,10 @@ pub use iter::SIntVecIter;
 /// signed integer distributions, where values are often clustered around zero.
 ///
 /// All compression logic and storage are delegated to the inner [`IntVec`].
-/// [`SIntVec`] simply provides a convenient API that accepts and returns `i64` values.
+/// This struct exposes an equivalent API but operates on `i64` values. The
+/// performance characteristics of its methods are nearly identical to their
+/// [`IntVec`] counterparts, with only the negligible overhead of the `to_int`
+/// transformation on the final results.
 ///
 /// # Limitations
 ///
@@ -65,7 +68,7 @@ pub use iter::SIntVecIter;
 /// ```rust
 /// use compressed_intvec::prelude::*;
 ///
-/// let data: &[i64] = &[-10, 200, 30, -40, 50];
+/// let data: &[i64] = &[-10, 20, -30, 40, -50, 60, -70, 80, -90, 100];
 ///
 /// // SIntVec requires manual codec selection. Let's use Gamma.
 /// let sintvec = LESIntVec::builder(data)
@@ -76,7 +79,8 @@ pub use iter::SIntVecIter;
 ///
 /// assert_eq!(sintvec.len(), data.len());
 /// assert_eq!(sintvec.get(0), Some(-10));
-/// assert_eq!(sintvec.get(2), Some(30));
+/// assert_eq!(sintvec.get(2), Some(-30));
+/// assert_eq!(sintvec.get(3), Some(40));
 /// ```
 #[derive(Debug, Clone, MemDbg, MemSize)]
 pub struct SIntVec<E: Endianness> {
@@ -92,96 +96,77 @@ where
 {
     /// Returns a builder for creating an [`SIntVec`] from a slice (`&[i64]`).
     ///
-    /// This builder requires that codec parameters be specified manually because
-    /// it transforms the data on-the-fly and cannot perform a pre-analysis pass.
-    ///
-    /// # Example
-    /// ```rust
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let data: &[i64] = &[-10, 20, 30, -40, 50];
-    ///
-    /// // Codec parameters must be fixed.
-    /// let sintvec = LESIntVec::builder(data)
-    ///     .codec(CodecSpec::Delta)
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// assert_eq!(sintvec.get(1), Some(20));
-    /// ```
+    /// See [`SIntVecBuilder`] for more details.
     pub fn builder(input: &[i64]) -> SIntVecBuilder<E> {
         SIntVecBuilder::new(input)
     }
 
     /// Retrieves the signed integer at the specified index.
     ///
-    /// This method retrieves the underlying compressed `u64` value from the inner
-    /// [`IntVec`] and then applies the inverse ZigZag transformation to restore the
-    /// original `i64` value.
-    ///
-    /// # Example
-    /// ```rust
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let data: &[i64] = &[-10, 20, 30, -40, 50];
-    /// let sintvec = LESIntVec::builder(data).codec(CodecSpec::Gamma).build().unwrap();
-    ///
-    /// assert_eq!(sintvec.get(0), Some(-10));
-    /// assert_eq!(sintvec.get(4), Some(50));
-    /// assert_eq!(sintvec.get(99), None); // Out of bounds
-    /// ```
+    /// This method delegates to [`IntVec::get`] and applies the inverse ZigZag
+    /// transformation to the result.
     pub fn get(&self, index: usize) -> Option<i64> {
         self.inner.get(index).map(ToInt::to_int)
+    }
+
+    /// Retrieves multiple signed integers at the specified indices.
+    ///
+    /// This method delegates to [`IntVec::get_many`] and applies the inverse ZigZag transformation to the results.
+    pub fn get_many(&self, indices: &[usize]) -> Result<Vec<i64>, IntVecError> {
+        let unsigned_values = self.inner.get_many(indices)?;
+        Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
+    }
+
+    /// Retrieves multiple signed integers from an iterator of indices.
+    ///
+    /// This method delegates to [`IntVec::get_many_from_iter`] and applies
+    /// the inverse ZigZag transformation to the results.
+    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<i64>, IntVecError>
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let unsigned_values = self.inner.get_many_from_iter(indices)?;
+        Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
+    }
+
+    /// Returns a stateful, sequential reader for this vector's underlying data.
+    ///
+    /// This method provides access to the sequential reader of the inner
+    /// [`IntVec`]. It is designed for dynamic, stateful access patterns where
+    /// indices are mostly sequential, offering significant performance gains by
+    /// avoiding unnecessary seeks.
+    ///
+    /// See [`IntVec::seq_reader`] for detailed documentation on its behavior
+    /// and performance characteristics.
+    /// ```
+    pub fn seq_reader(&self) -> IntVecSeqReader<E> {
+        self.inner.seq_reader()
     }
 
     /// Returns an iterator over the decompressed `i64` values.
     ///
     /// The iterator wraps the inner [`IntVec`]'s iterator and applies the inverse
-    /// ZigZag transformation to each value on the fly.
-    ///
-    /// # Example
-    /// ```rust
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let data: &[i64] = &[10, -20, 30, -40, 50];
-    /// let sintvec = LESIntVec::builder(data).codec(CodecSpec::Gamma).build().unwrap();
-    ///
-    /// let collected: Vec<i64> = sintvec.iter().collect();
-    /// assert_eq!(collected, data);
-    /// ```
+    /// ZigZag transformation to each value on the fly. See [`SIntVecIter`].
     pub fn iter(&self) -> SIntVecIter<E> {
         SIntVecIter::new(self)
     }
 
     /// Returns the number of elements in the vector.
-    /// This is delegated to the inner [`IntVec`].
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if the vector contains no elements.
-    /// This is delegated to the inner [`IntVec`].
-    ///
-    /// # Example
-    /// ```rust
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let empty_sintvec = LESIntVec::builder(&[]).codec(CodecSpec::Gamma).build().unwrap();
-    /// assert!(empty_sintvec.is_empty());
-    /// assert_eq!(empty_sintvec.len(), 0);
-    /// ```
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
 
     /// Returns the underlying `Encoding` used for compression.
-    /// This is delegated to the inner [`IntVec`].
     pub fn encoding(&self) -> Encoding {
         self.inner.encoding()
     }
 
     /// Returns the sampling rate `k` used during encoding, if applicable.
-    /// This is delegated to the inner [`IntVec`].
     pub fn get_sampling_rate(&self) -> Option<usize> {
         self.inner.get_sampling_rate()
     }
@@ -189,56 +174,16 @@ where
 
 /// A type alias for an [`SIntVec`] with Big-Endian ([`BE`]) bitstream encoding.
 ///
-/// Big-endian is a byte order used in many networking protocols and on certain
-/// CPU architectures (e.g., PowerPC, MIPS). The choice of endianness can have
-/// a measurable impact on performance.
+/// See [`BEIntVec`] for more details on endianness.
 ///
-/// While using the native endianness of the host machine is typically the most
-/// performant option, the optimal choice can be influenced by the availability of
-/// specific low-level CPU instructions for bit manipulation (like counting
-/// leading/trailing zeros). Depending on the architecture and compression code,
-/// a non-native endianness may unexpectedly yield better performance.
-///
-/// # Example
-/// ```rust
-/// use compressed_intvec::prelude::*;
-///
-/// let data: &[i64] = &[10, -20, 30, -40, 50];
-///
-/// // Create a Big-Endian SIntVec using the type alias.
-/// // Note that manual codec selection is required for SIntVec.
-/// let be_sintvec = BESIntVec::builder(data)
-///     .codec(CodecSpec::Delta)
-///     .build()
-///     .unwrap();
-///
-/// assert_eq!(be_sintvec.len(), data.len());
-/// assert_eq!(be_sintvec.get(1), Some(-20));
-/// ```
+/// [`BEIntVec`]: crate::intvec::BEIntVec
 pub type BESIntVec = SIntVec<BE>;
 
 /// A type alias for an [`SIntVec`] with Little-Endian ([`LE`]) bitstream encoding.
 ///
-/// Little-endian is the native byte order for most modern commodity CPUs,
-/// including x86 and ARM architectures. For this reason, it often leads to the
-/// best performance for bitstream operations on common hardware.
+/// See [`LEIntVec`] for more details on endianness.
 ///
-/// However, the optimal choice is not always straightforward. Performance depends
-/// on the interplay between the compression algorithm and the efficiency of
-// low-level bit manipulation instructions on the target hardware. Benchmarking
-/// is the only definitive way to determine the optimal choice for a given
-/// workload and architecture.
-///
-/// # Example
-/// ```rust
-/// use compressed_intvec::prelude::*;
-///
-/// let data: &[i64] = &[10, -20, 30, -40, 50];
-/// let sintvec = LESIntVec::builder(data).codec(CodecSpec::Gamma).build().unwrap();
-///
-/// assert_eq!(sintvec.len(), data.len());
-/// assert_eq!(sintvec.get(1), Some(-20));
-/// ```
+/// [`LEIntVec`]: crate::intvec::LEIntVec
 pub type LESIntVec = SIntVec<LE>;
 
 #[cfg(feature = "serde")]

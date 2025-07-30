@@ -6,9 +6,7 @@
 [![downloads](https://img.shields.io/crates/d/compressed-intvec)](https://crates.io/crates/compressed-intvec)
 ![license](https://img.shields.io/crates/l/compressed-intvec)
 
-A high-performance Rust library for compressed integer vectors with fast random access.
-
-`compressed-intvec` provides space-efficient, in-memory representations for vectors of `u64` and `i64` integers. It leverages a variety of instantaneous codes from the [dsi-bitstream] library, offering a flexible trade-off between compression ratio and random access speed.
+A Rust library that provides space-efficient, in-memory representations for vectors of `u64` and `i64` integers. It leverages a variety of instantaneous codes from the [dsi-bitstream] library, offering a flexible trade-off between compression ratio and random access speed.
 
 ## Features
 
@@ -154,36 +152,32 @@ The analysis of the output is as follows:
 
 The final line of the output indicates that the `Auto` spec analyzed the data's distribution and selected `Zeta` coding with `k=10` as the most space-efficient strategy for this dataset. This capability allows the library to adapt its compression strategy to the data, and the [`mem_dbg`] integration provides the means to directly inspect and validate the outcome.
 
-## High-Performance Access Patterns
+## Access Patterns
 
-While [`get`] is convenient for single, isolated lookups, calling it repeatedly in a loop is inefficient. For performance-critical scenarios involving multiple lookups, the library provides optimized methods that avoid the primary bottleneck: the repeated creation of internal bitstream readers.
-
-### Dynamic Lookups with a Reusable [`IntVecReader`]
-
-Each call to `intvec.get()` creates and subsequently discards a new bitstream reader, incurring a small but significant setup overhead. When lookups are performed in a loop, this overhead accumulates and can degrade performance.
-
-For scenarios involving multiple dynamic lookups, especially when the access sequence isn't known in advance, the solution is to use a stateful, reusable [`IntVecReader`]. You create it once with `intvec.reader()` and then call `get()` on it multiple times. This amortizes the reader's setup cost across all lookups.
+The standard method to access a single element in a compressed [`IntVec`] instance is through the [`get`] method.
 
 ```rust
 use compressed_intvec::prelude::*;
 
-let data: Vec<u64> = (0..10_000).collect();
-let intvec = LEIntVec::builder(&data).build().unwrap();
+let data = vec![10, 20, 30, 40, 50];
+let intvec = LEIntVec::builder(&data)
+    .codec(CodecSpec::Auto)
+    .k(4)
+    .build()
+    .unwrap();
 
-// Create a single, reusable reader for all lookups.
-let mut reader = intvec.reader();
-
-// Perform multiple, non-sequential lookups efficiently. This is ideal when the indices depend on runtime conditions.
-assert_eq!(reader.get(500).unwrap(), Some(500));
-assert_eq!(reader.get(10).unwrap(), Some(10));
-assert_eq!(reader.get(9000).unwrap(), Some(9000));
+assert_eq!(intvec.get(2), Some(30));
 ```
 
-### Efficient Batch Access with [`get_many`]
+Accessing multiple elements however, requires more attention to performance. A naive loop of `intvec.get()` calls is highly inefficient due to the repeated creation and destruction of internal readers. This library provides a suite of specialized methods tailored to different access scenarios.
 
-When you have a predefined set of indices to retrieve, the [`get_many`] method is the most efficient sequential approach.
+### Batch Access from a Slice: `get_many`
 
-For variable-length codes, it sorts the requested indices to perform a single, monotonic scan over the compressed data. This approach minimizes expensive seeking operations and avoids redundant decoding, making it substantially faster than other patterns for batch lookups.
+When the complete set of indices to be retrieved is available upfront in a slice or `Vec`, [`get_many`] is the most robust and performant choice.
+
+This method first sorts the indices, transforming a random access pattern into a single, monotonic scan over the compressed data. This approach minimizes expensive bitstream seeks and leverages data locality. Usually, [`get_many`] consistently outperforms loop-based alternatives across all access patterns, including sorted, clustered, and even fully random indices.
+
+> **If you have a slice of indices, always prefer `get_many`.**
 
 ```rust
 use compressed_intvec::prelude::*;
@@ -195,20 +189,41 @@ let intvec = LEIntVec::builder(&data)
     .build()
     .unwrap();
 
-// Indices can be in any order.
+// Indices can be in any order; get_many will sort them internally.
 let indices_to_get = &[500, 10, 9000, 1000, 2000];
 
-// get_many efficiently retrieves all values in one pass.
+// get_many efficiently retrieves all values in one optimized pass.
 let values = intvec.get_many(indices_to_get).unwrap();
 
 assert_eq!(values, vec![500, 10, 9000, 1000, 2000]);
 ```
 
-### Parallel Access with [`par_get_many`]
+### Access from a Stream: `get_many_from_iter`
 
-The `parallel` feature, which is **enabled by default**, provides access to [`par_get_many`]. This method uses the [Rayon] crate to parallelize lookups across multiple CPU cores.
+In scenarios where indices are provided by a streaming source (an iterator) and cannot be collected into a vector due to memory constraints, we provide [`get_many_from_iter`]. This is the method to use when you need to process indices on-the-fly and you expect them to be somewhat ordered or clustered.
 
-It works by dividing the slice of indices among worker threads, with each thread performing lookups independently. While this can lead to some redundant decoding if multiple threads access data within the same sample block, the throughput gained from parallelism often results in significant speedups for large batches of randomly distributed indices.
+This method uses a stateful [`IntVecSeqReader`] internally, which is optimized for streams that have sequential locality.
+
+
+```rust
+use compressed_intvec::prelude::*;
+
+let data: Vec<u64> = (0..10_000).collect();
+let intvec = LEIntVec::builder(&data).build().unwrap();
+
+// Process indices from a streaming source, like a range iterator.
+let values = intvec.get_many_from_iter(500..505).unwrap();
+
+assert_eq!(values, vec![500, 501, 502, 503, 504]);
+```
+
+### Parallel Access: `par_get_many`
+
+The `parallel` feature, enabled by default, provides [`par_get_many`]. This method uses the [Rayon] crate to distribute the lookup work across multiple CPU cores, offering significant throughput gains for large batches of indices on multi-core systems.
+
+It parallelizes the lookups by giving each thread a reusable reader and a portion of the indices. This "embarrassingly parallel" approach is most effective for large, randomly distributed workloads where the benefits of parallelism outweigh the cost of some potentially redundant decoding.
+
+> **Use `par_get_many` for large batches of indices. This is by far the fastest method**
 
 ```rust
 use compressed_intvec::prelude::*;
@@ -228,12 +243,58 @@ let parallel_values = intvec.par_get_many(indices_to_get).unwrap();
 assert_eq!(parallel_values, vec![500, 10, 9000, 1000, 2000]);
 ```
 
-If you need to disable this feature to reduce dependencies, you can do so in your `Cargo.toml`:
+### Dynamic Lookups: `IntVecReader` and `IntVecSeqReader`
 
-```toml
-[dependencies]
-compressed-intvec = { version = "0.4.0", default-features = false }
+For situations where we need to access elements dynamically, the library provides two distinct readers for this purpose:
+
+-   [`IntVecReader`]: A **stateless** reader optimized for fully random, unpredictable access patterns.
+
+```rust
+use compressed_intvec::prelude::*;
+
+let data: Vec<u64> = (0..10_000).collect();
+let intvec = LEIntVec::builder(&data)
+    .codec(CodecSpec::Delta)
+    .k(64)
+    .build()
+    .unwrap();
+
+// Create a stateless reader for random access.
+let mut reader = intvec.reader();
+let indices_to_get = &[500, 10, 9000, 1000, 2000];
+for &index in indices_to_get {
+    // Use the stateless reader to get values.
+    let value = reader.get(index).unwrap().unwrap();
+    assert_eq!(value, index as u64);
+}
+
+// NOTE: in this case using `get_many` would be more efficient, but this demonstrates the reader's usage.
 ```
+
+-   [`IntVecSeqReader`]: A **stateful** reader optimized for access patterns with sequential locality.
+
+```rust
+use compressed_intvec::prelude::*;
+
+use compressed_intvec::prelude::*;
+
+let data: Vec<u64> = (0..10_000).collect();
+let intvec = LEIntVec::builder(&data)
+    .codec(CodecSpec::Delta)
+    .k(64)
+    .build()
+    .unwrap();
+
+let mut reader = intvec.seq_reader();
+let indices_to_get = &[500, 10, 9000, 1000, 2000];
+for &index in indices_to_get {
+    let value = reader.get(index).unwrap().unwrap();
+    assert_eq!(value, index as u64);
+}
+
+// NOTE: in this case using `get_many` would be more efficient, but this demonstrates the reader's usage.
+```
+
 
 ## Instantaneous Codes vs. Fixed-Length Encoding
 
@@ -370,3 +431,5 @@ compressed-intvec = { version = "0.4.0", features = ["parallel", "serde"] }
 [`CodecSpec::FixedLength`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.FixedLength
 [`CodecSpec::VByte`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/codec_spec/enum.CodecSpec.html#variant.VByteLe
 [Serde]: https://serde.rs/
+[`IntVecSeqReader`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/intvec/struct.IntVecSeqReader.html
+[`get_many_from_iter`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/intvec/struct.IntVec.html#method.get_many_from_iter
