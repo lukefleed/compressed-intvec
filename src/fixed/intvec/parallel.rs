@@ -9,8 +9,8 @@
 //!
 //! [Rayon]: https://docs.rs/rayon/latest/rayon/
 
-use super::{FixedVec, FixedVecBitReader, FixedVecError};
-use dsi_bitstream::prelude::{BitRead, BitSeek, Endianness};
+use super::{FixedVec, FixedVecError};
+use dsi_bitstream::prelude::Endianness;
 use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
@@ -19,9 +19,6 @@ use rayon::prelude::{
 impl<E> FixedVec<E>
 where
     E: Endianness + Send + Sync,
-    for<'b> FixedVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + BitSeek<Error = core::convert::Infallible>
-        + Send,
 {
     /// Returns a parallel iterator over the decompressed `u64` values.
     ///
@@ -30,6 +27,7 @@ where
     pub fn par_iter(&self) -> impl ParallelIterator<Item = u64> + '_ {
         (0..self.len)
             .into_par_iter()
+            // Each parallel task now calls the highly optimized direct-access get_unchecked.
             .map(move |i| unsafe { self.get_unchecked(i) })
     }
 

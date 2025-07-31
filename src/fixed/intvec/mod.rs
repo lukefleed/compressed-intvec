@@ -30,16 +30,9 @@ use serde::{Deserialize, Serialize};
 pub use builder::{FixedVecBuilder, FixedVecFromIterBuilder};
 pub use iter::FixedVecIter;
 
-use dsi_bitstream::{
-    codes::params::DefaultReadParams,
-    prelude::{BitRead, BitSeek, BufBitReader, Endianness, MemWordReader, BE, LE},
-};
+use dsi_bitstream::prelude::{Endianness, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
-use std::{error::Error, fmt, marker::PhantomData};
-
-/// Type alias for the reader used internally by `FixedVec`.
-pub type FixedVecBitReader<'a, E> =
-    BufBitReader<E, MemWordReader<u64, &'a Vec<u64>>, DefaultReadParams>;
+use std::{any::TypeId, error::Error, fmt, marker::PhantomData};
 
 /// Defines the set of errors that can occur in `FixedVec` operations.
 #[derive(Debug)]
@@ -90,6 +83,8 @@ pub struct FixedVec<E: Endianness> {
     pub(super) data: Vec<u64>,
     pub(super) len: usize,
     pub(super) num_bits: usize,
+    /// A mask with the lowest `num_bits` bits set to one.
+    pub(super) mask: u64,
     #[cfg_attr(feature = "serde", serde(skip))]
     pub(super) _endian: PhantomData<E>,
 }
@@ -128,11 +123,7 @@ impl<E: Endianness> FixedVec<E> {
     }
 }
 
-impl<E: Endianness> FixedVec<E>
-where
-    for<'a> FixedVecBitReader<'a, E>:
-        BitRead<E, Error = core::convert::Infallible> + BitSeek<Error = core::convert::Infallible>,
-{
+impl<E: Endianness> FixedVec<E> {
     /// Retrieves the element at the specified index. Access is O(1).
     #[inline]
     pub fn get(&self, index: usize) -> Option<u64> {
@@ -144,6 +135,10 @@ where
     }
 
     /// Retrieves the element at the specified index without bounds checking.
+    ///
+    /// This is a high-performance, low-level implementation that operates
+    /// directly on the underlying `u64` slice. It avoids the overhead of any
+    /// bitstream reader abstractions and handles endianness correctly.
     ///
     /// In debug builds, this method will panic if the index is out of bounds.
     ///
@@ -157,14 +152,36 @@ where
             index,
             self.len
         );
+
         let bit_pos = index as u64 * self.num_bits as u64;
-        let mut reader =
-            FixedVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(&self.data));
-        // SAFETY: The bit position is guaranteed to be valid if the index is in bounds,
-        // as the buffer was allocated to hold exactly `len * num_bits` bits.
-        // The underlying bitstream operations are infallible.
-        reader.set_bit_pos(bit_pos).unwrap();
-        reader.read_bits(self.num_bits).unwrap()
+        let word_index = (bit_pos / 64) as usize;
+        let bit_offset = (bit_pos % 64) as usize;
+
+        let bits = &self.data;
+
+        // Dispatch based on endianness at compile time.
+        if TypeId::of::<E>() == TypeId::of::<LE>() {
+            // Little-Endian Path, inspired by sux-rs for maximum performance.
+            if bit_offset + self.num_bits <= 64 {
+                // Fast path: element is within a single word.
+                (*bits.get_unchecked(word_index) >> bit_offset) & self.mask
+            } else {
+                // Slow path: element spans two words.
+                ((*bits.get_unchecked(word_index) >> bit_offset)
+                    | (*bits.get_unchecked(word_index + 1) << (64 - bit_offset)))
+                    & self.mask
+            }
+        } else {
+            // Big-Endian Path, using 128-bit arithmetic for robust handling
+            // of all cases, including num_bits = 64.
+            let high_word = bits.get_unchecked(word_index).to_be();
+            let low_word = bits.get_unchecked(word_index + 1).to_be();
+
+            let a = u128::from(high_word);
+            let b = u128::from(low_word);
+
+            ((((a << 64) | b) << bit_offset) >> (128 - self.num_bits)) as u64
+        }
     }
 
     /// Retrieves multiple elements at the specified indices.
@@ -186,21 +203,9 @@ where
     /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<u64> {
         let mut results = Vec::with_capacity(indices.len());
-        let mut reader =
-            FixedVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(&self.data));
-
         for &index in indices {
-            debug_assert!(
-                index < self.len,
-                "Index out of bounds: index was {} but length was {}",
-                index,
-                self.len
-            );
-
-            let bit_pos = index as u64 * self.num_bits as u64;
-            // SAFETY: See safety comment in `get_unchecked`.
-            reader.set_bit_pos(bit_pos).unwrap();
-            results.push(reader.read_bits(self.num_bits).unwrap());
+            // SAFETY: The caller guarantees that the index is in bounds.
+            results.push(self.get_unchecked(index));
         }
         results
     }

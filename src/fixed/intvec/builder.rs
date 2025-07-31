@@ -66,19 +66,29 @@ impl<'a, E: Endianness> FixedVecBuilder<'a, E> {
             ));
         }
 
+        // Pre-calculate the mask for efficient reading.
+        let final_mask = if final_num_bits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << final_num_bits) - 1
+        };
+
         if self.input.is_empty() {
             return Ok(FixedVec {
                 data: Vec::new(),
                 len: 0,
                 num_bits: final_num_bits,
+                mask: final_mask,
                 _endian: PhantomData,
             });
         }
 
-        // Pre-allocate the exact number of u64 words needed.
+        // Pre-allocate the exact number of u64 words needed, plus one for padding.
+        // The padding word prevents out-of-bounds reads when an element spans
+        // the last word boundary.
         let total_bits = self.input.len() * final_num_bits;
         let num_words = (total_bits + 63) / 64;
-        let buffer = vec![0u64; num_words];
+        let buffer = vec![0u64; num_words + 1];
         let mut writer = FixedVecBitWriter::<E>::new(MemWordWriterVec::new(buffer));
 
         let limit = if final_num_bits < 64 {
@@ -105,6 +115,7 @@ impl<'a, E: Endianness> FixedVecBuilder<'a, E> {
             data,
             len: self.input.len(),
             num_bits: final_num_bits,
+            mask: final_mask,
             _endian: PhantomData,
         })
     }
@@ -146,6 +157,13 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> FixedVecFromIterBuilder<E, I> {
             ));
         }
 
+        // Pre-calculate the mask for efficient reading.
+        let final_mask = if self.num_bits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.num_bits) - 1
+        };
+
         let mut writer = FixedVecBitWriter::<E>::new(MemWordWriterVec::new(Vec::new()));
         let mut len = 0;
         let limit = if self.num_bits < 64 {
@@ -168,12 +186,16 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> FixedVecFromIterBuilder<E, I> {
 
         writer.flush().unwrap();
         let mut data = writer.into_inner().unwrap().into_inner();
+        // Add a padding word to prevent out-of-bounds reads when an element
+        // spans the last word boundary.
+        data.push(0);
         data.shrink_to_fit();
 
         Ok(FixedVec {
             data,
             len,
             num_bits: self.num_bits,
+            mask: final_mask,
             _endian: PhantomData,
         })
     }

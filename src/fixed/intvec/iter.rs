@@ -3,8 +3,8 @@
 //! This module provides [`FixedVecIter`], an iterator for performing efficient,
 //! sequential decompression of a [`FixedVec`].
 
-use super::{FixedVec, FixedVecBitReader};
-use dsi_bitstream::prelude::{BitRead, BitSeek, Endianness};
+use super::FixedVec;
+use dsi_bitstream::prelude::Endianness;
 
 /// An iterator over the decompressed `u64` values of a [`FixedVec`].
 ///
@@ -41,11 +41,7 @@ impl<'a, E: Endianness> FixedVecIter<'a, E> {
     }
 }
 
-impl<E: Endianness> Iterator for FixedVecIter<'_, E>
-where
-    for<'b> FixedVecBitReader<'b, E>:
-        BitRead<E, Error = core::convert::Infallible> + BitSeek<Error = core::convert::Infallible>,
-{
+impl<E: Endianness> Iterator for FixedVecIter<'_, E> {
     type Item = u64;
 
     #[inline]
@@ -54,6 +50,7 @@ where
             return None;
         }
         // SAFETY: The iterator's logic guarantees the index is in bounds.
+        // This now calls the highly optimized, direct-access get_unchecked method.
         let value = unsafe { self.vec.get_unchecked(self.current_index) };
         self.current_index += 1;
         Some(value)
@@ -65,11 +62,7 @@ where
     }
 }
 
-impl<E: Endianness> ExactSizeIterator for FixedVecIter<'_, E>
-where
-    for<'b> FixedVecBitReader<'b, E>:
-        BitRead<E, Error = core::convert::Infallible> + BitSeek<Error = core::convert::Infallible>,
-{
+impl<E: Endianness> ExactSizeIterator for FixedVecIter<'_, E> {
     /// Returns the exact number of remaining items in the iterator.
     fn len(&self) -> usize {
         self.vec.len().saturating_sub(self.current_index)
