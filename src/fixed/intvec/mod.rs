@@ -144,7 +144,7 @@ impl<E: Endianness> FixedVec<E> {
     ///
     /// # Safety
     /// Calling this method with an out-of-bounds index is undefined behavior in release builds.
-    #[inline]
+    #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> u64 {
         debug_assert!(
             index < self.len,

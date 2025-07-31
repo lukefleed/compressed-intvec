@@ -113,6 +113,44 @@ def parse_parallel_results():
                     })
     return pd.DataFrame(results)
 
+def parse_unchecked_results():
+    """Parses criterion JSON for the unchecked_access benchmark."""
+    results = []
+    base_path = os.path.join(CRITERION_DIR, "RandomAccess")
+    if not os.path.isdir(base_path):
+        print(f"Error: Criterion output directory not found at {base_path}")
+        return pd.DataFrame()
+
+    # Find all bit-width specific directories (e.g., "8bit", "64bit_Baseline_Vec<u64>")
+    group_dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
+
+    for group_dir in group_dirs:
+        bit_width_match = re.match(r"(\d+)bit", group_dir)
+        if not bit_width_match:
+            continue
+        bit_width = int(bit_width_match.group(1))
+
+        group_path = os.path.join(base_path, group_dir)
+        for bench_name in os.listdir(group_path):
+            bench_path = os.path.join(group_path, bench_name, 'base', 'estimates.json')
+            if os.path.exists(bench_path):
+                # Handle names like "LEFixedVec/Checked" and "sux::BitFieldVec/Unchecked"
+                parts = bench_name.split('/')
+                impl = parts[0]
+                access = parts[1]
+
+                with open(bench_path, 'r') as f:
+                    data = json.load(f)
+                    elapsed_seconds = data['mean']['point_estimate'] / 1e9
+                    results.append({
+                        "implementation": impl,
+                        "access_type": access,
+                        "bit_width": bit_width,
+                        "time_s": elapsed_seconds,
+                    })
+    return pd.DataFrame(results)
+
+
 # --- Helper Functions ---
 
 def format_codec_name(name):
@@ -138,7 +176,7 @@ def format_distribution_subtitle(dist_string):
     return dist_map.get(clean_dist, f"{clean_dist}, {VECTOR_SIZE:,} elements")
 
 def save_plots(fig, base_name):
-    """Saves interactive and static plots."""
+    """Saves interactive and static plots for distribution-based benchmarks."""
     benchmark_output_dir = os.path.join(OUTPUT_DIR, base_name)
     single_distr_dir = os.path.join(benchmark_output_dir, "single_distr")
     os.makedirs(single_distr_dir, exist_ok=True)
@@ -180,6 +218,50 @@ def save_plots(fig, base_name):
             print(f"    Could not save SVG for {dist}: {e}. Ensure 'kaleido' is installed.")
 
     print(f"Finished processing for {base_name}.")
+
+def save_unchecked_plot(fig, base_name):
+    """Saves interactive and static plots for the unchecked benchmark."""
+    benchmark_output_dir = os.path.join(OUTPUT_DIR, base_name)
+    single_access_dir = os.path.join(benchmark_output_dir, "single_access_type")
+    os.makedirs(single_access_dir, exist_ok=True)
+
+    interactive_path = os.path.join(benchmark_output_dir, f"{base_name}_interactive.html")
+    print(f"  Saving interactive plot to {interactive_path}")
+    fig.write_html(interactive_path, include_plotlyjs='cdn')
+
+    if not (fig.layout.updatemenus and fig.layout.updatemenus[0].buttons):
+        return
+
+    access_types = [button['label'].replace(" Access", "") for button in fig.layout.updatemenus[0].buttons]
+    main_title = "Random Access Performance vs. Bit Width"
+
+    for access_type in access_types:
+        static_fig = go.Figure(fig)
+
+        # Manually set visibility for traces based on the access type
+        for trace in static_fig.data:
+            # A bit of a trick: visibility is decided by checking if the trace's name
+            # is in the list of implementations for the current access_type.
+            df = pd.DataFrame(static_fig.data)
+            impl_for_access = df[df['customdata'].apply(lambda x: x[0] == access_type)]['name'].unique()
+            trace.visible = trace.name in impl_for_access
+
+        static_fig.layout.updatemenus = None
+        static_fig.update_layout(title_text=f"{main_title} ({access_type})")
+
+        base_filename = os.path.join(single_access_dir, f"{base_name}_{access_type.lower()}")
+        html_path = f"{base_filename}.html"
+        print(f"  Saving static plot to {html_path}")
+        static_fig.write_html(html_path, include_plotlyjs='cdn')
+        try:
+            svg_path = f"{base_filename}.svg"
+            print(f"  Saving static plot to {svg_path}")
+            static_fig.write_image(svg_path, width=1400, height=787)
+        except ValueError as e:
+            print(f"    Could not save SVG for {access_type}: {e}. Ensure 'kaleido' is installed.")
+
+    print(f"Finished processing for {base_name}.")
+
 
 # --- Plotting Logic ---
 
@@ -416,15 +498,82 @@ def plot_parallel():
 
     save_plots(fig, "parallel")
 
+def plot_unchecked():
+    """Generates plots for checked vs. unchecked random access benchmarks."""
+    print("\nProcessing unchecked access benchmarks...")
+    df = parse_unchecked_results()
+    if df.empty:
+        print("No unchecked access benchmark data found to plot.")
+        return
+
+    df["time_ms"] = df["time_s"] * 1000
+    df = df.sort_values(by=["bit_width", "implementation"])
+
+    fig = go.Figure()
+    access_types = sorted(df["access_type"].unique())
+    default_access = "Unchecked"
+    active_index = access_types.index(default_access) if default_access in access_types else 0
+
+    for access_type in access_types:
+        df_access = df[df["access_type"] == access_type]
+        is_visible = (access_type == default_access)
+
+        for impl_name in sorted(df_access["implementation"].unique()):
+            df_impl = df_access[df_access["implementation"] == impl_name]
+            fig.add_trace(go.Bar(
+                x=df_impl["bit_width"],
+                y=df_impl["time_ms"],
+                name=impl_name,
+                visible=is_visible,
+                customdata=[access_type] * len(df_impl),
+                hovertemplate=f"<b>{impl_name}</b><br>Bit Width: %{{x}} bits<br>Time: %{{y:.2f}} ms<extra></extra>"
+            ))
+
+    # Create buttons for the dropdown menu
+    buttons = []
+    for access_type in access_types:
+        # For each trace, make it visible only if its customdata matches the current access_type
+        visibility = [access_type in trace.customdata for trace in fig.data]
+        buttons.append(dict(
+            label=f"{access_type} Access",
+            method="update",
+            args=[{"visible": visibility},
+                  {"title.text": f"Random Access Performance ({access_type}) vs. Bit Width"}]
+        ))
+
+    fig.update_layout(
+        title_text=f"Random Access Performance ({default_access}) vs. Bit Width",
+        xaxis_title="Bit Width per Integer",
+        yaxis_title="Time for 1M Accesses (ms)",
+        barmode='group',
+        xaxis=dict(type='category'),
+        legend_title_text="Implementation",
+        updatemenus=[dict(
+            active=active_index,
+            buttons=buttons,
+            direction="down",
+            pad={"r": 10, "t": 10},
+            showactive=True,
+            x=0.1,
+            xanchor="left",
+            y=1.15,
+            yanchor="top"
+        )]
+    )
+
+    # Using the more complex save function to handle static image generation for each dropdown option
+    save_plots(fig, "unchecked_access_performance")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate plots from compressed-intvec benchmark results.")
     parser.add_argument("--random-access", action="store_true", help="Generate plots for random access benchmarks.")
     parser.add_argument("--size", action="store_true", help="Generate plots for memory size benchmarks.")
     parser.add_argument("--parallel", action="store_true", help="Generate plots for parallel performance benchmarks.")
+    parser.add_argument("--unchecked", action="store_true", help="Generate plots for unchecked access benchmarks.")
     parser.add_argument("--all", action="store_true", help="Generate all benchmark plots.")
     args = parser.parse_args()
 
-    if not any([args.random_access, args.size, args.parallel, args.all]):
+    if not any([args.random_access, args.size, args.parallel, args.unchecked, args.all]):
         parser.print_help()
     else:
         os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -435,3 +584,5 @@ if __name__ == "__main__":
             plot_size()
         if args.parallel or args.all:
             plot_parallel()
+        if args.unchecked or args.all:
+            plot_unchecked()
