@@ -1,3 +1,4 @@
+use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
@@ -5,9 +6,7 @@ use dsi_bitstream::{
 };
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::time::Duration;
-
-#[cfg(feature = "parallel")]
-use compressed_intvec::prelude::*;
+use sux::prelude::{BitFieldSlice, BitFieldVec};
 
 /// Enum to define the data distributions for testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,6 +112,18 @@ fn benchmark_random_access(c: &mut Criterion) {
                 }
             })
         });
+
+        // --- Benchmark sux::BitFieldVec (k-independent) ---
+        if !data.is_empty() {
+            let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
+            group.bench_function("sux::BitFieldVec/get_unchecked", |b| {
+                b.iter(|| {
+                    for &index in black_box(&access_indices) {
+                        black_box(unsafe { sux_bfv.get_unchecked(index) });
+                    }
+                })
+            });
+        }
 
         // --- Benchmark IntVec (k-dependent codecs) ---
         for (spec_name, codec_spec) in variable_codecs {

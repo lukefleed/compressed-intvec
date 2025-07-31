@@ -1,2 +1,2 @@
 pub mod intvec;
-// pub mod sintvec;
+pub mod sintvec;

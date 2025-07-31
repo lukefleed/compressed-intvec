@@ -29,6 +29,8 @@
 //! - Inside each group, every implementation is benchmarked for both checked
 //!   and unchecked access patterns using the same set of random indices.
 
+use std::time::Duration;
+
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
@@ -48,11 +50,11 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 /// The main benchmark function.
 fn benchmark_random_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 10_000_000;
-    const NUM_ACCESSES: usize = 1_000_000;
+    const NUM_ACCESSES: usize = 30_000_000;
 
-    // A curated list of bit widths to test, designed to highlight the
+    // A list of bit widths to test, designed to highlight the
     // performance impact of power-of-two optimizations.
-    let bit_widths_to_test = [7, 8, 15, 16, 31, 32, 63, 64];
+    let bit_widths_to_test = [7, 8, 15, 16, 31, 32];
 
     // Pre-generate the random indices that will be used for all benchmarks.
     let mut rng = SmallRng::seed_from_u64(1337);
@@ -67,7 +69,7 @@ fn benchmark_random_access(c: &mut Criterion) {
     group.bench_function("Checked", |b| {
         b.iter(|| {
             for &index in black_box(&access_indices) {
-                black_box(baseline_data[index]);
+                black_box(baseline_data.get(index));
             }
         })
     });
@@ -151,7 +153,10 @@ fn benchmark_random_access(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default();
+    config = Criterion::default()
+        .sample_size(10)
+        .measurement_time(Duration::from_secs(15));
+
     targets = benchmark_random_access
 }
 criterion_main!(benches);

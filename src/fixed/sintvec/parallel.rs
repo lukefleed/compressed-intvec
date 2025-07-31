@@ -4,17 +4,13 @@
 //! enabled by the `parallel` feature flag.
 
 use super::{FixedVecError, SFixedVec};
-use crate::fixed::intvec::FixedVecBitReader;
-use dsi_bitstream::prelude::{BitRead, BitSeek, Endianness, ToInt};
+use dsi_bitstream::prelude::{Endianness, ToInt};
 use rayon::prelude::*;
 
 #[cfg(feature = "parallel")]
 impl<E> SFixedVec<E>
 where
     E: Endianness + Send + Sync,
-    for<'a> FixedVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + BitSeek<Error = core::convert::Infallible>
-        + Send,
 {
     /// Returns a parallel iterator over the decompressed `i64` values.
     ///
@@ -33,9 +29,9 @@ where
     /// signed integers.
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<i64>, FixedVecError> {
         let unsigned_values = self.inner.par_get_many(indices)?;
-        // This conversion is fast and can be done sequentially after parallel fetch.
+        // This conversion is fast and can be parallelized.
         let signed_values = unsigned_values
-            .into_iter()
+            .into_par_iter()
             .map(|unsigned_val| unsigned_val.to_int())
             .collect();
         Ok(signed_values)
@@ -50,7 +46,7 @@ where
     pub unsafe fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<i64> {
         self.inner
             .par_get_many_unchecked(indices)
-            .into_iter()
+            .into_par_iter()
             .map(ToInt::to_int)
             .collect()
     }

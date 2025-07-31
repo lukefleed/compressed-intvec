@@ -4,8 +4,8 @@
 //! sequential decompression of a [`SFixedVec`].
 
 use super::SFixedVec;
-use crate::fixed::intvec::{iter::FixedVecIter, FixedVecBitReader};
-use dsi_bitstream::prelude::{BitRead, BitSeek, Endianness, ToInt};
+use crate::fixed::intvec::iter::FixedVecIter;
+use dsi_bitstream::prelude::{Endianness, ToInt};
 
 /// An iterator over the decompressed `i64` values of an [`SFixedVec`].
 ///
@@ -17,11 +17,7 @@ pub struct SFixedVecIter<'a, E: Endianness> {
     inner_iter: FixedVecIter<'a, E>,
 }
 
-impl<'a, E: Endianness> SFixedVecIter<'a, E>
-where
-    for<'b> FixedVecBitReader<'b, E>:
-        BitRead<E, Error = core::convert::Infallible> + BitSeek<Error = core::convert::Infallible>,
-{
+impl<'a, E: Endianness> SFixedVecIter<'a, E> {
     /// Creates a new `SFixedVecIter` that wraps the inner `FixedVec`'s iterator.
     ///
     /// This is `pub(super)` and is called by [`SFixedVec::iter`].
@@ -32,11 +28,7 @@ where
     }
 }
 
-impl<'a, E: Endianness> Iterator for SFixedVecIter<'a, E>
-where
-    for<'b> FixedVecBitReader<'b, E>:
-        BitRead<E, Error = core::convert::Infallible> + BitSeek<Error = core::convert::Infallible>,
-{
+impl<'a, E: Endianness> Iterator for SFixedVecIter<'a, E> {
     type Item = i64;
 
     #[inline]
@@ -51,11 +43,7 @@ where
     }
 }
 
-impl<'a, E: Endianness> ExactSizeIterator for SFixedVecIter<'a, E>
-where
-    for<'b> FixedVecBitReader<'b, E>:
-        BitRead<E, Error = core::convert::Infallible> + BitSeek<Error = core::convert::Infallible>,
-{
+impl<'a, E: Endianness> ExactSizeIterator for SFixedVecIter<'a, E> {
     /// Returns the exact number of remaining items in the iterator.
     fn len(&self) -> usize {
         self.inner_iter.len()

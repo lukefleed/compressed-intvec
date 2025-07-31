@@ -1,8 +1,8 @@
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
-use std::time::Duration;
+use sux::prelude::{BitFieldSlice, BitFieldVec};
 
 /// Generates a vector with uniformly random values.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
@@ -106,6 +106,15 @@ fn benchmark_access_patterns(c: &mut Criterion) {
         .build()
         .expect("Failed to build IntVec");
 
+    // --- Setup sux::BitFieldVec for comparison ---
+    let mut sux_bfv = BitFieldVec::<u64>::new(
+        (u64::BITS - data.iter().max().unwrap_or(&0).leading_zeros()) as usize,
+        0,
+    );
+    for &val in &data {
+        sux_bfv.push(val);
+    }
+
     let patterns = [
         AccessPattern::Clustered,
         AccessPattern::Sorted,
@@ -115,13 +124,12 @@ fn benchmark_access_patterns(c: &mut Criterion) {
 
     for pattern in patterns {
         let mut group = c.benchmark_group(format!("AccessPatterns/{}", pattern.name()));
-        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
 
         let mut rng = SmallRng::seed_from_u64(1337);
         let access_indices = pattern.generate_indices(&mut rng, NUM_ACCESSES, VECTOR_SIZE, K_VALUE);
 
-        // 1. Benchmark a loop using `get_unchecked`.
-        group.bench_function("get_unchecked_loop", |b| {
+        // --- Our IntVec benchmarks ---
+        group.bench_function("IntVec/get_unchecked_loop", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
                     // SAFETY: Indices are generated within bounds.
@@ -130,21 +138,29 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             })
         });
 
-        // 2. Benchmark `get_many_unchecked`.
-        group.bench_function("get_many_unchecked", |b| {
+        group.bench_function("IntVec/get_many_unchecked", |b| {
             b.iter(|| {
                 // SAFETY: Indices are generated within bounds.
                 let _ = black_box(unsafe { intvec.get_many_unchecked(black_box(&access_indices)) });
             })
         });
 
-        // 3. Benchmark `par_get_many_unchecked`.
         #[cfg(feature = "parallel")]
-        group.bench_function("par_get_many_unchecked", |b| {
+        group.bench_function("IntVec/par_get_many_unchecked", |b| {
             b.iter(|| {
                 // SAFETY: Indices are generated within bounds.
                 let _ =
                     black_box(unsafe { intvec.par_get_many_unchecked(black_box(&access_indices)) });
+            })
+        });
+
+        // --- sux::BitFieldVec benchmarks ---
+        group.bench_function("sux::BitFieldVec/get_unchecked_loop", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    // SAFETY: Indices are generated within bounds.
+                    black_box(unsafe { sux_bfv.get_unchecked(index) });
+                }
             })
         });
 
@@ -154,10 +170,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default()
-        .sample_size(10)
-        .warm_up_time(Duration::from_millis(10))
-        .measurement_time(Duration::from_secs(15));
+    config = Criterion::default();
     targets = benchmark_access_patterns
 }
 criterion_main!(benches);

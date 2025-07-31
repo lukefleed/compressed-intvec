@@ -7,7 +7,7 @@ use dsi_bitstream::prelude::{BitWrite, Endianness, ToNat};
 use std::marker::PhantomData;
 
 use crate::fixed::{
-    intvec::{FixedVec, FixedVecError},
+    intvec::{builder::FixedVecBitWriter, FixedVec, FixedVecError},
     sintvec::SFixedVec,
 };
 
@@ -49,8 +49,7 @@ impl<'a, E: Endianness> SFixedVecBuilder<'a, E> {
     /// Builds the `SFixedVec`, consuming the builder.
     pub fn build(self) -> Result<SFixedVec<E>, FixedVecError>
     where
-        for<'b> crate::fixed::intvec::builder::FixedVecBitWriter<E>:
-            BitWrite<E, Error = core::convert::Infallible>,
+        FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
         // Transform the signed integers to unsigned integers using ZigZag encoding.
         // We need to materialize this into a Vec to allow the underlying
@@ -94,8 +93,7 @@ impl<E: Endianness, I: IntoIterator<Item = i64>> SFixedVecFromIterBuilder<E, I> 
     /// Builds the `SFixedVec` by consuming the iterator.
     pub fn build(self) -> Result<SFixedVec<E>, FixedVecError>
     where
-        for<'b> crate::fixed::intvec::builder::FixedVecBitWriter<E>:
-            BitWrite<E, Error = core::convert::Infallible>,
+        FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
         // Create an iterator that applies ZigZag encoding on the fly.
         let unsigned_iter = self.iter.into_iter().map(|x| x.to_nat());

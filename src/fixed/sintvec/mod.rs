@@ -23,11 +23,11 @@ pub mod parallel;
 #[cfg(feature = "serde")]
 mod serde;
 
-use super::intvec::{FixedVec, FixedVecBitReader, FixedVecError};
+use super::intvec::{FixedVec, FixedVecError};
 pub use builder::{SFixedVecBuilder, SFixedVecFromIterBuilder};
 pub use iter::SFixedVecIter;
 
-use dsi_bitstream::prelude::{BitRead, BitSeek, Endianness, ToInt, BE, LE};
+use dsi_bitstream::prelude::{Endianness, ToInt, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 
 /// A compressed, randomly accessible vector of `i64` integers with fixed-width encoding.
@@ -99,15 +99,9 @@ impl<E: Endianness> SFixedVec<E> {
     pub fn limbs(&self) -> Vec<u64> {
         self.inner.limbs()
     }
-}
 
-impl<E: Endianness> SFixedVec<E>
-where
-    for<'a> FixedVecBitReader<'a, E>:
-        BitRead<E, Error = core::convert::Infallible> + BitSeek<Error = core::convert::Infallible>,
-{
     /// Retrieves the signed integer at the specified index. Access is O(1).
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, index: usize) -> Option<i64> {
         self.inner.get(index).map(ToInt::to_int)
     }
@@ -118,7 +112,7 @@ where
     ///
     /// # Safety
     /// Calling this method with an out-of-bounds index is undefined behavior in release builds.
-    #[inline]
+    #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> i64 {
         self.inner.get_unchecked(index).to_int()
     }
@@ -150,7 +144,11 @@ where
 
     /// Consumes the [`SFixedVec`] and returns the underlying `Vec<i64>`.
     pub fn into_vec(self) -> Vec<i64> {
-        self.inner.limbs().into_iter().map(ToInt::to_int).collect()
+        self.inner
+            .into_vec()
+            .into_iter()
+            .map(ToInt::to_int)
+            .collect()
     }
 }
 
@@ -159,39 +157,3 @@ pub type BESFixedVec = SFixedVec<BE>;
 
 /// A type alias for an [`SFixedVec`] with Little-Endian ([`LE`]) bitstream encoding.
 pub type LESFixedVec = SFixedVec<LE>;
-
-#[cfg(feature = "serde")]
-#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-mod serde_impls {
-    use super::{Endianness, FixedVec, SFixedVec};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    impl<E: Endianness> Serialize for SFixedVec<E>
-    where
-        FixedVec<E>: Serialize,
-    {
-        /// Serializes the `SFixedVec` by delegating to its inner `FixedVec`.
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            // Since SFixedVec is a transparent wrapper, we just serialize the inner field.
-            self.inner.serialize(serializer)
-        }
-    }
-
-    impl<'de, E: Endianness> Deserialize<'de> for SFixedVec<E>
-    where
-        FixedVec<E>: Deserialize<'de>,
-    {
-        /// Deserializes the `SFixedVec` by deserializing its inner `FixedVec`.
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            // Deserialize the inner FixedVec and wrap it in a new SFixedVec.
-            let inner = FixedVec::<E>::deserialize(deserializer)?;
-            Ok(SFixedVec { inner })
-        }
-    }
-}

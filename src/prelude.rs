@@ -11,9 +11,9 @@ pub use crate::variable::intvec::IntVecError;
 pub use crate::fixed::intvec::{
     BEFixedVec, FixedVec, FixedVecBuilder, FixedVecFromIterBuilder, FixedVecIter, LEFixedVec,
 };
-// pub use crate::fixed::sintvec::{
-//     BESFixedVec, LESFixedVec, SFixedVec, SFixedVecBuilder, SFixedVecFromIterBuilder, SFixedVecIter,
-// };
+pub use crate::fixed::sintvec::{
+    BESFixedVec, LESFixedVec, SFixedVec, SFixedVecBuilder, SFixedVecFromIterBuilder, SFixedVecIter,
+};
 
 // Types for variable-width vectors
 pub use crate::variable::codec::VariableCodecSpec;

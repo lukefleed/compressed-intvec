@@ -161,7 +161,7 @@ impl<E: Endianness> FixedVec<E> {
 
         // Dispatch based on endianness at compile time.
         if TypeId::of::<E>() == TypeId::of::<LE>() {
-            // Little-Endian Path, inspired by sux-rs for maximum performance.
+            // Little-Endian Path
             if bit_offset + self.num_bits <= 64 {
                 // Fast path: element is within a single word.
                 (*bits.get_unchecked(word_index) >> bit_offset) & self.mask
@@ -172,8 +172,11 @@ impl<E: Endianness> FixedVec<E> {
                     & self.mask
             }
         } else {
-            // Big-Endian Path, using 128-bit arithmetic for robust handling
-            // of all cases, including num_bits = 64.
+            // TODO! Implement a true 128-bit arithmetic path for Big-Endian.
+            // For now, we use the costly `to_be()` conversion.
+            // This is a placeholder for future optimization.
+
+            // Big-Endian Path, using 128-bit arithmetic
             let high_word = bits.get_unchecked(word_index).to_be();
             let low_word = bits.get_unchecked(word_index + 1).to_be();
 
