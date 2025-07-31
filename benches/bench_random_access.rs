@@ -7,15 +7,15 @@ use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::time::Duration;
 
 #[cfg(feature = "parallel")]
-use compressed_intvec::{codec_spec::CodecSpec, intvec::LEIntVec};
+use compressed_intvec::prelude::*;
 
 /// Enum to define the data distributions for testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Distribution {
     UniformLow,
     UniformHigh,
-    Geometric,
-    PowerLaw,
+    RiceImplied,
+    ZetaImplied,
 }
 
 impl Distribution {
@@ -24,13 +24,13 @@ impl Distribution {
         match self {
             Distribution::UniformLow => generate_random_vec(size, 1_000),
             Distribution::UniformHigh => generate_random_vec(size, 1 << 32),
-            Distribution::Geometric => {
+            Distribution::RiceImplied => {
                 let mut rng = SmallRng::seed_from_u64(42);
                 sample_implied_distribution(|v| len_rice(v, 4), &mut rng)
                     .take(size)
                     .collect()
             }
-            Distribution::PowerLaw => {
+            Distribution::ZetaImplied => {
                 let mut rng = SmallRng::seed_from_u64(42);
                 sample_implied_distribution(|v| len_zeta_param::<false>(v, 3), &mut rng)
                     .take(size)
@@ -60,27 +60,20 @@ fn benchmark_random_access(c: &mut Criterion) {
     let distributions = [
         (Distribution::UniformLow, "UniformLow"),
         (Distribution::UniformHigh, "UniformHigh"),
-        (Distribution::Geometric, "Geometric"),
-        (Distribution::PowerLaw, "PowerLaw"),
+        (Distribution::RiceImplied, "RiceImplied"),
+        (Distribution::ZetaImplied, "ZetaImplied"),
     ];
 
-    // Codecs that are dependent on the `k` parameter of the integer vector.
-    let k_dependent_codecs = [
-        ("Gamma", CodecSpec::Gamma),
-        ("Delta", CodecSpec::Delta),
-        ("Unary", CodecSpec::Unary),
-        ("Rice", CodecSpec::Rice { log2_b: None }),
-        ("Zeta", CodecSpec::Zeta { k: None }),
-        ("Explicit_Omega", CodecSpec::Omega),
-        ("Explicit_VByteLe", CodecSpec::VByteLe),
-        ("Explicit_VByteBe", CodecSpec::VByteBe),
-        ("Explicit_Pi", CodecSpec::Pi { k: Some(3) }),
-        ("Explicit_Golomb", CodecSpec::Golomb { b: Some(8) }),
-        ("Explicit_ExpGolomb", CodecSpec::ExpGolomb { k: Some(2) }),
+    // Codecs for IntVec (k-dependent).
+    let variable_codecs = [
+        ("Gamma", VariableCodecSpec::Gamma),
+        ("Delta", VariableCodecSpec::Delta),
+        ("Unary", VariableCodecSpec::Unary),
+        ("Rice", VariableCodecSpec::Rice { log2_b: None }),
+        ("Zeta", VariableCodecSpec::Zeta { k: None }),
+        ("Omega", VariableCodecSpec::Omega),
+        ("VByteLe", VariableCodecSpec::VByteLe),
     ];
-
-    // Codecs that are not dependent on `k`.
-    let k_independent_codecs = [("FixedLength", CodecSpec::FixedLength { num_bits: None })];
 
     // Prepare a vector of random indices for access tests.
     let mut rng = SmallRng::seed_from_u64(1337);
@@ -100,29 +93,37 @@ fn benchmark_random_access(c: &mut Criterion) {
         let data = distribution.generate(VECTOR_SIZE);
 
         // --- Baseline benchmark on the original Vec<u64> ---
-        group.bench_function("Baseline/get", |b| {
+        group.bench_function("Baseline/get_unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
                     // Accessing the original, uncompressed vector.
-                    black_box(data[index]);
+                    black_box(unsafe { data.get_unchecked(index) });
                 }
             })
         });
 
-        // Benchmark k-dependent codecs
-        for (spec_name, codec_spec) in k_dependent_codecs {
+        // --- Benchmark FixedVec (k-independent) ---
+        let fixed_vec = LEFixedVec::builder(&data)
+            .build()
+            .expect("Failed to build FixedVec");
+        group.bench_function("FixedVec/get_unchecked", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    black_box(unsafe { fixed_vec.get_unchecked(index) });
+                }
+            })
+        });
+
+        // --- Benchmark IntVec (k-dependent codecs) ---
+        for (spec_name, codec_spec) in variable_codecs {
             if matches!(
                 distribution,
-                Distribution::UniformHigh | Distribution::PowerLaw
+                Distribution::UniformHigh | Distribution::ZetaImplied
             ) {
                 if matches!(
                     codec_spec,
-                    CodecSpec::Unary | CodecSpec::Rice { .. } | CodecSpec::Golomb { .. }
+                    VariableCodecSpec::Unary | VariableCodecSpec::Rice { .. }
                 ) {
-                    println!(
-                        "\n- Skipping codec: {} for {} distribution",
-                        spec_name, dist_name
-                    );
                     continue;
                 }
             }
@@ -134,34 +135,15 @@ fn benchmark_random_access(c: &mut Criterion) {
                     .build()
                     .expect("Failed to build IntVec");
 
-                group.bench_function(format!("{}/k={}/get", spec_name, k_value), |b| {
+                group.bench_function(format!("{}/k={}/get_unchecked", spec_name, k_value), |b| {
                     b.iter(|| {
                         for &index in black_box(&access_indices) {
-                            black_box(intvec.get(index));
+                            black_box(unsafe { intvec.get_unchecked(index) });
                         }
                     })
                 });
             }
         }
-
-        // Benchmark k-independent codecs
-        for (spec_name, codec_spec) in k_independent_codecs {
-            // This codec is not dependent on k, so we build it once.
-            let intvec = LEIntVec::builder(&data)
-                .k(K_VALUES[0]) // This k value is ignored by the builder.
-                .codec(codec_spec)
-                .build()
-                .expect("Failed to build IntVec");
-
-            group.bench_function(format!("{}/get", spec_name), |b| {
-                b.iter(|| {
-                    for &index in black_box(&access_indices) {
-                        black_box(intvec.get(index));
-                    }
-                })
-            });
-        }
-
         group.finish();
     }
 }

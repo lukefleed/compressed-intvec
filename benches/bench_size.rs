@@ -1,18 +1,15 @@
 #![allow(clippy::all)]
-//! # Benchmark for Measuring Memory Space of `IntVec`.
+//! # Benchmark for Measuring Memory Space.
 //!
-//! This utility generates `IntVec` instances with various configurations to measure
-//! their memory footprint. The configurations are aligned with `bench_random_access`.
-//! It is intended to be run as a benchmark: `cargo bench --bench bench_size`.
+//! This utility generates `IntVec` and `FixedVec` instances with various
+//! configurations to measure their memory footprint. It is intended to be run
+//! as a benchmark: `cargo bench --bench bench_size`.
 //!
 //! ## Output
 //!
 //! A `size_results.csv` file is generated in the `bench_results/` directory.
 
-use compressed_intvec::{
-    codec_spec::{resolve_codec, CodecSpec},
-    intvec::LEIntVec,
-};
+use compressed_intvec::prelude::*;
 use criterion::{criterion_group, criterion_main, Criterion};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
@@ -54,8 +51,8 @@ fn generate_with_distribution(size: usize, len_fn: impl Fn(u64) -> usize) -> Vec
 enum Distribution {
     UniformLow,
     UniformHigh,
-    Geometric,
-    PowerLaw,
+    RiceImplied,
+    ZetaImplied,
 }
 
 impl Distribution {
@@ -64,8 +61,8 @@ impl Distribution {
         match self {
             Distribution::UniformLow => generate_random_vec(size, 1_000),
             Distribution::UniformHigh => generate_random_vec(size, 1 << 32),
-            Distribution::Geometric => generate_with_distribution(size, |v| len_rice(v, 4)),
-            Distribution::PowerLaw => {
+            Distribution::RiceImplied => generate_with_distribution(size, |v| len_rice(v, 4)),
+            Distribution::ZetaImplied => {
                 generate_with_distribution(size, |v| len_zeta_param::<false>(v, 3))
             }
         }
@@ -103,21 +100,21 @@ fn run_space_measurements() {
         let distributions = [
             Distribution::UniformLow,
             Distribution::UniformHigh,
-            Distribution::Geometric,
-            Distribution::PowerLaw,
+            Distribution::RiceImplied,
+            Distribution::ZetaImplied,
         ];
         let dsi_codecs_to_test = [
-            ("Gamma", CodecSpec::Gamma),
-            ("Delta", CodecSpec::Delta),
-            ("Unary", CodecSpec::Unary),
-            ("Rice_auto", CodecSpec::Rice { log2_b: None }),
-            ("Zeta_auto", CodecSpec::Zeta { k: None }),
-            ("Omega", CodecSpec::Omega),
-            ("VByteLe", CodecSpec::VByteLe),
-            ("VByteBe", CodecSpec::VByteBe),
-            ("Pi", CodecSpec::Pi { k: Some(3) }),
-            ("Golomb", CodecSpec::Golomb { b: Some(8) }),
-            ("ExpGolomb", CodecSpec::ExpGolomb { k: Some(2) }),
+            ("Gamma", VariableCodecSpec::Gamma),
+            ("Delta", VariableCodecSpec::Delta),
+            ("Unary", VariableCodecSpec::Unary),
+            ("Rice_auto", VariableCodecSpec::Rice { log2_b: None }),
+            ("Zeta_auto", VariableCodecSpec::Zeta { k: None }),
+            ("Omega", VariableCodecSpec::Omega),
+            ("VByteLe", VariableCodecSpec::VByteLe),
+            ("VByteBe", VariableCodecSpec::VByteBe),
+            ("Pi", VariableCodecSpec::Pi { k: Some(3) }),
+            ("Golomb", VariableCodecSpec::Golomb { b: Some(8) }),
+            ("ExpGolomb", VariableCodecSpec::ExpGolomb { k: Some(2) }),
         ];
 
         let mut all_results: Vec<BenchResult> = Vec::new();
@@ -137,52 +134,46 @@ fn run_space_measurements() {
                 data_distribution: dist_name.clone(),
             });
 
-            // Baseline: FixedLength
-            let codec_spec = CodecSpec::FixedLength { num_bits: None };
-            let resolved_encoding = resolve_codec(&data, codec_spec.clone()).unwrap();
-            let name = format!("{:?}", resolved_encoding)
-                .replace([' ', '{', '}'], "")
-                .replace(':', "=");
-            let intvec = LEIntVec::builder(&data).codec(codec_spec).build().unwrap();
+            // Baseline: FixedVec (auto-bits)
+            let fixed_vec = LEFixedVec::builder(&data).build().unwrap();
             all_results.push(BenchResult {
-                name,
-                k: 1, // `k` is not used, but set to 1 for consistency.
-                space_bytes: intvec.mem_size(SizeFlags::default()),
+                name: format!("FixedVec(bits={})", fixed_vec.num_bits()),
+                k: 0, // k is not applicable
+                space_bytes: fixed_vec.mem_size(SizeFlags::default()),
                 original_data_bytes: original_size_bytes,
                 data_distribution: dist_name.clone(),
             });
 
-            // DSI Codecs
+            // DSI Codecs (IntVec)
             for &(spec_name, ref codec_spec) in &dsi_codecs_to_test {
                 if (matches!(
                     distribution,
-                    Distribution::UniformHigh | Distribution::PowerLaw
+                    Distribution::UniformHigh | Distribution::ZetaImplied
                 ) && matches!(
                     codec_spec,
-                    CodecSpec::Unary | CodecSpec::Rice { .. } | CodecSpec::Golomb { .. }
+                    VariableCodecSpec::Unary
+                        | VariableCodecSpec::Rice { .. }
+                        | VariableCodecSpec::Golomb { .. }
                 )) || (matches!(distribution, Distribution::UniformLow)
-                    && matches!(codec_spec, CodecSpec::Unary))
+                    && matches!(codec_spec, VariableCodecSpec::Unary))
                 {
                     println!("- Skipping {} for distribution {}", spec_name, dist_name);
                     continue;
                 }
 
                 for &k in &k_values {
-                    // Resolve the codec to get its actual name and parameters.
-                    let resolved = resolve_codec(&data, codec_spec.clone()).unwrap();
-                    let name = format!("{:?}", resolved)
+                    let intvec = LEIntVec::builder(&data)
+                        .k(k)
+                        .codec(*codec_spec)
+                        .build()
+                        .unwrap();
+
+                    let name = format!("{:?}", intvec.encoding())
                         .replace([' ', '{', '}'], "")
                         .replace(':', "=");
 
-                    // Build the IntVec with the original spec.
-                    let intvec = LEIntVec::builder(&data)
-                        .k(k)
-                        .codec(codec_spec.clone())
-                        .build()
-                        .unwrap();
                     println!("  - Measured {} (k={})", name, k);
 
-                    // Store the result using the resolved name.
                     all_results.push(BenchResult {
                         name,
                         k,
@@ -202,8 +193,6 @@ fn run_space_measurements() {
         writeln!(file, "name,k,space_bytes,original_bytes,distribution")
             .expect("Could not write CSV header.");
 
-        // Use a HashSet to ensure that we only write unique rows to the CSV.
-        // This handles cases where different CodecSpecs resolve to the same underlying code.
         let mut unique_keys = HashSet::new();
         for result in all_results {
             let key = (
@@ -220,18 +209,14 @@ fn run_space_measurements() {
 }
 
 // --- Criterion Runner Setup ---
-// This setup ensures that the space measurement logic is run as part of `cargo bench`,
-// making it consistent with the other benchmarks.
 fn criterion_benchmark_runner(c: &mut Criterion) {
     let mut group = c.benchmark_group("SpaceMeasurementSuite");
-    // We only need one iteration to generate the file.
     group.bench_function("GenerateSpaceCSV", |b| b.iter(run_space_measurements));
     group.finish();
 }
 
 criterion_group! {
     name = benches;
-    // We only need a small sample size because the core logic is inside a `Once` block.
     config = Criterion::default().sample_size(10);
     targets = criterion_benchmark_runner
 }

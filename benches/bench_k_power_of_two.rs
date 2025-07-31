@@ -21,7 +21,7 @@
 //! advantage for `k=32`, thus justifying the additional code complexity of the
 //! smart dispatch mechanism.
 
-use compressed_intvec::{codec_spec::CodecSpec, intvec::LEIntVec};
+use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::time::Duration;
@@ -61,14 +61,14 @@ fn benchmark_k_optimization(c: &mut Criterion) {
     // Build the IntVec with k = 32 (a power of two, enabling the fast path).
     let intvec_k32 = LEIntVec::builder(&data)
         .k(32)
-        .codec(CodecSpec::Delta) // A typical, fast codec
+        .codec(VariableCodecSpec::Delta) // A typical, fast codec
         .build()
         .expect("Failed to build IntVec with k=32");
 
     // Build the IntVec with k = 31 (NOT a power of two, forcing the fallback path).
     let intvec_k31 = LEIntVec::builder(&data)
         .k(31)
-        .codec(CodecSpec::Delta)
+        .codec(VariableCodecSpec::Delta)
         .build()
         .expect("Failed to build IntVec with k=31");
 

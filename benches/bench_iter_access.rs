@@ -24,7 +24,7 @@
 //! This comparison will precisely isolate the performance difference between a
 //! stateful (`SeqReader`) and a stateless (`Reader`) access logic in a streaming context.
 
-use compressed_intvec::{codec_spec::CodecSpec, intvec::LEIntVec};
+use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
@@ -87,7 +87,7 @@ impl AccessPattern {
             AccessPattern::Clustered => {
                 let num_clusters = (num_accesses / 100).max(1);
                 let mut centroids = vec![0; num_clusters];
-                let uniform_centroid = Uniform::new(0, vector_size - (2 * k)).unwrap();
+                let uniform_centroid = Uniform::new(0, vector_size.saturating_sub(2 * k)).unwrap();
                 for centroid in &mut centroids {
                     *centroid = uniform_centroid.sample(rng);
                 }
@@ -97,20 +97,21 @@ impl AccessPattern {
                 for _ in 0..num_accesses {
                     let centroid = centroids.choose(rng).unwrap();
                     let offset = uniform_offset.sample(rng);
-                    indices.push(centroid + offset);
+                    indices.push((centroid + offset).min(vector_size - 1));
                 }
                 indices
             }
             AccessPattern::Strided => {
                 let mut indices = Vec::new();
                 let mut current_pos = 0;
-                while current_pos < vector_size {
+                while current_pos < vector_size && indices.len() < num_accesses {
                     // Read a block of k indices.
                     let end_read_block = (current_pos + k).min(vector_size);
                     indices.extend(current_pos..end_read_block);
                     // Skip the next block.
                     current_pos += 2 * k;
                 }
+                indices.truncate(num_accesses);
                 indices
             }
         }
@@ -127,7 +128,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
     let data = generate_random_vec(VECTOR_SIZE, 1 << 20);
     let intvec = LEIntVec::builder(&data)
         .k(K_VALUE)
-        .codec(CodecSpec::Delta)
+        .codec(VariableCodecSpec::Delta)
         .build()
         .expect("Failed to build IntVec");
 
@@ -156,7 +157,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
         });
 
         // 2. Benchmark the loop with a reusable but stateless `IntVecReader`.
-        group.bench_function("loop_reader_get_from_iter", |b| {
+        group.bench_function("loop_reader_get", |b| {
             b.iter(|| {
                 let mut results = Vec::with_capacity(access_indices.len());
                 let mut reader = intvec.reader();

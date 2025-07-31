@@ -1,0 +1,183 @@
+//! Integration tests for `FixedVec`.
+
+use compressed_intvec::prelude::*;
+use dsi_bitstream::prelude::{BE, LE};
+use rand::{rngs::StdRng, Rng, SeedableRng};
+
+// Import helper functions from the common module.
+#[path = "../common/mod.rs"]
+mod common;
+use common::helpers::generate_random_vec;
+
+#[cfg(feature = "parallel")]
+use rayon::iter::ParallelIterator;
+
+macro_rules! test_configuration {
+    ($test_name:ident, $endianness:ty, $input:expr, $num_bits:expr) => {
+        #[test]
+        fn $test_name() {
+            let input = &$input;
+            let num_bits = $num_bits;
+
+            // Build the FixedVec
+            let fixed_vec = FixedVec::<$endianness>::builder(input)
+                .num_bits(num_bits)
+                .build()
+                .unwrap();
+
+            // Basic property checks
+            assert_eq!(fixed_vec.len(), input.len());
+            assert_eq!(fixed_vec.is_empty(), input.is_empty());
+            if num_bits.is_some() {
+                assert_eq!(fixed_vec.num_bits(), num_bits.unwrap());
+            }
+
+            // Test full decompression
+            assert_eq!(&fixed_vec.clone().into_vec(), input, "into_vec failed");
+            assert_eq!(&fixed_vec.iter().collect::<Vec<_>>(), input, "iter failed");
+
+            if !input.is_empty() {
+                let mut rng = StdRng::seed_from_u64(42);
+                let num_indices = 100.min(input.len());
+                let indices: Vec<usize> = (0..num_indices)
+                    .map(|_| rng.random_range(0..input.len()))
+                    .collect();
+                let expected: Vec<u64> = indices.iter().map(|&i| input[i]).collect();
+
+                // Test safe accessors
+                for &idx in &indices {
+                    assert_eq!(fixed_vec.get(idx), Some(input[idx]), "get failed");
+                }
+                assert_eq!(
+                    fixed_vec.get_many(&indices).unwrap(),
+                    expected,
+                    "get_many failed"
+                );
+
+                // Test unsafe accessors
+                unsafe {
+                    for &idx in &indices {
+                        assert_eq!(
+                            fixed_vec.get_unchecked(idx),
+                            input[idx],
+                            "get_unchecked failed"
+                        );
+                    }
+                    assert_eq!(
+                        fixed_vec.get_many_unchecked(&indices),
+                        expected,
+                        "get_many_unchecked failed"
+                    );
+                }
+
+                // Parallel tests
+                #[cfg(feature = "parallel")]
+                {
+                    assert_eq!(
+                        &fixed_vec.par_iter().collect::<Vec<_>>(),
+                        input,
+                        "par_iter failed"
+                    );
+                    assert_eq!(
+                        fixed_vec.par_get_many(&indices).unwrap(),
+                        expected,
+                        "par_get_many failed"
+                    );
+                    unsafe {
+                        assert_eq!(
+                            fixed_vec.par_get_many_unchecked(&indices),
+                            expected,
+                            "par_get_many_unchecked failed"
+                        );
+                    }
+                }
+            } else {
+                // Special checks for empty vec
+                assert!(fixed_vec.get(0).is_none());
+                assert_eq!(fixed_vec.get_many(&[]).unwrap(), Vec::<u64>::new());
+                unsafe {
+                    assert_eq!(fixed_vec.get_many_unchecked(&[]), Vec::<u64>::new());
+                }
+            }
+        }
+    };
+}
+
+// TEST SUITE
+
+// Empty Vector
+test_configuration!(test_empty_le, LE, generate_random_vec(0, 0), Some(8));
+test_configuration!(test_empty_be, BE, generate_random_vec(0, 0), None);
+
+// Single Element Vector
+test_configuration!(test_single_element_le, LE, vec![42], Some(7));
+test_configuration!(test_single_element_auto_bits_be, BE, vec![1000], None);
+
+// Zeros Vector
+test_configuration!(test_zeros_le, LE, vec![0; 1000], Some(1));
+test_configuration!(test_zeros_auto_bits_be, BE, vec![0; 1000], None);
+
+// Uniform Distributions
+test_configuration!(
+    test_uniform_small_le,
+    LE,
+    generate_random_vec(1000, 100),
+    Some(7) // 100 requires 7 bits
+);
+test_configuration!(
+    test_uniform_large_auto_bits_be,
+    BE,
+    generate_random_vec(1000, 1_000_000),
+    None
+);
+
+// Full 64-bit values
+test_configuration!(
+    test_full_64_bits_be,
+    BE,
+    vec![u64::MAX - 1, u64::MAX],
+    Some(64)
+);
+
+#[test]
+fn test_invalid_parameters() {
+    // num_bits > 64
+    let result = LEFixedVec::builder(&[1, 2, 3]).num_bits(Some(65)).build();
+    assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
+
+    // Value too large for specified bits
+    let input_large = vec![10, 20, 256]; // 256 requires 9 bits
+    let result_large = LEFixedVec::builder(&input_large).num_bits(Some(8)).build();
+    assert!(matches!(
+        result_large,
+        Err(FixedVecError::ValueTooLarge { .. })
+    ));
+}
+
+#[test]
+fn test_out_of_bounds() {
+    let input = vec![10, 20, 30];
+    let fixed_vec = LEFixedVec::builder(&input).build().unwrap();
+    assert!(matches!(
+        fixed_vec.get_many(&[0, 1, 3]),
+        Err(FixedVecError::IndexOutOfBounds(3))
+    ));
+}
+
+#[test]
+fn test_from_iter_builder() {
+    let data: Vec<u64> = (0..1000).collect();
+
+    // Success case
+    let fixed_vec = LEFixedVec::from_iter_builder(data.clone(), 10)
+        .build()
+        .unwrap();
+    assert_eq!(fixed_vec.len(), data.len());
+    assert_eq!(fixed_vec.get(500), Some(500));
+    assert_eq!(fixed_vec.clone().into_vec(), data);
+
+    // Failure case: Value too large for specified bits
+    let data_too_large = vec![10, 20, 256];
+    let result = LEFixedVec::from_iter_builder(data_too_large, 8).build();
+    assert!(matches!(result, Err(FixedVecError::ValueTooLarge { .. })));
+}

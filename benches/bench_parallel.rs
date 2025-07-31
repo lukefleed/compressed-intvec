@@ -7,15 +7,15 @@ use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::time::Duration;
 
 #[cfg(feature = "parallel")]
-use compressed_intvec::{codec_spec::CodecSpec, intvec::LEIntVec};
+use compressed_intvec::prelude::*;
 
 /// Enum to define the data distributions for testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Distribution {
     UniformLow,
     UniformHigh,
-    Geometric,
-    PowerLaw,
+    RiceImplied,
+    ZetaImplied,
 }
 
 impl Distribution {
@@ -24,13 +24,13 @@ impl Distribution {
         match self {
             Distribution::UniformLow => generate_random_vec(size, 1_000),
             Distribution::UniformHigh => generate_random_vec(size, 1 << 32),
-            Distribution::Geometric => {
+            Distribution::RiceImplied => {
                 let mut rng = SmallRng::seed_from_u64(42);
                 sample_implied_distribution(|v| len_rice(v, 4), &mut rng)
                     .take(size)
                     .collect()
             }
-            Distribution::PowerLaw => {
+            Distribution::ZetaImplied => {
                 let mut rng = SmallRng::seed_from_u64(42);
                 sample_implied_distribution(|v| len_zeta_param::<false>(v, 3), &mut rng)
                     .take(size)
@@ -60,23 +60,25 @@ fn benchmark_access(c: &mut Criterion) {
     let distributions = [
         (Distribution::UniformLow, "UniformLow"),
         (Distribution::UniformHigh, "UniformHigh"),
-        (Distribution::Geometric, "Geometric"),
-        (Distribution::PowerLaw, "PowerLaw"),
+        (Distribution::RiceImplied, "RiceImplied"),
+        (Distribution::ZetaImplied, "ZetaImplied"),
     ];
 
     let codecs_to_test = [
-        ("Gamma", CodecSpec::Gamma),
-        ("Delta", CodecSpec::Delta),
-        ("Unary", CodecSpec::Unary),
-        ("Rice", CodecSpec::Rice { log2_b: None }),
-        ("Zeta", CodecSpec::Zeta { k: None }),
-        ("FixedLength", CodecSpec::FixedLength { num_bits: None }),
-        ("Explicit_Omega", CodecSpec::Omega),
-        ("Explicit_VByteLe", CodecSpec::VByteLe),
-        ("Explicit_VByteBe", CodecSpec::VByteBe),
-        ("Explicit_Pi", CodecSpec::Pi { k: Some(3) }),
-        ("Explicit_Golomb", CodecSpec::Golomb { b: Some(8) }),
-        ("Explicit_ExpGolomb", CodecSpec::ExpGolomb { k: Some(2) }),
+        ("Gamma", VariableCodecSpec::Gamma),
+        ("Delta", VariableCodecSpec::Delta),
+        ("Unary", VariableCodecSpec::Unary),
+        ("Rice", VariableCodecSpec::Rice { log2_b: None }),
+        ("Zeta", VariableCodecSpec::Zeta { k: None }),
+        ("Explicit_Omega", VariableCodecSpec::Omega),
+        ("Explicit_VByteLe", VariableCodecSpec::VByteLe),
+        ("Explicit_VByteBe", VariableCodecSpec::VByteBe),
+        ("Explicit_Pi", VariableCodecSpec::Pi { k: Some(3) }),
+        ("Explicit_Golomb", VariableCodecSpec::Golomb { b: Some(8) }),
+        (
+            "Explicit_ExpGolomb",
+            VariableCodecSpec::ExpGolomb { k: Some(2) },
+        ),
     ];
 
     // Prepare a vector of random indices for access tests.
@@ -100,11 +102,13 @@ fn benchmark_access(c: &mut Criterion) {
             // Skip combinations known to cause issues.
             if matches!(
                 distribution,
-                Distribution::UniformHigh | Distribution::PowerLaw
+                Distribution::UniformHigh | Distribution::ZetaImplied
             ) {
                 if matches!(
                     codec_spec,
-                    CodecSpec::Unary | CodecSpec::Rice { .. } | CodecSpec::Golomb { .. }
+                    VariableCodecSpec::Unary
+                        | VariableCodecSpec::Rice { .. }
+                        | VariableCodecSpec::Golomb { .. }
                 ) {
                     println!(
                         "\n- Skipping codec: {} for {} distribution",
@@ -120,26 +124,32 @@ fn benchmark_access(c: &mut Criterion) {
                 .build()
                 .expect("Failed to build IntVec");
 
-            // 1. Benchmark 'get' in a loop.
-            group.bench_function(format!("{}/get_loop", spec_name), |b| {
+            // 1. Benchmark 'get_unchecked' in a loop.
+            group.bench_function(format!("{}/get_unchecked_loop", spec_name), |b| {
                 b.iter(|| {
                     for &index in black_box(&access_indices) {
-                        black_box(intvec.get(index));
+                        // SAFETY: Indices are generated within bounds for the benchmark.
+                        black_box(unsafe { intvec.get_unchecked(index) });
                     }
                 })
             });
 
-            // 2. Benchmark 'get_many' (sequential batch).
-            group.bench_function(format!("{}/get_many", spec_name), |b| {
+            // 2. Benchmark 'get_many_unchecked' (sequential batch).
+            group.bench_function(format!("{}/get_many_unchecked", spec_name), |b| {
                 b.iter(|| {
-                    let _ = black_box(intvec.get_many(black_box(&access_indices)));
+                    // SAFETY: Indices are generated within bounds for the benchmark.
+                    let _ =
+                        black_box(unsafe { intvec.get_many_unchecked(black_box(&access_indices)) });
                 })
             });
 
-            // 3. Benchmark 'par_get_many' (parallel batch).
-            group.bench_function(format!("{}/par_get_many", spec_name), |b| {
+            // 3. Benchmark 'par_get_many_unchecked' (parallel batch).
+            group.bench_function(format!("{}/par_get_many_unchecked", spec_name), |b| {
                 b.iter(|| {
-                    let _ = black_box(intvec.par_get_many(black_box(&access_indices)));
+                    // SAFETY: Indices are generated within bounds for the benchmark.
+                    let _ = black_box(unsafe {
+                        intvec.par_get_many_unchecked(black_box(&access_indices))
+                    });
                 })
             });
         }

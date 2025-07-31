@@ -15,8 +15,8 @@
 //! [`ToInt`]: dsi_bitstream::prelude::ToInt
 
 use super::SIntVec;
-use crate::intvec::IntVecIter;
-use dsi_bitstream::prelude::{Endianness, ToInt};
+use crate::variable::intvec::IntVecIter;
+use dsi_bitstream::{codes::ToInt, prelude::Endianness};
 
 /// An iterator over the decompressed `i64` values of an [`SIntVec`].
 ///
@@ -45,7 +45,7 @@ use dsi_bitstream::prelude::{Endianness, ToInt};
 /// ```
 pub struct SIntVecIter<'a, E: Endianness>
 where
-    for<'b> crate::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
+    for<'b> crate::variable::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
         + dsi_bitstream::dispatch::CodesRead<E>
         + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
 {
@@ -55,7 +55,7 @@ where
 
 impl<'a, E: Endianness> SIntVecIter<'a, E>
 where
-    for<'b> crate::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
+    for<'b> crate::variable::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
         + dsi_bitstream::dispatch::CodesRead<E>
         + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
 {
@@ -70,7 +70,7 @@ where
 
 impl<E: Endianness> Iterator for SIntVecIter<'_, E>
 where
-    for<'b> crate::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
+    for<'b> crate::variable::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
         + dsi_bitstream::dispatch::CodesRead<E>
         + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
 {
@@ -98,7 +98,7 @@ where
 
 impl<E: Endianness> std::iter::ExactSizeIterator for SIntVecIter<'_, E>
 where
-    for<'b> crate::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
+    for<'b> crate::variable::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
         + dsi_bitstream::dispatch::CodesRead<E>
         + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
 {

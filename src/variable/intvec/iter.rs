@@ -8,37 +8,20 @@
 //! ## Performance
 //!
 //! The iterator is optimized for sequential access by pre-configuring the
-//! decoding logic (either for variable-length codes or fixed-width reads)
-//! upon creation. This avoids redundant decision-making within the `next()`
-//! method's hot loop.
+//! decoding logic upon creation. This avoids redundant decision-making within
+//! the `next()` method's hot loop.
 //!
 //! For full-vector decompression, `intvec.iter().collect::<Vec<_>>()` is often
 //! more performant than its parallel counterpart ([`par_iter`]) because it avoids
-//! thread management overhead and benefits from better CPU cache locality,
-//! especially when the decoding logic itself is not computationally intensive.
+//! thread management overhead and benefits from better CPU cache locality.
 //!
-//! [`par_iter`]: crate::intvec::IntVec::par_iter
+//! [`par_iter`]: crate::variable::intvec::IntVec::par_iter
 
 use super::{IntVec, IntVecBitReader};
-use crate::codec_spec::Encoding;
 use dsi_bitstream::{
     dispatch::{CodesRead, FuncCodeReader, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
-
-/// Helper enum to manage the decoding logic within the iterator.
-///
-/// This internal enum abstracts over the two possible decoding strategies:
-/// either using a function-dispatched code reader for DSI-based encodings,
-/// or reading a fixed number of bits for `FixedLength` encoding. This avoids
-/// a `match` statement inside the `next()` method's hot loop for better performance.
-enum IterLogic<'a, E: Endianness>
-where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E>,
-{
-    Dsi(FuncCodeReader<E, IntVecBitReader<'a, E>>),
-    Fixed { num_bits: usize },
-}
 
 /// An iterator over the decompressed `u64` values of an [`IntVec`].
 ///
@@ -52,10 +35,11 @@ where
 /// ```rust
 /// use compressed_intvec::prelude::*;
 ///
-/// let data: &[u64] = &[100, 200, 255, 0, 1];
+/// let data: &[u64] = &;
 ///
+/// // LEIntVec is a type alias for IntVec<LE>
 /// let intvec = LEIntVec::builder(data)
-///     .codec(CodecSpec::Gamma)
+///     .codec(VariableCodecSpec::Gamma)
 ///     .build()
 ///     .unwrap();
 ///
@@ -75,8 +59,8 @@ where
     len: usize,
     /// The underlying bitstream reader used for decoding.
     reader: IntVecBitReader<'a, E>,
-    /// The pre-configured decoding logic for this iterator instance.
-    logic: IterLogic<'a, E>,
+    /// The pre-configured code reader for this iterator instance.
+    code_reader: FuncCodeReader<E, IntVecBitReader<'a, E>>,
     /// The index of the next element to be returned.
     current_index: usize,
     /// A flag to track if the bitstream is still valid.
@@ -96,22 +80,16 @@ where
     /// This is `pub(super)` and is called by [`IntVec::iter`].
     pub(super) fn new(intvec: &'a IntVec<E>) -> Self {
         let reader = intvec.reader().reader;
-        let logic = match intvec.encoding {
-            Encoding::Dsi(code) => {
-                // Pre-create the code reader to avoid recreating it in `next()`.
-                // The `expect` is safe because all codes supported by `IntVec`
-                // are also supported by `FuncCodeReader`.
-                let code_reader = FuncCodeReader::new(code)
-                    .expect("Failed to create code reader for DSI encoding.");
-                IterLogic::Dsi(code_reader)
-            }
-            Encoding::Fixed { num_bits } => IterLogic::Fixed { num_bits },
-        };
+        // Pre-create the code reader to avoid recreating it in `next()`.
+        // The `expect` is safe because all codes supported by `IntVec`
+        // are also supported by `FuncCodeReader`.
+        let code_reader = FuncCodeReader::new(intvec.encoding)
+            .expect("Failed to create code reader for DSI encoding.");
 
         Self {
             len: intvec.len,
             reader,
-            logic,
+            code_reader,
             current_index: 0,
             valid: true,
         }
@@ -137,11 +115,8 @@ where
             return None;
         }
 
-        // Decode the next value based on the pre-selected logic.
-        let result = match &self.logic {
-            IterLogic::Dsi(code_reader) => code_reader.read(&mut self.reader),
-            IterLogic::Fixed { num_bits } => self.reader.read_bits(*num_bits),
-        };
+        // Decode the next value using the pre-configured code reader.
+        let result = self.code_reader.read(&mut self.reader);
 
         match result {
             Ok(value) => {

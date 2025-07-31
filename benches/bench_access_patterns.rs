@@ -1,5 +1,5 @@
-use compressed_intvec::{codec_spec::CodecSpec, intvec::LEIntVec};
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use compressed_intvec::prelude::*;
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
 use std::time::Duration;
@@ -61,7 +61,7 @@ impl AccessPattern {
             AccessPattern::Clustered => {
                 let num_clusters = (num_accesses / 100).max(1);
                 let mut centroids = vec![0; num_clusters];
-                let uniform_centroid = Uniform::new(0, vector_size - (2 * k)).unwrap();
+                let uniform_centroid = Uniform::new(0, vector_size.saturating_sub(2 * k)).unwrap();
                 for centroid in &mut centroids {
                     *centroid = uniform_centroid.sample(rng);
                 }
@@ -71,20 +71,21 @@ impl AccessPattern {
                 for _ in 0..num_accesses {
                     let centroid = centroids.choose(rng).unwrap();
                     let offset = uniform_offset.sample(rng);
-                    indices.push(centroid + offset);
+                    indices.push((centroid + offset).min(vector_size - 1));
                 }
                 indices
             }
             AccessPattern::Strided => {
                 let mut indices = Vec::new();
                 let mut current_pos = 0;
-                while current_pos < vector_size {
+                while current_pos < vector_size && indices.len() < num_accesses {
                     // Read a block of k indices.
                     let end_read_block = (current_pos + k).min(vector_size);
                     indices.extend(current_pos..end_read_block);
                     // Skip the next block.
                     current_pos += 2 * k;
                 }
+                indices.truncate(num_accesses);
                 indices
             }
         }
@@ -101,7 +102,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
     let data = generate_random_vec(VECTOR_SIZE, 1 << 20);
     let intvec = LEIntVec::builder(&data)
         .k(K_VALUE)
-        .codec(CodecSpec::Delta)
+        .codec(VariableCodecSpec::Delta)
         .build()
         .expect("Failed to build IntVec");
 
@@ -114,50 +115,36 @@ fn benchmark_access_patterns(c: &mut Criterion) {
 
     for pattern in patterns {
         let mut group = c.benchmark_group(format!("AccessPatterns/{}", pattern.name()));
+        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
 
         let mut rng = SmallRng::seed_from_u64(1337);
         let access_indices = pattern.generate_indices(&mut rng, NUM_ACCESSES, VECTOR_SIZE, K_VALUE);
 
-        // 1. Benchmark `get_many`
-        group.bench_function("get_many", |b| {
+        // 1. Benchmark a loop using `get_unchecked`.
+        group.bench_function("get_unchecked_loop", |b| {
             b.iter(|| {
-                let _ = black_box(intvec.get_many(black_box(&access_indices)));
-            })
-        });
-
-        // 2. Benchmark a loop using the stateful `seq_reader`.
-        group.bench_function("loop_seq_reader", |b| {
-            b.iter(|| {
-                let mut seq_reader = intvec.seq_reader();
                 for &index in black_box(&access_indices) {
-                    let _ = black_box(seq_reader.get(index));
+                    // SAFETY: Indices are generated within bounds.
+                    black_box(unsafe { intvec.get_unchecked(index) });
                 }
             })
         });
 
-        // 3. Benchmark a loop using the stateless `reader` (the anti-pattern).
-        group.bench_function("loop_reader", |b| {
+        // 2. Benchmark `get_many_unchecked`.
+        group.bench_function("get_many_unchecked", |b| {
             b.iter(|| {
-                let mut reader = intvec.reader();
-                for &index in black_box(&access_indices) {
-                    let _ = black_box(reader.get(index));
-                }
+                // SAFETY: Indices are generated within bounds.
+                let _ = black_box(unsafe { intvec.get_many_unchecked(black_box(&access_indices)) });
             })
         });
 
-        // 4. Benchmark a loop without using any reader.
-        group.bench_function("get_loop", |b| {
+        // 3. Benchmark `par_get_many_unchecked`.
+        #[cfg(feature = "parallel")]
+        group.bench_function("par_get_many_unchecked", |b| {
             b.iter(|| {
-                for &index in black_box(&access_indices) {
-                    let _ = black_box(intvec.get(index));
-                }
-            })
-        });
-
-        // 5. Benchmark par_get_many
-        group.bench_function("par_get_many", |b| {
-            b.iter(|| {
-                let _ = black_box(intvec.par_get_many(black_box(&access_indices)));
+                // SAFETY: Indices are generated within bounds.
+                let _ =
+                    black_box(unsafe { intvec.par_get_many_unchecked(black_box(&access_indices)) });
             })
         });
 

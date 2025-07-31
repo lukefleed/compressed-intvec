@@ -1,4 +1,4 @@
-//! A compressed, randomly accessible vector of signed `i64` integers.
+//! # A compressed, randomly accessible vector of signed `i64` integers.
 //!
 //! This module provides [`SIntVec`], a specialized vector for compressing signed
 //! integer data.
@@ -30,9 +30,11 @@
 //! This transformation is handled transparently by [`SIntVec`]. All compression,
 //! storage, and random access logic is then delegated to an inner [`IntVec`].
 
-use crate::codec_spec::Encoding;
-use crate::intvec::{IntVec, IntVecError, IntVecSeqReader};
-use dsi_bitstream::prelude::{Endianness, ToInt, BE, LE};
+use crate::variable::{
+    intvec::{IntVec, IntVecBitReader, IntVecError},
+    sintvec::{builder::SIntVecFromIterBuilder, iter::SIntVecIter},
+};
+use dsi_bitstream::prelude::{BitRead, BitSeek, Codes, CodesRead, Endianness, ToInt, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 
 // Declare and export submodules.
@@ -40,9 +42,10 @@ mod builder;
 mod iter;
 #[cfg(feature = "parallel")]
 mod parallel;
+#[cfg(feature = "serde")]
+mod serde;
 
 pub use builder::SIntVecBuilder;
-pub use iter::SIntVecIter;
 
 /// A compressed, randomly accessible vector of signed `i64` integers.
 ///
@@ -59,28 +62,25 @@ pub use iter::SIntVecIter;
 ///
 /// # Limitations
 ///
-/// Unlike `IntVec`, the [`SIntVecBuilder`] **requires that codec parameters be
+/// The [`SIntVecBuilder`] **requires that codec parameters be
 /// specified manually**. Automatic parameter selection is not supported because the
-/// on-the-fly ZigZag transformation of the data prevents the builder from performing
-/// a pre-analysis pass to determine optimal codec parameters.
+/// on-the-fly ZigZag transformation prevents a pre-analysis pass.
 ///
 /// # Example
 /// ```rust
 /// use compressed_intvec::prelude::*;
 ///
-/// let data: &[i64] = &[-10, 20, -30, 40, -50, 60, -70, 80, -90, 100];
+/// let data: &[i64] = &;
 ///
 /// // SIntVec requires manual codec selection. Let's use Gamma.
-/// let sintvec = LESIntVec::builder(data)
-///     .codec(CodecSpec::Gamma)
+/// let sintvec = LESIntVec::builder(&data)
+///     .codec(VariableCodecSpec::Gamma)
 ///     .k(4)
 ///     .build()
 ///     .unwrap();
 ///
 /// assert_eq!(sintvec.len(), data.len());
 /// assert_eq!(sintvec.get(0), Some(-10));
-/// assert_eq!(sintvec.get(2), Some(-30));
-/// assert_eq!(sintvec.get(3), Some(40));
 /// ```
 #[derive(Debug, Clone, MemDbg, MemSize)]
 pub struct SIntVec<E: Endianness> {
@@ -88,67 +88,23 @@ pub struct SIntVec<E: Endianness> {
     inner: IntVec<E>,
 }
 
-impl<E: Endianness> SIntVec<E>
+impl<'a, E: Endianness> SIntVec<E>
 where
-    for<'a> crate::intvec::IntVecBitReader<'a, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
+    for<'b> crate::variable::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
         + dsi_bitstream::dispatch::CodesRead<E>
         + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
 {
-    /// Returns a builder for creating an [`SIntVec`] from a slice (`&[i64]`).
+    /// Returns a builder for creating an [`SIntVec`] from a slice of data.
     ///
-    /// See [`SIntVecBuilder`] for more details.
-    pub fn builder(input: &[i64]) -> SIntVecBuilder<E> {
-        SIntVecBuilder::new(input)
+    /// This method is generic over `AsRef<[i64]>`, so it can accept `&[i64]`,
+    /// `Vec<i64>`, etc. See [`SIntVecBuilder`] for more details.
+    pub fn builder<T: AsRef<[i64]> + ?Sized>(input: &T) -> SIntVecBuilder<E> {
+        SIntVecBuilder::new(input.as_ref())
     }
 
-    /// Retrieves the signed integer at the specified index.
-    ///
-    /// This method delegates to [`IntVec::get`] and applies the inverse ZigZag
-    /// transformation to the result.
-    pub fn get(&self, index: usize) -> Option<i64> {
-        self.inner.get(index).map(ToInt::to_int)
-    }
-
-    /// Retrieves multiple signed integers at the specified indices.
-    ///
-    /// This method delegates to [`IntVec::get_many`] and applies the inverse ZigZag transformation to the results.
-    pub fn get_many(&self, indices: &[usize]) -> Result<Vec<i64>, IntVecError> {
-        let unsigned_values = self.inner.get_many(indices)?;
-        Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
-    }
-
-    /// Retrieves multiple signed integers from an iterator of indices.
-    ///
-    /// This method delegates to [`IntVec::get_many_from_iter`] and applies
-    /// the inverse ZigZag transformation to the results.
-    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<i64>, IntVecError>
-    where
-        I: IntoIterator<Item = usize>,
-    {
-        let unsigned_values = self.inner.get_many_from_iter(indices)?;
-        Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
-    }
-
-    /// Returns a stateful, sequential reader for this vector's underlying data.
-    ///
-    /// This method provides access to the sequential reader of the inner
-    /// [`IntVec`]. It is designed for dynamic, stateful access patterns where
-    /// indices are mostly sequential, offering significant performance gains by
-    /// avoiding unnecessary seeks.
-    ///
-    /// See [`IntVec::seq_reader`] for detailed documentation on its behavior
-    /// and performance characteristics.
-    /// ```
-    pub fn seq_reader(&self) -> IntVecSeqReader<E> {
-        self.inner.seq_reader()
-    }
-
-    /// Returns an iterator over the decompressed `i64` values.
-    ///
-    /// The iterator wraps the inner [`IntVec`]'s iterator and applies the inverse
-    /// ZigZag transformation to each value on the fly. See [`SIntVecIter`].
-    pub fn iter(&self) -> SIntVecIter<E> {
-        SIntVecIter::new(self)
+    /// Returns a builder for creating a [`SIntVec`] from an iterator.
+    pub fn from_iter_builder<I: IntoIterator<Item = i64>>(iter: I) -> SIntVecFromIterBuilder<E, I> {
+        SIntVecFromIterBuilder::new(iter)
     }
 
     /// Returns the number of elements in the vector.
@@ -161,14 +117,77 @@ where
         self.inner.is_empty()
     }
 
-    /// Returns the underlying `Encoding` used for compression.
-    pub fn encoding(&self) -> Encoding {
+    /// Returns the underlying `Codes` variant used for compression.
+    pub fn encoding(&self) -> Codes {
         self.inner.encoding()
     }
 
-    /// Returns the sampling rate `k` used during encoding, if applicable.
+    /// Returns the sampling rate `k` used during encoding.
     pub fn get_sampling_rate(&self) -> Option<usize> {
         self.inner.get_sampling_rate()
+    }
+
+    /// Returns the number of sample points stored in the vector.
+    pub fn get_num_samples(&self) -> usize {
+        self.inner.get_num_samples()
+    }
+
+    /// Returns a clone of the underlying storage (`Vec<u64>`).
+    pub fn limbs(&self) -> Vec<u64> {
+        self.inner.limbs()
+    }
+}
+
+impl<E: Endianness> SIntVec<E>
+where
+    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// Retrieves the signed integer at the specified index.
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<i64> {
+        self.inner.get(index).map(ToInt::to_int)
+    }
+
+    /// Retrieves the signed integer at the specified index without bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    #[inline]
+    pub unsafe fn get_unchecked(&self, index: usize) -> i64 {
+        self.inner.get_unchecked(index).to_int()
+    }
+
+    pub fn get_many(&self, indices: &[usize]) -> Result<Vec<i64>, IntVecError> {
+        let unsigned_values = self.inner.get_many(indices)?;
+        Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
+    }
+
+    /// Retrieves multiple signed integers at the specified indices without bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with any out-of-bounds index is undefined behavior.
+    pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<i64> {
+        self.inner
+            .get_many_unchecked(indices)
+            .into_iter()
+            .map(ToInt::to_int)
+            .collect()
+    }
+
+    /// Retrieves multiple signed integers from an iterator of indices.
+    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<i64>, IntVecError>
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let unsigned_values = self.inner.get_many_from_iter(indices)?;
+        Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
+    }
+
+    /// Returns an iterator over the decompressed `i64` values.
+    pub fn iter(&self) -> SIntVecIter<E> {
+        SIntVecIter::new(self)
     }
 }
 
@@ -176,48 +195,12 @@ where
 ///
 /// See [`BEIntVec`] for more details on endianness.
 ///
-/// [`BEIntVec`]: crate::intvec::BEIntVec
+/// [`BEIntVec`]: crate::variable::intvec::BEIntVec
 pub type BESIntVec = SIntVec<BE>;
 
 /// A type alias for an [`SIntVec`] with Little-Endian ([`LE`]) bitstream encoding.
 ///
 /// See [`LEIntVec`] for more details on endianness.
 ///
-/// [`LEIntVec`]: crate::intvec::LEIntVec
+/// [`LEIntVec`]: crate::variable::intvec::LEIntVec
 pub type LESIntVec = SIntVec<LE>;
-
-#[cfg(feature = "serde")]
-#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
-mod serde_impls {
-    use super::{Endianness, IntVec, SIntVec};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    impl<E: Endianness> Serialize for SIntVec<E>
-    where
-        IntVec<E>: Serialize,
-    {
-        /// Serializes the `SIntVec` by delegating to its inner `IntVec`.
-        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer,
-        {
-            // Since SIntVec is a transparent wrapper, we just serialize the inner field.
-            self.inner.serialize(serializer)
-        }
-    }
-
-    impl<'de, E: Endianness> Deserialize<'de> for SIntVec<E>
-    where
-        IntVec<E>: Deserialize<'de>,
-    {
-        /// Deserializes the `SIntVec` by deserializing its inner `IntVec`.
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            // Deserialize the inner IntVec and wrap it in a new SIntVec.
-            let inner = IntVec::<E>::deserialize(deserializer)?;
-            Ok(SIntVec { inner })
-        }
-    }
-}
