@@ -130,13 +130,11 @@ fn benchmark_random_access(c: &mut Criterion) {
             if matches!(
                 distribution,
                 Distribution::UniformHigh | Distribution::ZetaImplied
-            ) {
-                if matches!(
+            ) && matches!(
                     codec_spec,
                     VariableCodecSpec::Unary | VariableCodecSpec::Rice { .. }
                 ) {
-                    continue;
-                }
+                continue;
             }
 
             for &k_value in &K_VALUES {

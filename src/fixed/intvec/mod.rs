@@ -123,6 +123,11 @@ impl<E: Endianness> FixedVec<E> {
     pub fn limbs(&self) -> Vec<u64> {
         self.data.clone()
     }
+
+    /// Returns a zero-copy, read-only slice of the underlying storage (`&[u64]`).
+    pub fn as_limbs(&self) -> &[u64] {
+        &self.data
+    }
 }
 
 impl<E: Endianness> FixedVec<E> {
@@ -174,18 +179,26 @@ impl<E: Endianness> FixedVec<E> {
                     & self.mask
             }
         } else {
-            // TODO! Implement a true 128-bit arithmetic path for Big-Endian.
-            // For now, we use the costly `to_be()` conversion.
-            // This is a placeholder for future optimization.
+            // Big-Endian Path, using u64 arithmetic.
+            // The .to_be() call is essential to treat the native u64 value
+            // as a big-endian sequence of bytes for bitwise operations.
+            let word_hi = (*bits.get_unchecked(word_index)).to_be();
+            if bit_offset + self.num_bits <= 64 {
+                // Fast path: element is within a single word.
+                (word_hi << bit_offset) >> (64 - self.num_bits)
+            } else {
+                // Slow path: element spans two words.
+                let word_lo = (*bits.get_unchecked(word_index + 1)).to_be();
+                let num_bits_in_first = 64 - bit_offset;
+                let num_bits_in_second = self.num_bits - num_bits_in_first;
 
-            // Big-Endian Path, using 128-bit arithmetic
-            let high_word = bits.get_unchecked(word_index).to_be();
-            let low_word = bits.get_unchecked(word_index + 1).to_be();
+                // Mask to get the lower bits of the first word.
+                let high_part = word_hi & ((1u64 << num_bits_in_first) - 1);
+                // Get the most significant bits of the second word.
+                let low_part = word_lo >> (64 - num_bits_in_second);
 
-            let a = u128::from(high_word);
-            let b = u128::from(low_word);
-
-            ((((a << 64) | b) << bit_offset) >> (128 - self.num_bits)) as u64
+                (high_part << num_bits_in_second) | low_part
+            }
         }
     }
 

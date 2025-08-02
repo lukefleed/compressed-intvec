@@ -88,7 +88,7 @@ pub struct SIntVec<E: Endianness> {
     inner: IntVec<E>,
 }
 
-impl<'a, E: Endianness> SIntVec<E>
+impl<E: Endianness> SIntVec<E>
 where
     for<'b> crate::variable::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
         + dsi_bitstream::dispatch::CodesRead<E>

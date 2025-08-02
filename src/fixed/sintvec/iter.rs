@@ -28,7 +28,7 @@ impl<'a, E: Endianness> SFixedVecIter<'a, E> {
     }
 }
 
-impl<'a, E: Endianness> Iterator for SFixedVecIter<'a, E> {
+impl<E: Endianness> Iterator for SFixedVecIter<'_, E> {
     type Item = i64;
 
     #[inline]
@@ -43,7 +43,7 @@ impl<'a, E: Endianness> Iterator for SFixedVecIter<'a, E> {
     }
 }
 
-impl<'a, E: Endianness> ExactSizeIterator for SFixedVecIter<'a, E> {
+impl<E: Endianness> ExactSizeIterator for SFixedVecIter<'_, E> {
     /// Returns the exact number of remaining items in the iterator.
     fn len(&self) -> usize {
         self.inner_iter.len()

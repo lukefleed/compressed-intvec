@@ -94,13 +94,22 @@ impl<E: Endianness> SFixedVec<E> {
         self.inner.num_bits()
     }
 
-    /// Returns a clone of the underlying storage (`Vec<u64>`)
+    /// Returns a clone of the underlying storage (`Vec<u64>`).
     ///
     /// # Note
     ///
-    /// This values are zig-zag encoded, so they are not the original `i64` values.
+    /// The values are ZigZag encoded, so they are not the original `i64` values.
     pub fn limbs(&self) -> Vec<u64> {
         self.inner.limbs()
+    }
+
+    /// Returns a zero-copy, read-only slice of the underlying storage (`&[u64]`).
+    ///
+    /// # Note
+    ///
+    /// The values are ZigZag encoded, so they are not the original `i64` values.
+    pub fn as_limbs(&self) -> &[u64] {
+        self.inner.as_limbs()
     }
 
     /// Retrieves the signed integer at the specified index. Access is O(1).
@@ -142,9 +151,7 @@ impl<E: Endianness> SFixedVec<E> {
 
     /// Creates a zero-copy slice of this vector.
     pub fn slice(&self, start: usize, len: usize) -> Option<SFixedVecSlice<E>> {
-        self.inner
-            .slice(start, len)
-            .map(SFixedVecSlice::new)
+        self.inner.slice(start, len).map(SFixedVecSlice::new)
     }
 
     /// Splits the vector into two slices at a given index.

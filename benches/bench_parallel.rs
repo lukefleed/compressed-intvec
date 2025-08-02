@@ -103,19 +103,17 @@ fn benchmark_access(c: &mut Criterion) {
             if matches!(
                 distribution,
                 Distribution::UniformHigh | Distribution::ZetaImplied
-            ) {
-                if matches!(
+            ) && matches!(
                     codec_spec,
                     VariableCodecSpec::Unary
                         | VariableCodecSpec::Rice { .. }
                         | VariableCodecSpec::Golomb { .. }
                 ) {
-                    println!(
-                        "\n- Skipping codec: {} for {} distribution",
-                        spec_name, dist_name
-                    );
-                    continue;
-                }
+                println!(
+                    "\n- Skipping codec: {} for {} distribution",
+                    spec_name, dist_name
+                );
+                continue;
             }
 
             let intvec = LEIntVec::builder(&data)

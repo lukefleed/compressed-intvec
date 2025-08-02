@@ -47,6 +47,10 @@ macro_rules! test_sintvec_configuration {
             );
             assert_eq!(&s_fixed_vec, input, "PartialEq with slice failed");
 
+            // Test as_limbs
+            let cloned_limbs = s_fixed_vec.limbs();
+            assert_eq!(s_fixed_vec.as_limbs(), cloned_limbs.as_slice());
+
             // Test a non-equal case
             if input.len() > 1 && input[0] != input[1] {
                 let mut different_input = input.clone();
