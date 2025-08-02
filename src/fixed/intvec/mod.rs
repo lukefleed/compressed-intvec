@@ -23,12 +23,14 @@ pub mod builder;
 pub mod iter;
 #[cfg(feature = "parallel")]
 pub mod parallel;
+pub mod slice;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 pub use builder::{FixedVecBuilder, FixedVecFromIterBuilder};
 pub use iter::FixedVecIter;
+pub use slice::FixedVecSlice;
 
 use dsi_bitstream::prelude::{Endianness, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
@@ -211,6 +213,39 @@ impl<E: Endianness> FixedVec<E> {
             results.push(self.get_unchecked(index));
         }
         results
+    }
+
+    /// Creates a zero-copy slice of this vector.
+    ///
+    /// # Arguments
+    /// * `start`: The starting index of the slice.
+    /// * `len`: The number of elements in the slice.
+    ///
+    /// # Returns
+    /// An `Option` containing the [`FixedVecSlice`] if the specified range is
+    /// within the bounds of the vector, or `None` otherwise.
+    pub fn slice(&self, start: usize, len: usize) -> Option<FixedVecSlice<E>> {
+        if start + len > self.len {
+            return None;
+        }
+        Some(FixedVecSlice::new(self, start..start + len))
+    }
+
+    /// Splits the vector into two slices at a given index.
+    ///
+    /// # Arguments
+    /// * `mid`: The index at which to split the vector.
+    ///
+    /// # Returns
+    /// An `Option` containing a tuple of two [`FixedVecSlice`]s if `mid` is
+    /// within the bounds of the vector, or `None` otherwise.
+    pub fn split_at(&self, mid: usize) -> Option<(FixedVecSlice<E>, FixedVecSlice<E>)> {
+        if mid > self.len {
+            return None;
+        }
+        let left = FixedVecSlice::new(self, 0..mid);
+        let right = FixedVecSlice::new(self, mid..self.len);
+        Some((left, right))
     }
 
     /// Returns an iterator over the decompressed `u64` values.

@@ -19,6 +19,7 @@ pub mod builder;
 pub mod iter;
 #[cfg(feature = "parallel")]
 pub mod parallel;
+pub mod slice;
 
 #[cfg(feature = "serde")]
 mod serde;
@@ -26,6 +27,7 @@ mod serde;
 use super::intvec::{FixedVec, FixedVecError};
 pub use builder::{SFixedVecBuilder, SFixedVecFromIterBuilder};
 pub use iter::SFixedVecIter;
+pub use slice::SFixedVecSlice;
 
 use dsi_bitstream::prelude::{Endianness, ToInt, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
@@ -135,6 +137,23 @@ impl<E: Endianness> SFixedVec<E> {
             .into_iter()
             .map(ToInt::to_int)
             .collect()
+    }
+
+    /// Creates a zero-copy slice of this vector.
+    pub fn slice(&self, start: usize, len: usize) -> Option<SFixedVecSlice<E>> {
+        self.inner
+            .slice(start, len)
+            .map(SFixedVecSlice::new)
+    }
+
+    /// Splits the vector into two slices at a given index.
+    pub fn split_at(&self, mid: usize) -> Option<(SFixedVecSlice<E>, SFixedVecSlice<E>)> {
+        self.inner.split_at(mid).map(|(left, right)| {
+            (
+                SFixedVecSlice::new(left),
+                SFixedVecSlice::new(right),
+            )
+        })
     }
 
     /// Returns an iterator over the decompressed `i64` values.
