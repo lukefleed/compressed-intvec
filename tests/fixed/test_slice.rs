@@ -147,8 +147,25 @@ fn test_into_iterator_implementations() {
     // Test for FixedVecSlice
     let slice = s_fixed_vec_i64.slice(10, 20).unwrap();
     let mut collected_slice = Vec::new();
-    for value in slice {
+    for value in &slice {
         collected_slice.push(value);
     }
     assert_eq!(collected_slice, &data_i64[10..30]);
+}
+
+#[test]
+fn test_partial_eq_vec_and_slice() {
+    let data: Vec<u64> = (0..100).collect();
+    let vec = LEFixedVec::builder(&data).build().unwrap();
+    let slice_all = vec.slice(0, 100).unwrap();
+    let slice_part = vec.slice(10, 20).unwrap();
+
+    // Test FixedVec == FixedVecSlice
+    assert_eq!(vec, slice_all);
+    assert_ne!(vec, slice_part);
+
+    // Test FixedVecSlice == FixedVec (already covered, but good for completeness)
+    let part_vec = LEFixedVec::from_slice(&data[10..30]).unwrap();
+    assert_eq!(slice_part, part_vec);
+    assert_ne!(slice_all, part_vec);
 }

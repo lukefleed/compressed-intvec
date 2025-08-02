@@ -20,7 +20,7 @@ macro_rules! test_configuration {
             let bit_width = $bit_width;
 
             // Build the FixedVec
-            let fixed_vec = FixedVec::<$endianness>::builder(input)
+            let fixed_vec: FixedVec<$endianness> = FixedVec::builder(input)
                 .bit_width(bit_width)
                 .build()
                 .unwrap();
@@ -143,7 +143,12 @@ test_configuration!(
 );
 
 // Single Element Vector
-test_configuration!(test_single_element_le, LE, vec![42u64], BitWidth::Explicit(7));
+test_configuration!(
+    test_single_element_le,
+    LE,
+    vec![42u64],
+    BitWidth::Explicit(7)
+);
 test_configuration!(
     test_single_element_auto_bits_be,
     BE,
@@ -269,4 +274,34 @@ fn test_bit_width_byte_aligned() {
         .unwrap();
     assert_eq!(vec3.num_bits(), 8);
     assert_eq!(vec3, &data3[..]);
+}
+
+#[test]
+fn test_edge_case_zero_bits() {
+    let result = LEFixedVec::builder(&[0u64])
+        .bit_width(BitWidth::Explicit(0))
+        .build();
+    // Building with 0 bits should be an error if there is data.
+    // If the vector is empty, it might be allowed, but `get` would be impossible.
+    // Let's enforce it's invalid for non-empty slices.
+    assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
+
+    // Test building an empty vector with 0 bits.
+    let empty_vec = LEFixedVec::builder(&Vec::<u64>::new())
+        .bit_width(BitWidth::Explicit(0))
+        .build()
+        .unwrap();
+    assert_eq!(empty_vec.len(), 0);
+    assert_eq!(empty_vec.num_bits(), 0);
+}
+
+#[test]
+fn test_edge_case_u64_max() {
+    let data = vec![u64::MAX];
+    let vec = LEFixedVec::builder(&data)
+        .bit_width(BitWidth::Minimal)
+        .build()
+        .unwrap();
+    assert_eq!(vec.num_bits(), 64);
+    assert_eq!(vec.get(0), Some(u64::MAX));
 }

@@ -49,8 +49,8 @@ macro_rules! test_sintvec_configuration {
             assert_eq!(s_fixed_vec, &input[..], "PartialEq with slice failed");
 
             // Test as_limbs
-            let cloned_limbs = s_fixed_vec.limbs();
-            assert_eq!(s_fixed_vec.as_limbs(), cloned_limbs.as_slice());
+            let cloned_limbs = s_fixed_vec.as_limbs();
+            assert_eq!(s_fixed_vec.as_limbs(), cloned_limbs);
 
             // Test a non-equal case
             if input.len() > 1 && input[0] != input[1] {
@@ -150,7 +150,12 @@ test_sintvec_configuration!(
 );
 
 // Single Element Vector
-test_sintvec_configuration!(test_single_element_le, LE, vec![-42i64], BitWidth::Explicit(7)); // -42 -> 83, needs 7 bits
+test_sintvec_configuration!(
+    test_single_element_le,
+    LE,
+    vec![-42i64],
+    BitWidth::Explicit(7)
+); // -42 -> 83, needs 7 bits
 test_sintvec_configuration!(
     test_single_element_auto_bits_be,
     BE,
@@ -211,4 +216,20 @@ fn test_build_from_i32_slice() {
 
     let expected_i64: Vec<i64> = data_i32.iter().map(|&x| x as i64).collect();
     assert_eq!(s_fixed_vec, expected_i64.as_slice());
+}
+
+#[test]
+fn test_edge_case_i64_min_max() {
+    // i64::MIN ZigZag-encodes to u64::MAX.
+    // i64::MAX ZigZag-encodes to u64::MAX - 1.
+    let data = vec![i64::MIN, i64::MAX];
+    let vec = LESFixedVec::builder(&data)
+        .bit_width(BitWidth::Minimal)
+        .build()
+        .unwrap();
+
+    // The presence of i64::MIN should force the bit width to 64.
+    assert_eq!(vec.num_bits(), 64);
+    assert_eq!(vec.get(0), Some(i64::MIN));
+    assert_eq!(vec.get(1), Some(i64::MAX));
 }

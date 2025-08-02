@@ -12,23 +12,23 @@ use dsi_bitstream::prelude::{Endianness, ToInt};
 /// This struct is created by the [`iter`](SFixedVec::iter) method. It wraps
 /// the underlying [`FixedVecIter`] and applies the inverse ZigZag transformation
 /// to each decompressed `u64` value on the fly, yielding the original `i64` values.
-pub struct SFixedVecIter<'a, E: Endianness> {
+pub struct SFixedVecIter<'a, E: Endianness, B: AsRef<[u64]>> {
     /// The inner iterator over the ZigZag-encoded `u64` values.
-    inner_iter: FixedVecIter<'a, E>,
+    inner_iter: FixedVecIter<'a, E, B>,
 }
 
-impl<'a, E: Endianness> SFixedVecIter<'a, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> SFixedVecIter<'a, E, B> {
     /// Creates a new `SFixedVecIter` that wraps the inner `FixedVec`'s iterator.
     ///
     /// This is `pub(super)` and is called by [`SFixedVec::iter`].
-    pub(super) fn new(s_fixed_vec: &'a SFixedVec<E>) -> Self {
+    pub(super) fn new(s_fixed_vec: &'a SFixedVec<E, B>) -> Self {
         Self {
             inner_iter: s_fixed_vec.inner.iter(),
         }
     }
 }
 
-impl<E: Endianness> Iterator for SFixedVecIter<'_, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> Iterator for SFixedVecIter<'a, E, B> {
     type Item = i64;
 
     #[inline]
@@ -43,7 +43,7 @@ impl<E: Endianness> Iterator for SFixedVecIter<'_, E> {
     }
 }
 
-impl<E: Endianness> ExactSizeIterator for SFixedVecIter<'_, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for SFixedVecIter<'a, E, B> {
     /// Returns the exact number of remaining items in the iterator.
     fn len(&self) -> usize {
         self.inner_iter.len()

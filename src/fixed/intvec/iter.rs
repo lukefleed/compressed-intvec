@@ -24,16 +24,16 @@ use dsi_bitstream::prelude::Endianness;
 ///     assert_eq!(value, data[index]);
 /// }
 /// ```
-pub struct FixedVecIter<'a, E: Endianness> {
-    vec: &'a FixedVec<E>,
+pub struct FixedVecIter<'a, E: Endianness, B: AsRef<[u64]>> {
+    vec: &'a FixedVec<E, B>,
     current_index: usize,
 }
 
-impl<'a, E: Endianness> FixedVecIter<'a, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> FixedVecIter<'a, E, B> {
     /// Creates a new iterator for a given `FixedVec`.
     ///
     /// This is `pub(super)` and is called by [`FixedVec::iter`].
-    pub(super) fn new(vec: &'a FixedVec<E>) -> Self {
+    pub(super) fn new(vec: &'a FixedVec<E, B>) -> Self {
         Self {
             vec,
             current_index: 0,
@@ -41,7 +41,7 @@ impl<'a, E: Endianness> FixedVecIter<'a, E> {
     }
 }
 
-impl<E: Endianness> Iterator for FixedVecIter<'_, E> {
+impl<E: Endianness, B: AsRef<[u64]>> Iterator for FixedVecIter<'_, E, B> {
     type Item = u64;
 
     #[inline]
@@ -62,7 +62,7 @@ impl<E: Endianness> Iterator for FixedVecIter<'_, E> {
     }
 }
 
-impl<E: Endianness> ExactSizeIterator for FixedVecIter<'_, E> {
+impl<E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for FixedVecIter<'_, E, B> {
     /// Returns the exact number of remaining items in the iterator.
     fn len(&self) -> usize {
         self.vec.len().saturating_sub(self.current_index)

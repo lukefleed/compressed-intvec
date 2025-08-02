@@ -50,15 +50,15 @@ fn test_s_fixed_vec_macro() {
 
 #[test]
 fn test_from_slice_method() {
+    // from_slice uses the default BitWidth strategy, which is Minimal.
     let data_u32: &[u32] = &[10, 20, 30, 1000];
     let vec_u32 = LEFixedVec::from_slice(data_u32).unwrap();
-    // With ByteAligned as default, 10 bits (for 1000) rounds up to 16.
-    assert_eq!(vec_u32.num_bits(), 16);
+    assert_eq!(vec_u32.num_bits(), 10); // Minimal for 1000 is 10 bits.
     assert_eq!(vec_u32, data_u32);
 
     let data_i16: &[i16] = &[-10, 20, -300];
     let vec_i16 = LESFixedVec::from_slice(data_i16).unwrap();
-    // ZigZag(-300) = 599, requires 10 bits, which rounds up to 16.
-    assert_eq!(vec_i16.num_bits(), 16);
+    // ZigZag(-300) = 599, requires 10 bits.
+    assert_eq!(vec_i16.num_bits(), 10);
     assert_eq!(vec_i16, data_i16);
 }

@@ -62,29 +62,30 @@ fn benchmark_random_access(c: &mut Criterion) {
         .map(|_| rng.random_range(0..VECTOR_SIZE))
         .collect();
 
-    // --- Baseline: Standard Vec<u64> ---
-    let baseline_data = generate_random_vec(VECTOR_SIZE, u64::MAX);
-    let mut group = c.benchmark_group("RandomAccess/64bit_Baseline_Vec<u64>");
-
-    group.bench_function("Checked", |b| {
-        b.iter(|| {
-            for &index in black_box(&access_indices) {
-                black_box(baseline_data.get(index));
-            }
-        })
-    });
-    group.bench_function("Unchecked", |b| {
-        b.iter(|| {
-            for &index in black_box(&access_indices) {
-                // SAFETY: Indices are generated within bounds for this benchmark.
-                black_box(unsafe { baseline_data.get_unchecked(index) });
-            }
-        })
-    });
-    group.finish();
-
     // --- Parametric Benchmarks for different bit widths ---
     for &bit_width in &bit_widths_to_test {
+        // --- Baseline: Standard Vec<u64> ---
+        let baseline_data = generate_random_vec(VECTOR_SIZE, 1 << bit_width);
+        let mut group =
+            c.benchmark_group(format!("RandomAccess/{}bit_Baseline_Vec<u64>", bit_width));
+
+        group.bench_function("Checked", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    black_box(baseline_data.get(index));
+                }
+            })
+        });
+        group.bench_function("Unchecked", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    // SAFETY: Indices are generated within bounds for this benchmark.
+                    black_box(unsafe { baseline_data.get_unchecked(index) });
+                }
+            })
+        });
+        group.finish();
+
         let mut group = c.benchmark_group(format!("RandomAccess/{}bit", bit_width));
 
         // Setup data and structures for this specific bit_width.

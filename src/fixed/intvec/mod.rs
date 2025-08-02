@@ -11,9 +11,9 @@
 //!   uniformly distributed within a known range.
 //! - **O(1) Random Access**: The position of any element can be calculated
 //!   arithmetically (`index * num_bits`), providing the fastest possible random access.
-//! - **Flexible Construction**: Provides a builder API that can determine the
-//!   optimal number of bits automatically from a slice of data, or build from an
-//!   iterator with a specified bit width.
+//! - **Flexible Backends**: Can be created as an owned vector (`Vec<u64>`) or as a
+//!   zero-copy view over an existing slice (`&[u64]`), making it ideal for
+//!   memory-mapped files and zero-copy deserialization.
 //!
 //! The main struct, [`FixedVec`], is generic over [`Endianness`], allowing
 //! users to choose between Little-Endian ([`LEFixedVec`]) and Big-Endian ([`BEFixedVec`])
@@ -32,7 +32,7 @@ pub use builder::{FixedVecBuilder, FixedVecFromIterBuilder};
 pub use iter::FixedVecIter;
 pub use slice::FixedVecSlice;
 
-use dsi_bitstream::{prelude::{Endianness, BE, LE}, traits::BitWrite};
+use dsi_bitstream::prelude::{BitWrite, Endianness, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 use std::{any::TypeId, cmp::Ordering, error::Error, fmt, marker::PhantomData};
 
@@ -51,15 +51,15 @@ pub enum BitWidth {
     /// This prioritizes minimal memory usage but may result in bit widths that are
     /// not aligned to byte boundaries (e.g., 9 bits), which can be slightly
     /// less performant for access than byte-aligned widths.
+    #[default]
     Minimal,
-    
+
     /// Automatically determine the minimum number of bits and round up to the
     /// nearest multiple of 8 (i.e., a full byte).
     ///
     /// This may use slightly more memory than `Minimal` but can lead to faster
     /// access patterns due to better memory alignment. For example, if the
     /// minimum required bits is 11, this will use 16.
-    #[default]
     ByteAligned,
 }
 
@@ -106,35 +106,27 @@ impl Error for FixedVecError {}
 /// `FixedVec` is optimized for data that is uniformly distributed. It encodes
 /// every integer using the same number of bits, which allows for O(1) random
 /// access by arithmetically calculating the position of any element.
+///
+/// It is generic over the backend storage `B`, which can be an owned `Vec<u64>`
+/// or a borrowed slice `&[u64]`.
 #[derive(Debug, Clone, MemDbg, MemSize)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct FixedVec<E: Endianness> {
-    pub(super) data: Vec<u64>,
-    pub(super) len: usize,
-    pub(super) num_bits: usize,
+pub struct FixedVec<E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
+    /// The underlying storage for the bit-packed data.
+    bits: B,
+    /// The number of elements in the vector.
+    len: usize,
+    /// The number of bits used to encode each integer.
+    num_bits: usize,
     /// A mask with the lowest `num_bits` bits set to one.
-    pub(super) mask: u64,
+    mask: u64,
+    /// Zero-sized markers for endianness and backend type parameters.
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub(super) _endian: PhantomData<E>,
+    _endian: PhantomData<(E, B)>,
 }
-impl<E: Endianness> FixedVec<E> {
 
-    /// Creates a [`FixedVec`] directly from a slice of data.
-    ///
-    /// This is a convenient alias for `FixedVec::builder(slice).build()`.
-    /// The bit width will be automatically determined using the [`BitWidth::ByteAligned`] strategy.
-    /// To specify a different strategy, use the builder directly.
-    pub fn from_slice<U, T>(slice: &T) -> Result<Self, FixedVecError>
-    where
-        U: Into<u64> + Ord + Copy + Default,
-        T: AsRef<[U]> + ?Sized,
-        Self: Sized,
-        builder::FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
-    {
-        Self::builder(slice).build()
-    }
-
-    /// Returns a builder for creating a [`FixedVec`] from a slice of data.
+impl<E: Endianness> FixedVec<E, Vec<u64>> {
+    /// Returns a builder for creating an owned [`FixedVec`] from a slice of data.
     ///
     /// The builder is generic over the input integer type `U` (e.g., `u8`, `u16`, `u32`),
     /// allowing for direct construction without an intermediate conversion to `u64`.
@@ -146,12 +138,95 @@ impl<E: Endianness> FixedVec<E> {
         FixedVecBuilder::new(input.as_ref())
     }
 
-    /// Returns a builder for creating a [`FixedVec`] from an iterator.
+    /// Returns a builder for creating an owned [`FixedVec`] from an iterator.
     pub fn from_iter_builder<I: IntoIterator<Item = u64>>(
         iter: I,
         num_bits: usize,
     ) -> FixedVecFromIterBuilder<E, I> {
         FixedVecFromIterBuilder::new(iter, num_bits)
+    }
+
+    /// Creates an owned `FixedVec` directly from a slice of data.
+    ///
+    /// This is a convenient alias for `FixedVec::builder(slice).build()`.
+    /// The bit width will be automatically determined using the `BitWidth::Minimal` strategy.
+    /// To specify a different strategy, use the builder directly.
+    pub fn from_slice<U, T>(slice: &T) -> Result<Self, FixedVecError>
+    where
+        U: Into<u64> + Ord + Copy + Default,
+        T: AsRef<[U]> + ?Sized,
+        Self: Sized,
+        builder::FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
+    {
+        Self::builder(slice).build()
+    }
+}
+
+impl<E: Endianness, B: AsRef<[u64]>> FixedVec<E, B> {
+    /// Creates a `FixedVec` from its constituent parts.
+    ///
+    /// This is the primary constructor for creating a `FixedVec` view over an
+    /// existing data slice (e.g., `&[u64]` or a memory-mapped buffer).
+    ///
+    /// # Arguments
+    /// * `bits`: The backend storage containing the compressed data.
+    /// * `len`: The number of elements in the vector.
+    /// * `num_bits`: The number of bits used for each element.
+    ///
+    /// # Errors
+    /// Returns an error if the provided parameters are invalid (e.g., `num_bits > 64`
+    /// or the `bits` buffer is too small for the given `len` and `num_bits`).
+    ///
+    /// # Safety Note
+    /// This constructor is safe because it validates that the `bits` buffer is large
+    /// enough to contain all encoded data **plus one padding word**. This padding
+    /// is essential to prevent `get_unchecked` from reading past the end of the buffer.
+    pub fn from_parts(bits: B, len: usize, num_bits: usize) -> Result<Self, FixedVecError> {
+        if num_bits > 64 {
+            return Err(FixedVecError::InvalidParameters(
+                "num_bits cannot be greater than 64".to_string(),
+            ));
+        }
+
+        let total_bits = len * num_bits;
+        let data_words = (total_bits + 63) / 64;
+
+        // Essential safety check: ensure the buffer is large enough for the data
+        // AND the padding word required by get_unchecked.
+        if bits.as_ref().len() < data_words + 1 {
+            return Err(FixedVecError::InvalidParameters(format!(
+                "The provided buffer is too small. It has {} words, but {} data words + 1 padding word are required.",
+                bits.as_ref().len(),
+                data_words
+            )));
+        }
+
+        // SAFETY: We have performed all necessary checks.
+        Ok(unsafe { Self::new_unchecked(bits, len, num_bits) })
+    }
+
+    /// Creates a new `FixedVec` from its raw parts without performing safety checks.
+    ///
+    /// # Safety
+    /// The caller must ensure that:
+    /// 1. `len * num_bits` is not larger than the number of bits available in `bits`.
+    /// 2. The `bits` slice has at least one extra padding word at the end
+    ///    to prevent out-of-bounds reads during `get_unchecked`.
+    /// 3. `num_bits` is not greater than 64.
+    pub(crate) unsafe fn new_unchecked(bits: B, len: usize, num_bits: usize) -> Self {
+        let mask = if num_bits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << num_bits) - 1
+        };
+
+        Self {
+            bits,
+            len,
+            num_bits,
+            mask,
+            _endian: PhantomData,
+        }
     }
 
     /// Returns the number of integers in the vector.
@@ -171,18 +246,18 @@ impl<E: Endianness> FixedVec<E> {
 
     /// Returns a clone of the underlying storage (`Vec<u64>`).
     pub fn limbs(&self) -> Vec<u64> {
-        self.data.clone()
+        self.bits.as_ref().to_vec()
     }
 
     /// Returns a zero-copy, read-only slice of the underlying storage (`&[u64]`).
     pub fn as_limbs(&self) -> &[u64] {
-        &self.data
+        self.bits.as_ref()
     }
 }
 
-impl<E: Endianness> FixedVec<E> {
+impl<E: Endianness, B: AsRef<[u64]>> FixedVec<E, B> {
     /// Retrieves the element at the specified index. Access is O(1).
-    #[inline(always)]
+    #[inline]
     pub fn get(&self, index: usize) -> Option<u64> {
         if index >= self.len {
             return None;
@@ -209,10 +284,11 @@ impl<E: Endianness> FixedVec<E> {
             index,
             self.len
         );
+
         // Fast path for 64-bit values. This branch is perfectly predicted
         // by the CPU as `num_bits` is constant for a given FixedVec instance.
         if self.num_bits == 64 {
-            let val = *self.data.get_unchecked(index);
+            let val = *self.as_limbs().get_unchecked(index);
             // For Big-Endian, the value was stored with bytes swapped,
             // so we must swap them back to get the correct native representation.
             if TypeId::of::<E>() == TypeId::of::<BE>() {
@@ -225,7 +301,7 @@ impl<E: Endianness> FixedVec<E> {
         let word_index = (bit_pos / 64) as usize;
         let bit_offset = (bit_pos % 64) as usize;
 
-        let bits = &self.data;
+        let bits = self.as_limbs();
 
         // Dispatch based on endianness at compile time.
         if TypeId::of::<E>() == TypeId::of::<LE>() {
@@ -253,8 +329,8 @@ impl<E: Endianness> FixedVec<E> {
                 let num_bits_in_first = 64 - bit_offset;
                 let num_bits_in_second = self.num_bits - num_bits_in_first;
 
-                // Mask to get the lower bits of the first word.
-                let high_part = word_hi & ((1u64 << num_bits_in_first) - 1);
+                // Extract the relevant bits from the first word.
+                let high_part = word_hi << bit_offset >> (64 - num_bits_in_first);
                 // Get the most significant bits of the second word.
                 let low_part = word_lo >> (64 - num_bits_in_second);
 
@@ -264,7 +340,6 @@ impl<E: Endianness> FixedVec<E> {
     }
 
     /// Retrieves multiple elements at the specified indices.
-    #[inline(always)]
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<u64>, FixedVecError> {
         for &index in indices {
             if index >= self.len {
@@ -281,7 +356,6 @@ impl<E: Endianness> FixedVec<E> {
     ///
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
-    #[inline(always)]
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<u64> {
         let mut results = Vec::with_capacity(indices.len());
         for &index in indices {
@@ -300,7 +374,7 @@ impl<E: Endianness> FixedVec<E> {
     /// # Returns
     /// An `Option` containing the [`FixedVecSlice`] if the specified range is
     /// within the bounds of the vector, or `None` otherwise.
-    pub fn slice(&self, start: usize, len: usize) -> Option<FixedVecSlice<E>> {
+    pub fn slice(&self, start: usize, len: usize) -> Option<FixedVecSlice<E, B>> {
         if start + len > self.len {
             return None;
         }
@@ -315,7 +389,7 @@ impl<E: Endianness> FixedVec<E> {
     /// # Returns
     /// An `Option` containing a tuple of two [`FixedVecSlice`]s if `mid` is
     /// within the bounds of the vector, or `None` otherwise.
-    pub fn split_at(&self, mid: usize) -> Option<(FixedVecSlice<E>, FixedVecSlice<E>)> {
+    pub fn split_at(&self, mid: usize) -> Option<(FixedVecSlice<E, B>, FixedVecSlice<E, B>)> {
         if mid > self.len {
             return None;
         }
@@ -374,60 +448,62 @@ impl<E: Endianness> FixedVec<E> {
     /// If the vector is not sorted by the key, the returned result is
     /// unspecified.
     #[inline]
-    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
     where
-        F: FnMut(u64) -> B,
-        B: Ord,
+        F: FnMut(u64) -> B1,
+        B1: Ord,
     {
         self.binary_search_by(|k| f(k).cmp(b))
     }
 
     /// Returns an iterator over the decompressed `u64` values.
-    pub fn iter(&self) -> FixedVecIter<E> {
+    pub fn iter(&self) -> FixedVecIter<E, B> {
         FixedVecIter::new(self)
     }
+}
 
-    /// Consumes the [`FixedVec`] and returns a `Vec<u64>`.
+impl<E: Endianness> FixedVec<E, Vec<u64>> {
+    /// Consumes the owned [`FixedVec`] and returns its underlying `Vec<u64>`.
+    pub fn into_limbs(self) -> Vec<u64> {
+        self.bits
+    }
+
+    /// Consumes the owned [`FixedVec`] and returns a `Vec<u64>` of its decoded values.
     pub fn into_vec(self) -> Vec<u64> {
         self.iter().collect()
     }
 }
 
 // Implementations of traits from the standard library
-impl<E: Endianness> PartialEq for FixedVec<E> {
-    /// Checks for equality between two `FixedVec` instances.
-    ///
-    /// This method provides a highly efficient comparison. It first checks if the
-    /// lengths and bit widths are identical. If they are, it proceeds with an
-    /// element-wise comparison using iterators, which decompresses values
-    /// on the fly and short-circuits at the first mismatch.
-    fn eq(&self, other: &Self) -> bool {
+impl<E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<FixedVec<E, B2>>
+    for FixedVec<E, B>
+{
+    /// Checks for equality between two `FixedVec` instances, regardless of backend.
+    fn eq(&self, other: &FixedVec<E, B2>) -> bool {
         if self.len != other.len || self.num_bits != other.num_bits {
             return false;
         }
-        // Use iterators for an efficient, element-by-element comparison
-        // that avoids full decompression into a new Vec.
         self.iter().eq(other.iter())
     }
 }
 
-impl<E: Endianness> Eq for FixedVec<E> {}
+impl<E: Endianness, B: AsRef<[u64]>> Eq for FixedVec<E, B> {}
 
 macro_rules! impl_partial_eq_for_uint_slice {
     ($($t:ty),*) => {$(
-        impl<E: Endianness> PartialEq<Vec<$t>> for FixedVec<E> {
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for FixedVec<E, B> {
             fn eq(&self, other: &Vec<$t>) -> bool {
                 self.eq(&other[..])
             }
         }
 
-        impl<E: Endianness> PartialEq<&[$t]> for FixedVec<E> {
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for FixedVec<E, B> {
             fn eq(&self, other: &&[$t]) -> bool {
                 self.eq(*other)
             }
         }
 
-        impl<E: Endianness> PartialEq<[$t]> for FixedVec<E> {
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<[$t]> for FixedVec<E, B> {
             fn eq(&self, other: &[$t]) -> bool {
                 if self.len() != other.len() {
                     return false;
@@ -440,9 +516,9 @@ macro_rules! impl_partial_eq_for_uint_slice {
 
 impl_partial_eq_for_uint_slice!(u8, u16, u32, u64);
 
-impl<'a, E: Endianness> IntoIterator for &'a FixedVec<E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> IntoIterator for &'a FixedVec<E, B> {
     type Item = u64;
-    type IntoIter = FixedVecIter<'a, E>;
+    type IntoIter = FixedVecIter<'a, E, B>;
 
     /// Creates an iterator over the values of the `FixedVec`.
     fn into_iter(self) -> Self::IntoIter {
@@ -450,7 +526,7 @@ impl<'a, E: Endianness> IntoIterator for &'a FixedVec<E> {
     }
 }
 
-impl<E: Endianness> IntoIterator for FixedVec<E> {
+impl<E: Endianness> IntoIterator for FixedVec<E, Vec<u64>> {
     type Item = u64;
     type IntoIter = std::vec::IntoIter<u64>;
 
@@ -460,8 +536,19 @@ impl<E: Endianness> IntoIterator for FixedVec<E> {
     }
 }
 
-/// A type alias for a [`FixedVec`] with Big-Endian ([`BE`]) bitstream encoding.
-pub type BEFixedVec = FixedVec<BE>;
+impl<E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<FixedVecSlice<'_, E, B2>>
+    for FixedVec<E, B>
+{
+    fn eq(&self, other: &FixedVecSlice<'_, E, B2>) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        self.iter().eq(other.iter())
+    }
+}
 
-/// A type alias for a [`FixedVec`] with Little-Endian ([`LE`]) bitstream encoding.
-pub type LEFixedVec = FixedVec<LE>;
+/// A type alias for an owned [`FixedVec`] with Big-Endian ([`BE`]) bitstream encoding.
+pub type BEFixedVec = FixedVec<BE, Vec<u64>>;
+
+/// A type alias for an owned [`FixedVec`] with Little-Endian ([`LE`]) bitstream encoding.
+pub type LEFixedVec = FixedVec<LE, Vec<u64>>;

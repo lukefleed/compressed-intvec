@@ -16,15 +16,15 @@ use std::cmp::Ordering;
 ///
 /// [`slice`]: SFixedVec::slice
 /// [`split_at`]: SFixedVec::split_at
-#[derive(Debug, Clone, Copy)]
-pub struct SFixedVecSlice<'a, E: Endianness> {
+#[derive(Debug, Clone)]
+pub struct SFixedVecSlice<'a, E: Endianness, B: AsRef<[u64]>> {
     /// The inner slice of the ZigZag-encoded `u64` values.
-    inner: FixedVecSlice<'a, E>,
+    inner: FixedVecSlice<'a, E, B>,
 }
 
-impl<'a, E: Endianness> SFixedVecSlice<'a, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> SFixedVecSlice<'a, E, B> {
     /// Creates a new `SFixedVecSlice` that wraps an `FixedVecSlice`.
-    pub(super) fn new(inner_slice: FixedVecSlice<'a, E>) -> Self {
+    pub(super) fn new(inner_slice: FixedVecSlice<'a, E, B>) -> Self {
         Self { inner: inner_slice }
     }
 
@@ -77,29 +77,29 @@ impl<'a, E: Endianness> SFixedVecSlice<'a, E> {
     ///
     /// If the slice is not sorted by key, the result is unspecified.
     #[inline]
-    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
     where
-        F: FnMut(i64) -> B,
-        B: Ord,
+        F: FnMut(i64) -> B1,
+        B1: Ord,
     {
         self.binary_search_by(|k| f(k).cmp(b))
     }
 
     /// Returns an iterator over the `i64` values in the slice.
-    pub fn iter(&self) -> SFixedVecSliceIter<'a, E> {
-        SFixedVecSliceIter::new(*self)
+    pub fn iter(&self) -> SFixedVecSliceIter<'_, E, B> {
+        SFixedVecSliceIter::new(self)
     }
 }
 
 /// An iterator over the decompressed `i64` values of an [`SFixedVecSlice`].
-pub struct SFixedVecSliceIter<'a, E: Endianness> {
-    slice: SFixedVecSlice<'a, E>,
+pub struct SFixedVecSliceIter<'a, E: Endianness, B: AsRef<[u64]>> {
+    slice: &'a SFixedVecSlice<'a, E, B>,
     current_index: usize,
 }
 
-impl<'a, E: Endianness> SFixedVecSliceIter<'a, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> SFixedVecSliceIter<'a, E, B> {
     /// Creates a new iterator for a given `SFixedVecSlice`.
-    fn new(slice: SFixedVecSlice<'a, E>) -> Self {
+    fn new(slice: &'a SFixedVecSlice<'a, E, B>) -> Self {
         Self {
             slice,
             current_index: 0,
@@ -107,7 +107,7 @@ impl<'a, E: Endianness> SFixedVecSliceIter<'a, E> {
     }
 }
 
-impl<E: Endianness> Iterator for SFixedVecSliceIter<'_, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> Iterator for SFixedVecSliceIter<'a, E, B> {
     type Item = i64;
 
     #[inline]
@@ -127,23 +127,25 @@ impl<E: Endianness> Iterator for SFixedVecSliceIter<'_, E> {
     }
 }
 
-impl<E: Endianness> ExactSizeIterator for SFixedVecSliceIter<'_, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for SFixedVecSliceIter<'a, E, B> {
     fn len(&self) -> usize {
         self.slice.len().saturating_sub(self.current_index)
     }
 }
 
 // Implementations of traits from the standard library
-impl<'b, E: Endianness> PartialEq<SFixedVecSlice<'b, E>> for SFixedVecSlice<'_, E> {
-    fn eq(&self, other: &SFixedVecSlice<'b, E>) -> bool {
+impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq for SFixedVecSlice<'a, E, B> {
+    fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
 }
 
-impl<E: Endianness> Eq for SFixedVecSlice<'_, E> {}
+impl<'a, E: Endianness, B: AsRef<[u64]>> Eq for SFixedVecSlice<'a, E, B> {}
 
-impl<E: Endianness> PartialEq<SFixedVec<E>> for SFixedVecSlice<'_, E> {
-    fn eq(&self, other: &SFixedVec<E>) -> bool {
+impl<'a, E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<SFixedVec<E, B2>>
+    for SFixedVecSlice<'a, E, B>
+{
+    fn eq(&self, other: &SFixedVec<E, B2>) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -151,19 +153,36 @@ impl<E: Endianness> PartialEq<SFixedVec<E>> for SFixedVecSlice<'_, E> {
     }
 }
 
-impl<E: Endianness, T: AsRef<[i64]>> PartialEq<T> for SFixedVecSlice<'_, E> {
-    fn eq(&self, other: &T) -> bool {
-        let other_slice = other.as_ref();
-        if self.len() != other_slice.len() {
-            return false;
+macro_rules! impl_partial_eq_for_sint_slice_for_slice {
+    ($($t:ty),*) => {$(
+        impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for SFixedVecSlice<'a, E, B> {
+            fn eq(&self, other: &Vec<$t>) -> bool {
+                self.eq(&other[..])
+            }
         }
-        self.iter().eq(other_slice.iter().copied())
-    }
+
+        impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for SFixedVecSlice<'a, E, B> {
+            fn eq(&self, other: &&[$t]) -> bool {
+                self.eq(*other)
+            }
+        }
+
+        impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq<[$t]> for SFixedVecSlice<'a, E, B> {
+            fn eq(&self, other: &[$t]) -> bool {
+                if self.len() != other.len() {
+                    return false;
+                }
+                self.iter().eq(other.iter().map(|&x| x as i64))
+            }
+        }
+    )*};
 }
 
-impl<'a, E: Endianness> IntoIterator for SFixedVecSlice<'a, E> {
+impl_partial_eq_for_sint_slice_for_slice!(i8, i16, i32, i64);
+
+impl<'a, E: Endianness, B: AsRef<[u64]>> IntoIterator for &'a SFixedVecSlice<'a, E, B> {
     type Item = i64;
-    type IntoIter = SFixedVecSliceIter<'a, E>;
+    type IntoIter = SFixedVecSliceIter<'a, E, B>;
 
     /// Creates an iterator over the values of the slice.
     fn into_iter(self) -> Self::IntoIter {

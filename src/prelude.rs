@@ -4,17 +4,17 @@
 //! It exports all the most common types and traits.
 
 // Common error types
-pub use crate::fixed::intvec::FixedVecError;
+pub use crate::fixed::intvec::{BitWidth, FixedVecError};
 pub use crate::variable::intvec::IntVecError;
 
 // Types for fixed-width vectors
 pub use crate::fixed::intvec::{
     BEFixedVec, FixedVec, FixedVecBuilder, FixedVecFromIterBuilder, FixedVecIter, FixedVecSlice,
-    LEFixedVec, BitWidth,
+    LEFixedVec,
 };
 pub use crate::fixed::sintvec::{
-    BESFixedVec, LESFixedVec, SFixedVec, SFixedVecBuilder, SFixedVecFromIterBuilder,
-    SFixedVecIter, SFixedVecSlice,
+    BESFixedVec, LESFixedVec, SFixedVec, SFixedVecBuilder, SFixedVecFromIterBuilder, SFixedVecIter,
+    SFixedVecSlice,
 };
 
 // Types for variable-width vectors

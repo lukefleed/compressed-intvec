@@ -15,24 +15,26 @@ use std::ops::Range;
 /// for accessing elements. It is created by the [`slice`] or [`split_at`]
 /// methods on a [`FixedVec`].
 ///
+/// It is generic over the backend `B` of the parent vector.
+///
 /// [`slice`]: FixedVec::slice
 /// [`split_at`]: FixedVec::split_at
-#[derive(Debug, Clone, Copy)]
-pub struct FixedVecSlice<'a, E: Endianness> {
+#[derive(Debug, Clone)]
+pub struct FixedVecSlice<'a, E: Endianness, B: AsRef<[u64]>> {
     /// A reference to the parent vector.
-    vec: &'a FixedVec<E>,
+    vec: &'a FixedVec<E, B>,
     /// The starting index of the slice within the parent vector.
     start: usize,
     /// The number of elements in the slice.
     len: usize,
 }
 
-impl<'a, E: Endianness> FixedVecSlice<'a, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> FixedVecSlice<'a, E, B> {
     /// Creates a new `FixedVecSlice`.
     ///
     /// This is `pub(super)` and is called by [`FixedVec::slice`].
     /// It assumes that bounds have already been checked.
-    pub(super) fn new(vec: &'a FixedVec<E>, range: Range<usize>) -> Self {
+    pub(super) fn new(vec: &'a FixedVec<E, B>, range: Range<usize>) -> Self {
         Self {
             vec,
             start: range.start,
@@ -110,29 +112,29 @@ impl<'a, E: Endianness> FixedVecSlice<'a, E> {
     ///
     /// If the slice is not sorted by key, the result is unspecified.
     #[inline]
-    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
     where
-        F: FnMut(u64) -> B,
-        B: Ord,
+        F: FnMut(u64) -> B1,
+        B1: Ord,
     {
         self.binary_search_by(|k| f(k).cmp(b))
     }
 
     /// Returns an iterator over the values in the slice.
-    pub fn iter(&self) -> FixedVecSliceIter<'a, E> {
-        FixedVecSliceIter::new(*self)
+    pub fn iter(&self) -> FixedVecSliceIter<'_, E, B> {
+        FixedVecSliceIter::new(self)
     }
 }
 
 /// An iterator over the decompressed `u64` values of a [`FixedVecSlice`].
-pub struct FixedVecSliceIter<'a, E: Endianness> {
-    slice: FixedVecSlice<'a, E>,
+pub struct FixedVecSliceIter<'a, E: Endianness, B: AsRef<[u64]>> {
+    slice: &'a FixedVecSlice<'a, E, B>,
     current_index: usize,
 }
 
-impl<'a, E: Endianness> FixedVecSliceIter<'a, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> FixedVecSliceIter<'a, E, B> {
     /// Creates a new iterator for a given `FixedVecSlice`.
-    fn new(slice: FixedVecSlice<'a, E>) -> Self {
+    fn new(slice: &'a FixedVecSlice<'a, E, B>) -> Self {
         Self {
             slice,
             current_index: 0,
@@ -140,7 +142,7 @@ impl<'a, E: Endianness> FixedVecSliceIter<'a, E> {
     }
 }
 
-impl<E: Endianness> Iterator for FixedVecSliceIter<'_, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> Iterator for FixedVecSliceIter<'a, E, B> {
     type Item = u64;
 
     #[inline]
@@ -160,15 +162,15 @@ impl<E: Endianness> Iterator for FixedVecSliceIter<'_, E> {
     }
 }
 
-impl<E: Endianness> ExactSizeIterator for FixedVecSliceIter<'_, E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for FixedVecSliceIter<'a, E, B> {
     fn len(&self) -> usize {
         self.slice.len().saturating_sub(self.current_index)
     }
 }
 
 // Implementations of traits from the standard library
-impl<'b, E: Endianness> PartialEq<FixedVecSlice<'b, E>> for FixedVecSlice<'_, E> {
-    fn eq(&self, other: &FixedVecSlice<'b, E>) -> bool {
+impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq for FixedVecSlice<'a, E, B> {
+    fn eq(&self, other: &Self) -> bool {
         if self.len != other.len {
             return false;
         }
@@ -176,10 +178,12 @@ impl<'b, E: Endianness> PartialEq<FixedVecSlice<'b, E>> for FixedVecSlice<'_, E>
     }
 }
 
-impl<E: Endianness> Eq for FixedVecSlice<'_, E> {}
+impl<'a, E: Endianness, B: AsRef<[u64]>> Eq for FixedVecSlice<'a, E, B> {}
 
-impl<E: Endianness> PartialEq<FixedVec<E>> for FixedVecSlice<'_, E> {
-    fn eq(&self, other: &FixedVec<E>) -> bool {
+impl<'a, E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<FixedVec<E, B2>>
+    for FixedVecSlice<'a, E, B>
+{
+    fn eq(&self, other: &FixedVec<E, B2>) -> bool {
         if self.len != other.len() {
             return false;
         }
@@ -187,19 +191,36 @@ impl<E: Endianness> PartialEq<FixedVec<E>> for FixedVecSlice<'_, E> {
     }
 }
 
-impl<E: Endianness, T: AsRef<[u64]>> PartialEq<T> for FixedVecSlice<'_, E> {
-    fn eq(&self, other: &T) -> bool {
-        let other_slice = other.as_ref();
-        if self.len() != other_slice.len() {
-            return false;
+macro_rules! impl_partial_eq_for_uint_slice_for_slice {
+    ($($t:ty),*) => {$(
+        impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for FixedVecSlice<'a, E, B> {
+            fn eq(&self, other: &Vec<$t>) -> bool {
+                self.eq(&other[..])
+            }
         }
-        self.iter().eq(other_slice.iter().copied())
-    }
+
+        impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for FixedVecSlice<'a, E, B> {
+            fn eq(&self, other: &&[$t]) -> bool {
+                self.eq(*other)
+            }
+        }
+
+        impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq<[$t]> for FixedVecSlice<'a, E, B> {
+            fn eq(&self, other: &[$t]) -> bool {
+                if self.len() != other.len() {
+                    return false;
+                }
+                self.iter().eq(other.iter().map(|&x| x as u64))
+            }
+        }
+    )*};
 }
 
-impl<'a, E: Endianness> IntoIterator for FixedVecSlice<'a, E> {
+impl_partial_eq_for_uint_slice_for_slice!(u8, u16, u32, u64);
+
+impl<'a, E: Endianness, B: AsRef<[u64]>> IntoIterator for &'a FixedVecSlice<'a, E, B> {
     type Item = u64;
-    type IntoIter = FixedVecSliceIter<'a, E>;
+    type IntoIter = FixedVecSliceIter<'a, E, B>;
 
     /// Creates an iterator over the values of the slice.
     fn into_iter(self) -> Self::IntoIter {

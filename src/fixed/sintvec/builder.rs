@@ -6,16 +6,18 @@
 use crate::fixed::intvec::{BitWidth, FixedVec, FixedVecError};
 use crate::fixed::sintvec::SFixedVec;
 use common_traits::SignedInt;
-use dsi_bitstream::impls::MemWordWriterVec;
 use dsi_bitstream::prelude::{BitWrite, Endianness, ToNat};
 use std::marker::PhantomData;
 
 use crate::fixed::intvec::builder::FixedVecBitWriter;
+use dsi_bitstream::impls::MemWordWriterVec;
 
-/// A builder for creating a [`SFixedVec`] from a slice of signed integers.
+/// A builder for creating an owned [`SFixedVec`] from a slice of signed integers.
 ///
 /// This builder transparently handles the ZigZag encoding of the input data.
 /// It can automatically determine the optimal number of bits if not specified.
+///
+/// This builder always produces a `SFixedVec<E, Vec<u64>>`.
 #[derive(Debug)]
 pub struct SFixedVecBuilder<'a, E: Endianness, I> {
     input: &'a [I],
@@ -45,13 +47,13 @@ where
         self
     }
 
-    /// Builds the `SFixedVec`, consuming the builder.
+    /// Builds the `SFixedVec<E, Vec<u64>>`, consuming the builder.
     ///
     /// This implementation is optimized to avoid intermediate allocations. It makes
     /// two passes over the input data: one to determine the maximum ZigZag-encoded
     /// value (for `Minimal` and `ByteAligned` strategies), and a second pass
     /// to write the bits.
-    pub fn build(self) -> Result<SFixedVec<E>, FixedVecError>
+    pub fn build(self) -> Result<SFixedVec<E, Vec<u64>>, FixedVecError>
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
@@ -86,22 +88,10 @@ where
             ));
         }
 
-        let final_mask = if final_num_bits == 64 {
-            u64::MAX
-        } else {
-            (1u64 << final_num_bits) - 1
-        };
-
         if self.input.is_empty() {
-            return Ok(SFixedVec {
-                inner: FixedVec {
-                    data: Vec::new(),
-                    len: 0,
-                    num_bits: final_num_bits,
-                    mask: final_mask,
-                    _endian: PhantomData,
-                },
-            });
+            // SAFETY: An empty vector with 0 length is always valid.
+            let inner = unsafe { FixedVec::new_unchecked(Vec::new(), 0, final_num_bits) };
+            return Ok(SFixedVec { inner });
         }
 
         let total_bits = self.input.len() * final_num_bits;
@@ -131,13 +121,9 @@ where
         writer.flush().unwrap();
         let data = writer.into_inner().unwrap().into_inner();
 
-        let inner_fixed_vec = FixedVec {
-            data,
-            len: self.input.len(),
-            num_bits: final_num_bits,
-            mask: final_mask,
-            _endian: PhantomData,
-        };
+        // SAFETY: The builder correctly constructs the inner vector with necessary padding.
+        let inner_fixed_vec =
+            unsafe { FixedVec::new_unchecked(data, self.input.len(), final_num_bits) };
 
         Ok(SFixedVec {
             inner: inner_fixed_vec,
@@ -145,7 +131,7 @@ where
     }
 }
 
-/// A builder for creating a [`SFixedVec`] from an iterator of `i64`.
+/// A builder for creating an owned [`SFixedVec`] from an iterator of `i64`.
 ///
 /// # Limitations
 ///
@@ -168,8 +154,8 @@ impl<E: Endianness, I: IntoIterator<Item = i64>> SFixedVecFromIterBuilder<E, I> 
         }
     }
 
-    /// Builds the `SFixedVec` by consuming the iterator.
-    pub fn build(self) -> Result<SFixedVec<E>, FixedVecError>
+    /// Builds the `SFixedVec<E, Vec<u64>>` by consuming the iterator.
+    pub fn build(self) -> Result<SFixedVec<E, Vec<u64>>, FixedVecError>
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {

@@ -41,27 +41,28 @@ use std::cmp::Ordering;
 /// methods are nearly identical to their [`FixedVec`] counterparts, with only
 /// the negligible overhead of the ZigZag transformation.
 ///
-/// # Example
-/// ```rust
-/// use compressed_intvec::prelude::*;
-///
-/// let data: &[i64] = &;
-///
-/// // The builder will automatically determine the number of bits required
-/// // after ZigZag encoding the values.
-/// let s_fixed_vec = LESFixedVec::builder(&data).build().unwrap();
-///
-/// assert_eq!(s_fixed_vec.len(), data.len());
-/// assert_eq!(s_fixed_vec.get(1), Some(-128));
-/// ```
+/// It is generic over the backend storage `B`, which can be an owned `Vec<u64>`
+/// or a borrowed slice `&[u64]`.
 #[derive(Debug, Clone, MemDbg, MemSize)]
-pub struct SFixedVec<E: Endianness> {
+pub struct SFixedVec<E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// The inner `FixedVec` that stores the ZigZag-encoded `u64` values.
-    inner: FixedVec<E>,
+    inner: FixedVec<E, B>,
 }
 
-impl<E: Endianness> SFixedVec<E> {
-    /// Creates an `SFixedVec` directly from a slice of data.
+impl<E: Endianness> SFixedVec<E, Vec<u64>> {
+    /// Returns a builder for creating an owned [`SFixedVec`] from a slice of signed integers.
+    ///
+    /// This method is generic and can accept slices of `i8`, `i16`, `i32`, and `i64`.
+    pub fn builder<I, T>(input: &T) -> SFixedVecBuilder<E, I>
+    where
+        I: ToNat + Copy + SignedInt,
+        <I as SignedInt>::UnsignedInt: Into<u64> + Ord + Copy + Default,
+        T: AsRef<[I]> + ?Sized,
+    {
+        SFixedVecBuilder::new(input.as_ref())
+    }
+
+    /// Creates an owned `SFixedVec` directly from a slice of data.
     ///
     /// This is a convenient alias for `SFixedVec::builder(slice).build()`.
     /// The bit width will be automatically determined using the `BitWidth::Minimal` strategy.
@@ -78,19 +79,7 @@ impl<E: Endianness> SFixedVec<E> {
         Self::builder(slice).build()
     }
 
-    /// Returns a builder for creating an [`SFixedVec`] from a slice of signed integers.
-    ///
-    /// This method is generic and can accept slices of `i8`, `i16`, `i32`, and `i64`.
-    pub fn builder<I, T>(input: &T) -> SFixedVecBuilder<E, I>
-    where
-        I: ToNat + Copy + SignedInt,
-        <I as SignedInt>::UnsignedInt: Into<u64> + Ord + Copy + Default,
-        T: AsRef<[I]> + ?Sized,
-    {
-        SFixedVecBuilder::new(input.as_ref())
-    }
-
-    /// Returns a builder for creating a [`SFixedVec`] from an iterator.
+    /// Returns a builder for creating an owned [`SFixedVec`] from an iterator.
     ///
     /// # Limitations
     /// This builder requires that the number of bits be specified manually.
@@ -99,6 +88,16 @@ impl<E: Endianness> SFixedVec<E> {
         num_bits: usize,
     ) -> SFixedVecFromIterBuilder<E, I> {
         SFixedVecFromIterBuilder::new(iter, num_bits)
+    }
+}
+
+impl<E: Endianness, B: AsRef<[u64]>> SFixedVec<E, B> {
+    /// Creates an `SFixedVec` view from an existing `FixedVec`.
+    ///
+    /// This is the primary constructor for creating a zero-copy view. The provided
+    /// `FixedVec` is assumed to contain ZigZag-encoded data.
+    pub fn from_parts(inner: FixedVec<E, B>) -> Self {
+        Self { inner }
     }
 
     /// Returns the number of integers in the vector.
@@ -114,15 +113,6 @@ impl<E: Endianness> SFixedVec<E> {
     /// Returns the number of bits used to encode each integer.
     pub fn num_bits(&self) -> usize {
         self.inner.num_bits()
-    }
-
-    /// Returns a clone of the underlying storage (`Vec<u64>`).
-    ///
-    /// # Note
-    ///
-    /// The values are ZigZag encoded, so they are not the original `i64` values.
-    pub fn limbs(&self) -> Vec<u64> {
-        self.inner.limbs()
     }
 
     /// Returns a zero-copy, read-only slice of the underlying storage (`&[u64]`).
@@ -172,18 +162,15 @@ impl<E: Endianness> SFixedVec<E> {
     }
 
     /// Creates a zero-copy slice of this vector.
-    pub fn slice(&self, start: usize, len: usize) -> Option<SFixedVecSlice<E>> {
+    pub fn slice(&self, start: usize, len: usize) -> Option<SFixedVecSlice<E, B>> {
         self.inner.slice(start, len).map(SFixedVecSlice::new)
     }
 
     /// Splits the vector into two slices at a given index.
-    pub fn split_at(&self, mid: usize) -> Option<(SFixedVecSlice<E>, SFixedVecSlice<E>)> {
-        self.inner.split_at(mid).map(|(left, right)| {
-            (
-                SFixedVecSlice::new(left),
-                SFixedVecSlice::new(right),
-            )
-        })
+    pub fn split_at(&self, mid: usize) -> Option<(SFixedVecSlice<E, B>, SFixedVecSlice<E, B>)> {
+        self.inner
+            .split_at(mid)
+            .map(|(left, right)| (SFixedVecSlice::new(left), SFixedVecSlice::new(right)))
     }
 
     /// Binary searches this vector for a given element.
@@ -215,20 +202,22 @@ impl<E: Endianness> SFixedVec<E> {
     /// If the vector is not sorted by the key, the returned result is
     /// unspecified.
     #[inline]
-    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
     where
-        F: FnMut(i64) -> B,
-        B: Ord,
+        F: FnMut(i64) -> B1,
+        B1: Ord,
     {
         self.binary_search_by(|k| f(k).cmp(b))
     }
 
     /// Returns an iterator over the decompressed `i64` values.
-    pub fn iter(&self) -> SFixedVecIter<E> {
+    pub fn iter(&self) -> SFixedVecIter<E, B> {
         SFixedVecIter::new(self)
     }
+}
 
-    /// Consumes the [`SFixedVec`] and returns the underlying `Vec<i64>`.
+impl<E: Endianness> SFixedVec<E, Vec<u64>> {
+    /// Consumes the owned [`SFixedVec`] and returns the underlying `Vec<i64>`.
     pub fn into_vec(self) -> Vec<i64> {
         self.inner
             .into_vec()
@@ -239,33 +228,32 @@ impl<E: Endianness> SFixedVec<E> {
 }
 
 // Implementations of traits from the standard library
-impl<E: Endianness> PartialEq for SFixedVec<E> {
-    /// Checks for equality between two `SFixedVec` instances.
-    ///
-    /// This comparison is delegated to the inner `FixedVec`, which provides an
-    /// efficient check of metadata and on-the-fly element comparison.
-    fn eq(&self, other: &Self) -> bool {
+impl<E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<SFixedVec<E, B2>>
+    for SFixedVec<E, B>
+{
+    /// Checks for equality between two `SFixedVec` instances, regardless of backend.
+    fn eq(&self, other: &SFixedVec<E, B2>) -> bool {
         self.inner == other.inner
     }
 }
 
-impl<E: Endianness> Eq for SFixedVec<E> {}
+impl<E: Endianness, B: AsRef<[u64]>> Eq for SFixedVec<E, B> {}
 
 macro_rules! impl_partial_eq_for_sint_slice {
     ($($t:ty),*) => {$(
-        impl<E: Endianness> PartialEq<Vec<$t>> for SFixedVec<E> {
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for SFixedVec<E, B> {
             fn eq(&self, other: &Vec<$t>) -> bool {
                 self.eq(&other[..])
             }
         }
 
-        impl<E: Endianness> PartialEq<&[$t]> for SFixedVec<E> {
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for SFixedVec<E, B> {
             fn eq(&self, other: &&[$t]) -> bool {
                 self.eq(*other)
             }
         }
 
-        impl<E: Endianness> PartialEq<[$t]> for SFixedVec<E> {
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<[$t]> for SFixedVec<E, B> {
             fn eq(&self, other: &[$t]) -> bool {
                 if self.len() != other.len() {
                     return false;
@@ -278,9 +266,9 @@ macro_rules! impl_partial_eq_for_sint_slice {
 
 impl_partial_eq_for_sint_slice!(i8, i16, i32, i64);
 
-impl<'a, E: Endianness> IntoIterator for &'a SFixedVec<E> {
+impl<'a, E: Endianness, B: AsRef<[u64]>> IntoIterator for &'a SFixedVec<E, B> {
     type Item = i64;
-    type IntoIter = SFixedVecIter<'a, E>;
+    type IntoIter = SFixedVecIter<'a, E, B>;
 
     /// Creates an iterator over the values of the `SFixedVec`.
     fn into_iter(self) -> Self::IntoIter {
@@ -288,7 +276,7 @@ impl<'a, E: Endianness> IntoIterator for &'a SFixedVec<E> {
     }
 }
 
-impl<E: Endianness> IntoIterator for SFixedVec<E> {
+impl<E: Endianness> IntoIterator for SFixedVec<E, Vec<u64>> {
     type Item = i64;
     type IntoIter = std::vec::IntoIter<i64>;
 
@@ -298,8 +286,19 @@ impl<E: Endianness> IntoIterator for SFixedVec<E> {
     }
 }
 
-/// A type alias for an [`SFixedVec`] with Big-Endian ([`BE`]) bitstream encoding.
-pub type BESFixedVec = SFixedVec<BE>;
+impl<E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<SFixedVecSlice<'_, E, B2>>
+    for SFixedVec<E, B>
+{
+    fn eq(&self, other: &SFixedVecSlice<'_, E, B2>) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        self.iter().eq(other.iter())
+    }
+}
 
-/// A type alias for an [`SFixedVec`] with Little-Endian ([`LE`]) bitstream encoding.
-pub type LESFixedVec = SFixedVec<LE>;
+/// A type alias for an owned [`SFixedVec`] with Big-Endian ([`BE`]) bitstream encoding.
+pub type BESFixedVec = SFixedVec<BE, Vec<u64>>;
+
+/// A type alias for an owned [`SFixedVec`] with Little-Endian ([`LE`]) bitstream encoding.
+pub type LESFixedVec = SFixedVec<LE, Vec<u64>>;
