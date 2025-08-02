@@ -3,14 +3,14 @@
 //! This module provides builders for creating a compressed fixed-width signed
 //! integer vector, [`SFixedVec`].
 
+use crate::fixed::intvec::{BitWidth, FixedVec, FixedVecError};
+use crate::fixed::sintvec::SFixedVec;
+use common_traits::SignedInt;
+use dsi_bitstream::impls::MemWordWriterVec;
 use dsi_bitstream::prelude::{BitWrite, Endianness, ToNat};
 use std::marker::PhantomData;
 
-use crate::fixed::{
-    intvec::{builder::FixedVecBitWriter, BitWidth, FixedVec, FixedVecError},
-    sintvec::SFixedVec,
-};
-use common_traits::SignedInt;
+use crate::fixed::intvec::builder::FixedVecBitWriter;
 
 /// A builder for creating a [`SFixedVec`] from a slice of signed integers.
 ///
@@ -46,17 +46,98 @@ where
     }
 
     /// Builds the `SFixedVec`, consuming the builder.
+    ///
+    /// This implementation is optimized to avoid intermediate allocations. It makes
+    /// two passes over the input data: one to determine the maximum ZigZag-encoded
+    /// value (for `Minimal` and `ByteAligned` strategies), and a second pass
+    /// to write the bits.
     pub fn build(self) -> Result<SFixedVec<E>, FixedVecError>
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
-        // Transform the signed integers to unsigned integers using ZigZag encoding.
-        let unsigned_data: Vec<u64> = self.input.iter().map(|&x| x.to_nat().into()).collect();
+        let final_num_bits = match self.bit_width {
+            BitWidth::Explicit(n) => n,
+            BitWidth::Minimal | BitWidth::ByteAligned => {
+                // First pass: find the max ZigZag value without allocating a new Vec.
+                let max_val: u64 = self
+                    .input
+                    .iter()
+                    .map(|&x| x.to_nat().into())
+                    .max()
+                    .unwrap_or(0);
 
-        // Delegate the actual construction to the FixedVec builder.
-        let inner_fixed_vec = FixedVec::<E>::builder(&unsigned_data)
-            .bit_width(self.bit_width)
-            .build()?;
+                let min_bits = if max_val == 0 {
+                    1
+                } else {
+                    (u64::BITS - max_val.leading_zeros()) as usize
+                };
+
+                if let BitWidth::ByteAligned = self.bit_width {
+                    ((min_bits + 7) / 8 * 8).min(64)
+                } else {
+                    min_bits
+                }
+            }
+        };
+
+        if final_num_bits > 64 {
+            return Err(FixedVecError::InvalidParameters(
+                "num_bits cannot be greater than 64".to_string(),
+            ));
+        }
+
+        let final_mask = if final_num_bits == 64 {
+            u64::MAX
+        } else {
+            (1u64 << final_num_bits) - 1
+        };
+
+        if self.input.is_empty() {
+            return Ok(SFixedVec {
+                inner: FixedVec {
+                    data: Vec::new(),
+                    len: 0,
+                    num_bits: final_num_bits,
+                    mask: final_mask,
+                    _endian: PhantomData,
+                },
+            });
+        }
+
+        let total_bits = self.input.len() * final_num_bits;
+        let num_words = (total_bits + 63) / 64;
+        let buffer = vec![0u64; num_words + 1];
+        let mut writer = FixedVecBitWriter::<E>::new(MemWordWriterVec::new(buffer));
+
+        let limit = if final_num_bits < 64 {
+            1u64 << final_num_bits
+        } else {
+            u64::MAX
+        };
+
+        // Second pass: write the ZigZag-encoded values to the bitstream.
+        for (i, &value_i) in self.input.iter().enumerate() {
+            let value: u64 = value_i.to_nat().into();
+            if final_num_bits < 64 && value >= limit {
+                return Err(FixedVecError::ValueTooLarge {
+                    value,
+                    index: i,
+                    num_bits: final_num_bits,
+                });
+            }
+            writer.write_bits(value, final_num_bits).unwrap();
+        }
+
+        writer.flush().unwrap();
+        let data = writer.into_inner().unwrap().into_inner();
+
+        let inner_fixed_vec = FixedVec {
+            data,
+            len: self.input.len(),
+            num_bits: final_num_bits,
+            mask: final_mask,
+            _endian: PhantomData,
+        };
 
         Ok(SFixedVec {
             inner: inner_fixed_vec,
