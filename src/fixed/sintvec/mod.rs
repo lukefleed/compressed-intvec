@@ -31,6 +31,7 @@ pub use slice::SFixedVecSlice;
 
 use dsi_bitstream::prelude::{Endianness, ToInt, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
+use std::cmp::Ordering;
 
 /// A compressed, randomly accessible vector of `i64` integers with fixed-width encoding.
 ///
@@ -154,6 +155,43 @@ impl<E: Endianness> SFixedVec<E> {
                 SFixedVecSlice::new(right),
             )
         })
+    }
+
+    /// Binary searches this vector for a given element.
+    ///
+    /// If the vector is not sorted, the returned result is unspecified and
+    /// meaningless. For `binary_search` to work correctly, the vector must be
+    /// sorted in ascending order.
+    pub fn binary_search(&self, value: i64) -> Result<usize, usize> {
+        self.binary_search_by(|probe| probe.cmp(&value))
+    }
+
+    /// Binary searches this vector with a comparator function.
+    ///
+    /// The comparator function should return an `Ordering` that indicates
+    /// whether its argument is `Less`, `Equal` or `Greater` than the desired
+    /// target. If the vector is not sorted or if the comparator does not
+    /// reflect the vector's ordering, the returned result is unspecified.
+    #[inline]
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(i64) -> Ordering,
+    {
+        self.inner
+            .binary_search_by(|probe_unsigned| f(probe_unsigned.to_int()))
+    }
+
+    /// Binary searches this vector with a key extraction function.
+    ///
+    /// If the vector is not sorted by the key, the returned result is
+    /// unspecified.
+    #[inline]
+    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(i64) -> B,
+        B: Ord,
+    {
+        self.binary_search_by(|k| f(k).cmp(b))
     }
 
     /// Returns an iterator over the decompressed `i64` values.

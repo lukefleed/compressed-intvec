@@ -34,7 +34,7 @@ pub use slice::FixedVecSlice;
 
 use dsi_bitstream::prelude::{Endianness, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
-use std::{any::TypeId, error::Error, fmt, marker::PhantomData};
+use std::{any::TypeId, cmp::Ordering, error::Error, fmt, marker::PhantomData};
 
 /// Defines the set of errors that can occur in `FixedVec` operations.
 #[derive(Debug)]
@@ -246,6 +246,64 @@ impl<E: Endianness> FixedVec<E> {
         let left = FixedVecSlice::new(self, 0..mid);
         let right = FixedVecSlice::new(self, mid..self.len);
         Some((left, right))
+    }
+
+    /// Binary searches this vector for a given element.
+    ///
+    /// If the vector is not sorted, the returned result is unspecified and
+    /// meaningless. For `binary_search` to work correctly, the vector must be
+    /// sorted in ascending order.
+    ///
+    /// If the value is found then `Ok(idx)` is returned, containing the
+    /// index of the matching element. If there are multiple matches, then any
+    /// one of the matches could be returned.
+    /// If the value is not found then `Err(idx)` is returned, containing
+    /// the index where a matching element could be inserted while maintaining
+    /// sorted order.
+    pub fn binary_search(&self, value: u64) -> Result<usize, usize> {
+        self.binary_search_by(|probe| probe.cmp(&value))
+    }
+
+    /// Binary searches this vector with a comparator function.
+    ///
+    /// The comparator function should return an `Ordering` that indicates
+    /// whether its argument is `Less`, `Equal` or `Greater` than the desired
+    /// target.
+    /// If the vector is not sorted or if the comparator does not reflect the
+    /// vector's ordering, the returned result is unspecified.
+    #[inline]
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(u64) -> Ordering,
+    {
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            // SAFETY: The `low` and `high` bounds are checked in the loop.
+            let cmp = f(unsafe { self.get_unchecked(mid) });
+
+            match cmp {
+                Ordering::Less => low = mid + 1,
+                Ordering::Equal => return Ok(mid),
+                Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary searches this vector with a key extraction function.
+    ///
+    /// If the vector is not sorted by the key, the returned result is
+    /// unspecified.
+    #[inline]
+    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(u64) -> B,
+        B: Ord,
+    {
+        self.binary_search_by(|k| f(k).cmp(b))
     }
 
     /// Returns an iterator over the decompressed `u64` values.

@@ -5,6 +5,7 @@
 
 use super::FixedVec;
 use dsi_bitstream::prelude::Endianness;
+use std::cmp::Ordering;
 use std::ops::Range;
 
 /// A zero-copy slice of a [`FixedVec`].
@@ -71,6 +72,50 @@ impl<'a, E: Endianness> FixedVecSlice<'a, E> {
     pub unsafe fn get_unchecked(&self, index: usize) -> u64 {
         debug_assert!(index < self.len, "Index out of bounds");
         self.vec.get_unchecked(self.start + index)
+    }
+
+    /// Binary searches this slice for a given element.
+    ///
+    /// If the slice is not sorted, the returned result is unspecified.
+    pub fn binary_search(&self, value: u64) -> Result<usize, usize> {
+        self.binary_search_by(|probe| probe.cmp(&value))
+    }
+
+    /// Binary searches this slice with a comparator function.
+    ///
+    /// If the slice is not sorted or the comparator does not reflect the
+    /// slice's ordering, the result is unspecified.
+    #[inline]
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(u64) -> Ordering,
+    {
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            // SAFETY: Bounds are checked by the loop.
+            let cmp = f(unsafe { self.get_unchecked(mid) });
+            match cmp {
+                Ordering::Less => low = mid + 1,
+                Ordering::Equal => return Ok(mid),
+                Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary searches this slice with a key extraction function.
+    ///
+    /// If the slice is not sorted by key, the result is unspecified.
+    #[inline]
+    pub fn binary_search_by_key<B, F>(&self, b: &B, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(u64) -> B,
+        B: Ord,
+    {
+        self.binary_search_by(|k| f(k).cmp(b))
     }
 
     /// Returns an iterator over the values in the slice.
