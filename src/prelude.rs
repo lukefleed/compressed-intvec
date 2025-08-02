@@ -10,7 +10,7 @@ pub use crate::variable::intvec::IntVecError;
 // Types for fixed-width vectors
 pub use crate::fixed::intvec::{
     BEFixedVec, FixedVec, FixedVecBuilder, FixedVecFromIterBuilder, FixedVecIter, FixedVecSlice,
-    LEFixedVec,
+    LEFixedVec, BitWidth,
 };
 pub use crate::fixed::sintvec::{
     BESFixedVec, LESFixedVec, SFixedVec, SFixedVecBuilder, SFixedVecFromIterBuilder,

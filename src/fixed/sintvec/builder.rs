@@ -7,23 +7,19 @@ use dsi_bitstream::prelude::{BitWrite, Endianness, ToNat};
 use std::marker::PhantomData;
 
 use crate::fixed::{
-    intvec::{builder::FixedVecBitWriter, FixedVec, FixedVecError},
+    intvec::{builder::FixedVecBitWriter, BitWidth, FixedVec, FixedVecError},
     sintvec::SFixedVec,
 };
 use common_traits::SignedInt;
 
-/// A builder for creating a [`SFixedVec`] from a slice of `i64`.
+/// A builder for creating a [`SFixedVec`] from a slice of signed integers.
 ///
 /// This builder transparently handles the ZigZag encoding of the input data.
-/// It first transforms the `&[i64]` slice into a temporary `Vec<u64>` and then
-/// delegates the construction to the underlying [`FixedVecBuilder`].
-///
-/// Like `FixedVecBuilder`, it can automatically determine the optimal number of
-/// bits if not specified.
+/// It can automatically determine the optimal number of bits if not specified.
 #[derive(Debug)]
 pub struct SFixedVecBuilder<'a, E: Endianness, I> {
     input: &'a [I],
-    num_bits: Option<usize>,
+    bit_width: BitWidth,
     _endian: PhantomData<E>,
 }
 
@@ -36,18 +32,16 @@ where
     pub(super) fn new(input: &'a [I]) -> Self {
         Self {
             input,
-            num_bits: None,
+            bit_width: BitWidth::default(),
             _endian: PhantomData,
         }
     }
 
-    /// Sets the number of bits to use for encoding each integer.
+    /// Sets the strategy for determining the number of bits for encoding each integer.
     ///
-    /// If `Some(bits)`, the specified number of bits will be used.
-    /// If `None`, the builder will automatically determine the minimum number of
-    /// bits required to store the largest ZigZag-encoded value.
-    pub fn num_bits(mut self, num_bits: Option<usize>) -> Self {
-        self.num_bits = num_bits;
+    /// See [`BitWidth`] for available strategies.
+    pub fn bit_width(mut self, bit_width: BitWidth) -> Self {
+        self.bit_width = bit_width;
         self
     }
 
@@ -56,13 +50,12 @@ where
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
-        // Transform the signed integers to unsigned integers using ZigZag encoding,
-        // and convert them to u64 for the underlying builder.
+        // Transform the signed integers to unsigned integers using ZigZag encoding.
         let unsigned_data: Vec<u64> = self.input.iter().map(|&x| x.to_nat().into()).collect();
 
         // Delegate the actual construction to the FixedVec builder.
         let inner_fixed_vec = FixedVec::<E>::builder(&unsigned_data)
-            .num_bits(self.num_bits)
+            .bit_width(self.bit_width)
             .build()?;
 
         Ok(SFixedVec {

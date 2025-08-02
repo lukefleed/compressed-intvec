@@ -1,12 +1,15 @@
 //! Integration tests for `FixedVecSlice` and `SFixedVecSlice`.
 
 use crate::common::helpers::{generate_random_signed_vec, generate_random_vec};
-use compressed_intvec::prelude::*;
+use compressed_intvec::{fixed::intvec::BitWidth, prelude::*};
 
 #[test]
 fn test_fixedvec_slice_creation_and_access() {
     let data = generate_random_vec(100, 1000);
-    let fixed_vec = LEFixedVec::builder(&data).num_bits(Some(10)).build().unwrap();
+    let fixed_vec = LEFixedVec::builder(&data)
+        .bit_width(BitWidth::Explicit(10))
+        .build()
+        .unwrap();
 
     // Valid slice
     let slice = fixed_vec.slice(10, 20).unwrap();
@@ -36,7 +39,7 @@ fn test_fixedvec_slice_creation_and_access() {
 fn test_sfixedvec_slice_creation_and_access() {
     let data = generate_random_signed_vec(100, 1000);
     let s_fixed_vec = LESFixedVec::builder(&data)
-        .num_bits(Some(11))
+        .bit_width(BitWidth::Explicit(11))
         .build()
         .unwrap();
 

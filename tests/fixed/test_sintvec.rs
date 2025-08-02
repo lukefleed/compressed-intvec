@@ -1,6 +1,6 @@
 //! Integration tests for `SFixedVec`.
 
-use compressed_intvec::prelude::*;
+use compressed_intvec::{fixed::intvec::BitWidth, prelude::*};
 use dsi_bitstream::prelude::{BE, LE};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -13,23 +13,23 @@ use common::helpers::generate_random_signed_vec;
 use rayon::iter::ParallelIterator;
 
 macro_rules! test_sintvec_configuration {
-    ($test_name:ident, $endianness:ty, $input:expr, $num_bits:expr) => {
+    ($test_name:ident, $endianness:ty, $input:expr, $bit_width:expr) => {
         #[test]
         fn $test_name() {
             let input = &$input;
-            let num_bits = $num_bits;
+            let bit_width = $bit_width;
 
             // Build the SFixedVec
             let s_fixed_vec = SFixedVec::<$endianness>::builder(input)
-                .num_bits(num_bits)
+                .bit_width(bit_width)
                 .build()
                 .unwrap();
 
             // Basic property checks
             assert_eq!(s_fixed_vec.len(), input.len());
             assert_eq!(s_fixed_vec.is_empty(), input.is_empty());
-            if num_bits.is_some() {
-                assert_eq!(s_fixed_vec.num_bits(), num_bits.unwrap());
+            if let BitWidth::Explicit(n) = bit_width {
+                assert_eq!(s_fixed_vec.num_bits(), n);
             }
 
             // Test full decompression
@@ -56,7 +56,7 @@ macro_rules! test_sintvec_configuration {
                 let mut different_input = input.clone();
                 different_input.swap(0, 1);
                 let different_vec = SFixedVec::<$endianness>::builder(&different_input)
-                    .num_bits(num_bits)
+                    .bit_width(bit_width)
                     .build()
                     .unwrap();
                 assert_ne!(
@@ -135,47 +135,64 @@ macro_rules! test_sintvec_configuration {
 // TEST SUITE
 
 // Empty Vector
-test_sintvec_configuration!(test_empty_le, LE, generate_random_signed_vec(0, 0), Some(8));
+test_sintvec_configuration!(
+    test_empty_le,
+    LE,
+    generate_random_signed_vec(0, 0),
+    BitWidth::Explicit(8)
+);
 test_sintvec_configuration!(
     test_empty_auto_bits_be,
     BE,
     generate_random_signed_vec(0, 0),
-    None
+    BitWidth::Minimal
 );
 
 // Single Element Vector
-test_sintvec_configuration!(test_single_element_le, LE, vec![-42i64], Some(7)); // -42 -> 83, needs 7 bits
-test_sintvec_configuration!(test_single_element_auto_bits_be, BE, vec![-500i64], None); // -500 -> 999, needs 10 bits
+test_sintvec_configuration!(test_single_element_le, LE, vec![-42i64], BitWidth::Explicit(7)); // -42 -> 83, needs 7 bits
+test_sintvec_configuration!(
+    test_single_element_auto_bits_be,
+    BE,
+    vec![-500i64],
+    BitWidth::Minimal
+); // -500 -> 999, needs 10 bits
 
 // Zeros Vector
-test_sintvec_configuration!(test_zeros_le, LE, vec![0i64; 1000], Some(1));
-test_sintvec_configuration!(test_zeros_auto_bits_be, BE, vec![0i64; 1000], None);
+test_sintvec_configuration!(test_zeros_le, LE, vec![0i64; 1000], BitWidth::Explicit(1));
+test_sintvec_configuration!(
+    test_zeros_auto_bits_be,
+    BE,
+    vec![0i64; 1000],
+    BitWidth::Minimal
+);
 
 // Mixed positive and negative values
 test_sintvec_configuration!(
     test_mixed_values_le,
     LE,
     generate_random_signed_vec(1000, 500), // Range [-499, 499] -> max zigzag is 998, needs 10 bits
-    Some(10)
+    BitWidth::Explicit(10)
 );
 test_sintvec_configuration!(
     test_mixed_values_auto_bits_be,
     BE,
     generate_random_signed_vec(1000, 1_000_000),
-    None
+    BitWidth::Minimal
 );
 
 #[test]
 fn test_invalid_parameters() {
     // num_bits > 64
     let result = LESFixedVec::builder(&[-1i64, 2, -3])
-        .num_bits(Some(65))
+        .bit_width(BitWidth::Explicit(65))
         .build();
     assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
 
     // Value (after zigzag) too large for specified bits
     let input_large = vec![-10i64, 20, 128]; // zigzag(128) = 256, requires 9 bits
-    let result_large = LESFixedVec::builder(&input_large).num_bits(Some(8)).build();
+    let result_large = LESFixedVec::builder(&input_large)
+        .bit_width(BitWidth::Explicit(8))
+        .build();
     assert!(matches!(
         result_large,
         Err(FixedVecError::ValueTooLarge { .. })

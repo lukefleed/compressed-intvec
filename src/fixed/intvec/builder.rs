@@ -3,7 +3,7 @@
 //! This module provides builders for creating a compressed fixed-width integer
 //! vector, [`FixedVec`].
 
-use super::{FixedVec, FixedVecError};
+use super::{BitWidth, FixedVec, FixedVecError};
 use dsi_bitstream::{
     impls::MemWordWriterVec,
     prelude::{BitWrite, BufBitWriter, Endianness},
@@ -22,7 +22,7 @@ pub type FixedVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>
 #[derive(Debug)]
 pub struct FixedVecBuilder<'a, E: Endianness, U> {
     input: &'a [U],
-    num_bits: Option<usize>,
+    bit_width: BitWidth,
     _endian: PhantomData<E>,
 }
 
@@ -36,18 +36,16 @@ where
     pub(super) fn new(input: &'a [U]) -> Self {
         Self {
             input,
-            num_bits: None,
+            bit_width: BitWidth::default(),
             _endian: PhantomData,
         }
     }
 
-    /// Sets the number of bits to use for encoding each integer.
+    /// Sets the strategy for determining the number of bits for encoding each integer.
     ///
-    /// If `Some(bits)`, the specified number of bits will be used.
-    /// If `None`, the builder will automatically determine the minimum number of
-    /// bits required to store the largest value in the input data.
-    pub fn num_bits(mut self, num_bits: Option<usize>) -> Self {
-        self.num_bits = num_bits;
+    /// See [`BitWidth`] for available strategies.
+    pub fn bit_width(mut self, bit_width: BitWidth) -> Self {
+        self.bit_width = bit_width;
         self
     }
 
@@ -56,15 +54,24 @@ where
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
-        let final_num_bits = self.num_bits.unwrap_or_else(|| {
-            // Determine max value from generic slice, then convert to u64.
-            let max_val: u64 = self.input.iter().max().copied().unwrap_or_default().into();
-            if max_val == 0 {
-                1
-            } else {
-                (u64::BITS - max_val.leading_zeros()) as usize
+        let final_num_bits = match self.bit_width {
+            BitWidth::Explicit(n) => n,
+            BitWidth::Minimal | BitWidth::ByteAligned => {
+                let max_val: u64 = self.input.iter().max().copied().unwrap_or_default().into();
+                let min_bits = if max_val == 0 {
+                    1
+                } else {
+                    (u64::BITS - max_val.leading_zeros()) as usize
+                };
+
+                if let BitWidth::ByteAligned = self.bit_width {
+                    // Round up to the nearest multiple of 8, capped at 64.
+                    ((min_bits + 7) / 8 * 8).min(64)
+                } else {
+                    min_bits
+                }
             }
-        });
+        };
 
         if final_num_bits > 64 {
             return Err(FixedVecError::InvalidParameters(
@@ -90,8 +97,6 @@ where
         }
 
         // Pre-allocate the exact number of u64 words needed, plus one for padding.
-        // The padding word prevents out-of-bounds reads when an element spans
-        // the last word boundary.
         let total_bits = self.input.len() * final_num_bits;
         let num_words = (total_bits + 63) / 64;
         let buffer = vec![0u64; num_words + 1];

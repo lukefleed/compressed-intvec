@@ -90,11 +90,11 @@ fn benchmark_random_access(c: &mut Criterion) {
         // Setup data and structures for this specific bit_width.
         let data = generate_random_vec(VECTOR_SIZE, 1 << bit_width.min(63));
         let le_fixed_vec = LEFixedVec::builder(&data)
-            .num_bits(Some(bit_width))
+            .bit_width(BitWidth::Explicit(bit_width))
             .build()
             .unwrap();
         let be_fixed_vec = BEFixedVec::builder(&data)
-            .num_bits(Some(bit_width))
+            .bit_width(BitWidth::Explicit(bit_width))
             .build()
             .unwrap();
         let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();

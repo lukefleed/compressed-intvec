@@ -2,7 +2,6 @@ use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
-use sux::prelude::{BitFieldSlice, BitFieldVec};
 
 /// Generates a vector with uniformly random values.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
@@ -106,15 +105,6 @@ fn benchmark_access_patterns(c: &mut Criterion) {
         .build()
         .expect("Failed to build IntVec");
 
-    // --- Setup sux::BitFieldVec for comparison ---
-    let mut sux_bfv = BitFieldVec::<u64>::new(
-        (u64::BITS - data.iter().max().unwrap_or(&0).leading_zeros()) as usize,
-        0,
-    );
-    for &val in &data {
-        sux_bfv.push(val);
-    }
-
     let patterns = [
         AccessPattern::Clustered,
         AccessPattern::Sorted,
@@ -151,16 +141,6 @@ fn benchmark_access_patterns(c: &mut Criterion) {
                 // SAFETY: Indices are generated within bounds.
                 let _ =
                     black_box(unsafe { intvec.par_get_many_unchecked(black_box(&access_indices)) });
-            })
-        });
-
-        // --- sux::BitFieldVec benchmarks ---
-        group.bench_function("sux::BitFieldVec/get_unchecked_loop", |b| {
-            b.iter(|| {
-                for &index in black_box(&access_indices) {
-                    // SAFETY: Indices are generated within bounds.
-                    black_box(unsafe { sux_bfv.get_unchecked(index) });
-                }
             })
         });
 

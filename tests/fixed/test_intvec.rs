@@ -1,6 +1,6 @@
 //! Integration tests for `FixedVec`.
 
-use compressed_intvec::prelude::*;
+use compressed_intvec::{fixed::intvec::BitWidth, prelude::*};
 use dsi_bitstream::prelude::{BE, LE};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -13,23 +13,23 @@ use common::helpers::generate_random_vec;
 use rayon::iter::ParallelIterator;
 
 macro_rules! test_configuration {
-    ($test_name:ident, $endianness:ty, $input:expr, $num_bits:expr) => {
+    ($test_name:ident, $endianness:ty, $input:expr, $bit_width:expr) => {
         #[test]
         fn $test_name() {
             let input = &$input;
-            let num_bits = $num_bits;
+            let bit_width = $bit_width;
 
             // Build the FixedVec
             let fixed_vec = FixedVec::<$endianness>::builder(input)
-                .num_bits(num_bits)
+                .bit_width(bit_width)
                 .build()
                 .unwrap();
 
             // Basic property checks
             assert_eq!(fixed_vec.len(), input.len());
             assert_eq!(fixed_vec.is_empty(), input.is_empty());
-            if num_bits.is_some() {
-                assert_eq!(fixed_vec.num_bits(), num_bits.unwrap());
+            if let BitWidth::Explicit(n) = bit_width {
+                assert_eq!(fixed_vec.num_bits(), n);
             }
 
             // Test full decompression
@@ -38,7 +38,7 @@ macro_rules! test_configuration {
 
             // Test PartialEq implementations
             assert_eq!(fixed_vec, fixed_vec.clone(), "PartialEq with self failed");
-            assert_eq!(&fixed_vec, input, "PartialEq with slice failed");
+            assert_eq!(fixed_vec, input, "PartialEq with slice failed");
 
             // Test as_limbs
             let cloned_limbs = fixed_vec.limbs();
@@ -49,7 +49,7 @@ macro_rules! test_configuration {
                 let mut different_input = input.clone();
                 different_input.swap(0, 1);
                 let different_vec = FixedVec::<$endianness>::builder(&different_input)
-                    .num_bits(num_bits)
+                    .bit_width(bit_width)
                     .build()
                     .unwrap();
                 assert_ne!(
@@ -128,29 +128,49 @@ macro_rules! test_configuration {
 // TEST SUITE
 
 // Empty Vector
-test_configuration!(test_empty_le, LE, generate_random_vec(0, 0), Some(8));
-test_configuration!(test_empty_be, BE, generate_random_vec(0, 0), None);
+test_configuration!(
+    test_empty_le,
+    LE,
+    generate_random_vec(0, 0),
+    BitWidth::Explicit(8)
+);
+test_configuration!(
+    test_empty_be,
+    BE,
+    generate_random_vec(0, 0),
+    BitWidth::Minimal
+);
 
 // Single Element Vector
-test_configuration!(test_single_element_le, LE, vec![42], Some(7));
-test_configuration!(test_single_element_auto_bits_be, BE, vec![1000], None);
+test_configuration!(test_single_element_le, LE, vec![42u64], BitWidth::Explicit(7));
+test_configuration!(
+    test_single_element_auto_bits_be,
+    BE,
+    vec![1000u64],
+    BitWidth::Minimal
+);
 
 // Zeros Vector
-test_configuration!(test_zeros_le, LE, vec![0; 1000], Some(1));
-test_configuration!(test_zeros_auto_bits_be, BE, vec![0; 1000], None);
+test_configuration!(test_zeros_le, LE, vec![0u64; 1000], BitWidth::Explicit(1));
+test_configuration!(
+    test_zeros_auto_bits_be,
+    BE,
+    vec![0u64; 1000],
+    BitWidth::Minimal
+);
 
 // Uniform Distributions
 test_configuration!(
     test_uniform_small_le,
     LE,
     generate_random_vec(1000, 100),
-    Some(7) // 100 requires 7 bits
+    BitWidth::Explicit(7) // 100 requires 7 bits
 );
 test_configuration!(
     test_uniform_large_auto_bits_be,
     BE,
     generate_random_vec(1000, 1_000_000),
-    None
+    BitWidth::Minimal
 );
 
 // Full 64-bit values
@@ -158,20 +178,22 @@ test_configuration!(
     test_full_64_bits_be,
     BE,
     vec![u64::MAX - 1, u64::MAX],
-    Some(64)
+    BitWidth::Explicit(64)
 );
 
 #[test]
 fn test_invalid_parameters() {
     // num_bits > 64
     let result = LEFixedVec::builder(&[1u64, 2, 3])
-        .num_bits(Some(65))
+        .bit_width(BitWidth::Explicit(65))
         .build();
     assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
 
     // Value too large for specified bits
     let input_large = vec![10u64, 20, 256]; // 256 requires 9 bits
-    let result_large = LEFixedVec::builder(&input_large).num_bits(Some(8)).build();
+    let result_large = LEFixedVec::builder(&input_large)
+        .bit_width(BitWidth::Explicit(8))
+        .build();
     assert!(matches!(
         result_large,
         Err(FixedVecError::ValueTooLarge { .. })
@@ -216,4 +238,34 @@ fn test_build_from_u32_slice() {
 
     let expected_u64: Vec<u64> = data_u32.iter().map(|&x| x as u64).collect();
     assert_eq!(fixed_vec, expected_u64.as_slice());
+}
+
+#[test]
+fn test_bit_width_byte_aligned() {
+    // 11 bits required -> rounds up to 16
+    let data1 = vec![1024u64, 2047]; // max needs 11 bits
+    let vec1 = LEFixedVec::builder(&data1)
+        .bit_width(BitWidth::ByteAligned)
+        .build()
+        .unwrap();
+    assert_eq!(vec1.num_bits(), 16);
+    assert_eq!(vec1, &data1[..]);
+
+    // 16 bits required -> stays 16
+    let data2 = vec![u16::MAX as u64];
+    let vec2 = LEFixedVec::builder(&data2)
+        .bit_width(BitWidth::ByteAligned)
+        .build()
+        .unwrap();
+    assert_eq!(vec2.num_bits(), 16);
+    assert_eq!(vec2, &data2[..]);
+
+    // 1 bit required -> rounds up to 8
+    let data3 = vec![0u64, 1];
+    let vec3 = LEFixedVec::builder(&data3)
+        .bit_width(BitWidth::ByteAligned)
+        .build()
+        .unwrap();
+    assert_eq!(vec3.num_bits(), 8);
+    assert_eq!(vec3, &data3[..]);
 }

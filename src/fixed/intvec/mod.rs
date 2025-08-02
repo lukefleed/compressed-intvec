@@ -36,6 +36,33 @@ use dsi_bitstream::prelude::{Endianness, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 use std::{any::TypeId, cmp::Ordering, error::Error, fmt, marker::PhantomData};
 
+/// Specifies the strategy for determining the number of bits per integer in a `FixedVec`.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum BitWidth {
+    /// Use the exact number of bits specified by the user.
+    ///
+    /// The user is responsible for ensuring all values fit within this bit width.
+    /// An error will be returned during build if a value is too large.
+    Explicit(usize),
+
+    /// Automatically determine the minimum number of bits required to store the
+    /// largest value in the input data.
+    ///
+    /// This prioritizes minimal memory usage but may result in bit widths that are
+    /// not aligned to byte boundaries (e.g., 9 bits), which can be slightly
+    /// less performant for access than byte-aligned widths.
+    Minimal,
+    
+    /// Automatically determine the minimum number of bits and round up to the
+    /// nearest multiple of 8 (i.e., a full byte).
+    ///
+    /// This may use slightly more memory than `Minimal` but can lead to faster
+    /// access patterns due to better memory alignment. For example, if the
+    /// minimum required bits is 11, this will use 16.
+    #[default]
+    ByteAligned,
+}
+
 /// Defines the set of errors that can occur in `FixedVec` operations.
 #[derive(Debug)]
 pub enum FixedVecError {
