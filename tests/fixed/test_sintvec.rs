@@ -1,6 +1,6 @@
 //! Integration tests for `SFixedVec`.
 
-use compressed_intvec::{fixed::intvec::BitWidth, prelude::*};
+use compressed_intvec::prelude::*;
 use dsi_bitstream::prelude::{BE, LE};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
@@ -45,7 +45,8 @@ macro_rules! test_sintvec_configuration {
                 s_fixed_vec.clone(),
                 "PartialEq with self failed"
             );
-            assert_eq!(s_fixed_vec, input, "PartialEq with slice failed");
+            // Correctly compare with a slice
+            assert_eq!(s_fixed_vec, &input[..], "PartialEq with slice failed");
 
             // Test as_limbs
             let cloned_limbs = s_fixed_vec.limbs();

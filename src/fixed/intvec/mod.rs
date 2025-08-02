@@ -32,7 +32,7 @@ pub use builder::{FixedVecBuilder, FixedVecFromIterBuilder};
 pub use iter::FixedVecIter;
 pub use slice::FixedVecSlice;
 
-use dsi_bitstream::prelude::{Endianness, BE, LE};
+use dsi_bitstream::{prelude::{Endianness, BE, LE}, traits::BitWrite};
 use mem_dbg::{MemDbg, MemSize};
 use std::{any::TypeId, cmp::Ordering, error::Error, fmt, marker::PhantomData};
 
@@ -118,6 +118,22 @@ pub struct FixedVec<E: Endianness> {
     pub(super) _endian: PhantomData<E>,
 }
 impl<E: Endianness> FixedVec<E> {
+
+    /// Creates a [`FixedVec`] directly from a slice of data.
+    ///
+    /// This is a convenient alias for `FixedVec::builder(slice).build()`.
+    /// The bit width will be automatically determined using the [`BitWidth::ByteAligned`] strategy.
+    /// To specify a different strategy, use the builder directly.
+    pub fn from_slice<U, T>(slice: &T) -> Result<Self, FixedVecError>
+    where
+        U: Into<u64> + Ord + Copy + Default,
+        T: AsRef<[U]> + ?Sized,
+        Self: Sized,
+        builder::FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
+    {
+        Self::builder(slice).build()
+    }
+
     /// Returns a builder for creating a [`FixedVec`] from a slice of data.
     ///
     /// The builder is generic over the input integer type `U` (e.g., `u8`, `u16`, `u32`),
@@ -397,20 +413,32 @@ impl<E: Endianness> PartialEq for FixedVec<E> {
 
 impl<E: Endianness> Eq for FixedVec<E> {}
 
-impl<E: Endianness, T: AsRef<[u64]> + ?Sized> PartialEq<T> for FixedVec<E> {
-    /// Checks for equality between a `FixedVec` and a slice-like type (e.g., `&[u64]`, `Vec<u64>`).
-    ///
-    /// The comparison first checks for equal length. If lengths match, it performs
-    /// an element-wise comparison between the `FixedVec`'s iterator and the
-    /// slice's iterator.
-    fn eq(&self, other: &T) -> bool {
-        let other_slice = other.as_ref();
-        if self.len() != other_slice.len() {
-            return false;
+macro_rules! impl_partial_eq_for_uint_slice {
+    ($($t:ty),*) => {$(
+        impl<E: Endianness> PartialEq<Vec<$t>> for FixedVec<E> {
+            fn eq(&self, other: &Vec<$t>) -> bool {
+                self.eq(&other[..])
+            }
         }
-        self.iter().eq(other_slice.iter().copied())
-    }
+
+        impl<E: Endianness> PartialEq<&[$t]> for FixedVec<E> {
+            fn eq(&self, other: &&[$t]) -> bool {
+                self.eq(*other)
+            }
+        }
+
+        impl<E: Endianness> PartialEq<[$t]> for FixedVec<E> {
+            fn eq(&self, other: &[$t]) -> bool {
+                if self.len() != other.len() {
+                    return false;
+                }
+                self.iter().eq(other.iter().map(|&x| x as u64))
+            }
+        }
+    )*};
 }
+
+impl_partial_eq_for_uint_slice!(u8, u16, u32, u64);
 
 impl<'a, E: Endianness> IntoIterator for &'a FixedVec<E> {
     type Item = u64;

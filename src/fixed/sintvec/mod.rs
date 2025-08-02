@@ -30,7 +30,7 @@ pub use iter::SFixedVecIter;
 pub use slice::SFixedVecSlice;
 
 use common_traits::SignedInt;
-use dsi_bitstream::prelude::{Endianness, ToInt, ToNat, BE, LE};
+use dsi_bitstream::prelude::{BitWrite, Endianness, ToInt, ToNat, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 use std::cmp::Ordering;
 
@@ -61,6 +61,23 @@ pub struct SFixedVec<E: Endianness> {
 }
 
 impl<E: Endianness> SFixedVec<E> {
+    /// Creates an `SFixedVec` directly from a slice of data.
+    ///
+    /// This is a convenient alias for `SFixedVec::builder(slice).build()`.
+    /// The bit width will be automatically determined using the `BitWidth::Minimal` strategy.
+    /// To specify a different strategy, use the builder directly.
+    pub fn from_slice<I, T>(slice: &T) -> Result<Self, FixedVecError>
+    where
+        I: ToNat + Copy + SignedInt,
+        <I as SignedInt>::UnsignedInt: Into<u64> + Ord + Copy + Default,
+        T: AsRef<[I]> + ?Sized,
+        Self: Sized,
+        crate::fixed::intvec::builder::FixedVecBitWriter<E>:
+            BitWrite<E, Error = core::convert::Infallible>,
+    {
+        Self::builder(slice).build()
+    }
+
     /// Returns a builder for creating an [`SFixedVec`] from a slice of signed integers.
     ///
     /// This method is generic and can accept slices of `i8`, `i16`, `i32`, and `i64`.
@@ -135,7 +152,6 @@ impl<E: Endianness> SFixedVec<E> {
     }
 
     /// Retrieves multiple signed integers at the specified indices.
-    #[inline(always)]
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<i64>, FixedVecError> {
         let unsigned_values = self.inner.get_many(indices)?;
         Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
@@ -147,7 +163,6 @@ impl<E: Endianness> SFixedVec<E> {
     ///
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
-    #[inline(always)]
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<i64> {
         self.inner
             .get_many_unchecked(indices)
@@ -236,20 +251,32 @@ impl<E: Endianness> PartialEq for SFixedVec<E> {
 
 impl<E: Endianness> Eq for SFixedVec<E> {}
 
-impl<E: Endianness, T: AsRef<[i64]> + ?Sized> PartialEq<T> for SFixedVec<E> {
-    /// Checks for equality between an `SFixedVec` and a slice-like type (e.g., `&[i64]`, `Vec<i64>`).
-    ///
-    /// The comparison first checks for equal length. If lengths match, it performs
-    /// an element-wise comparison between the `SFixedVec`'s iterator (which yields
-    /// `i64` values) and the slice's iterator.
-    fn eq(&self, other: &T) -> bool {
-        let other_slice = other.as_ref();
-        if self.len() != other_slice.len() {
-            return false;
+macro_rules! impl_partial_eq_for_sint_slice {
+    ($($t:ty),*) => {$(
+        impl<E: Endianness> PartialEq<Vec<$t>> for SFixedVec<E> {
+            fn eq(&self, other: &Vec<$t>) -> bool {
+                self.eq(&other[..])
+            }
         }
-        self.iter().eq(other_slice.iter().copied())
-    }
+
+        impl<E: Endianness> PartialEq<&[$t]> for SFixedVec<E> {
+            fn eq(&self, other: &&[$t]) -> bool {
+                self.eq(*other)
+            }
+        }
+
+        impl<E: Endianness> PartialEq<[$t]> for SFixedVec<E> {
+            fn eq(&self, other: &[$t]) -> bool {
+                if self.len() != other.len() {
+                    return false;
+                }
+                self.iter().eq(other.iter().map(|&x| x as i64))
+            }
+        }
+    )*};
 }
+
+impl_partial_eq_for_sint_slice!(i8, i16, i32, i64);
 
 impl<'a, E: Endianness> IntoIterator for &'a SFixedVec<E> {
     type Item = i64;
