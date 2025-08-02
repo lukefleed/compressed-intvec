@@ -152,6 +152,34 @@ impl<E: Endianness> SFixedVec<E> {
     }
 }
 
+// Implementations of traits from the standard library
+impl<E: Endianness> PartialEq for SFixedVec<E> {
+    /// Checks for equality between two `SFixedVec` instances.
+    ///
+    /// This comparison is delegated to the inner `FixedVec`, which provides an
+    /// efficient check of metadata and on-the-fly element comparison.
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl<E: Endianness> Eq for SFixedVec<E> {}
+
+impl<E: Endianness, T: AsRef<[i64]>> PartialEq<T> for SFixedVec<E> {
+    /// Checks for equality between an `SFixedVec` and a slice-like type (e.g., `&[i64]`, `Vec<i64>`).
+    ///
+    /// The comparison first checks for equal length. If lengths match, it performs
+    /// an element-wise comparison between the `SFixedVec`'s iterator (which yields
+    /// `i64` values) and the slice's iterator.
+    fn eq(&self, other: &T) -> bool {
+        let other_slice = other.as_ref();
+        if self.len() != other_slice.len() {
+            return false;
+        }
+        self.iter().eq(other_slice.iter().copied())
+    }
+}
+
 /// A type alias for an [`SFixedVec`] with Big-Endian ([`BE`]) bitstream encoding.
 pub type BESFixedVec = SFixedVec<BE>;
 

@@ -36,6 +36,24 @@ macro_rules! test_configuration {
             assert_eq!(&fixed_vec.clone().into_vec(), input, "into_vec failed");
             assert_eq!(&fixed_vec.iter().collect::<Vec<_>>(), input, "iter failed");
 
+            // Test PartialEq implementations
+            assert_eq!(fixed_vec, fixed_vec.clone(), "PartialEq with self failed");
+            assert_eq!(&fixed_vec, input, "PartialEq with slice failed");
+
+            // Test a non-equal case
+            if input.len() > 1 && input[0] != input[1] {
+                let mut different_input = input.clone();
+                different_input.swap(0, 1);
+                let different_vec = FixedVec::<$endianness>::builder(&different_input)
+                    .num_bits(num_bits)
+                    .build()
+                    .unwrap();
+                assert_ne!(
+                    fixed_vec, different_vec,
+                    "PartialEq with different vec should fail"
+                );
+            }
+
             if !input.is_empty() {
                 let mut rng = StdRng::seed_from_u64(42);
                 let num_indices = 100.min(input.len());

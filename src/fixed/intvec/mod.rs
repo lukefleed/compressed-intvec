@@ -224,6 +224,41 @@ impl<E: Endianness> FixedVec<E> {
     }
 }
 
+// Implementations of traits from the standard library
+impl<E: Endianness> PartialEq for FixedVec<E> {
+    /// Checks for equality between two `FixedVec` instances.
+    ///
+    /// This method provides a highly efficient comparison. It first checks if the
+    /// lengths and bit widths are identical. If they are, it proceeds with an
+    /// element-wise comparison using iterators, which decompresses values
+    /// on the fly and short-circuits at the first mismatch.
+    fn eq(&self, other: &Self) -> bool {
+        if self.len != other.len || self.num_bits != other.num_bits {
+            return false;
+        }
+        // Use iterators for an efficient, element-by-element comparison
+        // that avoids full decompression into a new Vec.
+        self.iter().eq(other.iter())
+    }
+}
+
+impl<E: Endianness> Eq for FixedVec<E> {}
+
+impl<E: Endianness, T: AsRef<[u64]>> PartialEq<T> for FixedVec<E> {
+    /// Checks for equality between a `FixedVec` and a slice-like type (e.g., `&[u64]`, `Vec<u64>`).
+    ///
+    /// The comparison first checks for equal length. If lengths match, it performs
+    /// an element-wise comparison between the `FixedVec`'s iterator and the
+    /// slice's iterator.
+    fn eq(&self, other: &T) -> bool {
+        let other_slice = other.as_ref();
+        if self.len() != other_slice.len() {
+            return false;
+        }
+        self.iter().eq(other_slice.iter().copied())
+    }
+}
+
 /// A type alias for a [`FixedVec`] with Big-Endian ([`BE`]) bitstream encoding.
 pub type BEFixedVec = FixedVec<BE>;
 
