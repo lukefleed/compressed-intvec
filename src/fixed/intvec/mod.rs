@@ -166,7 +166,7 @@ impl<E: Endianness> FixedVec<E> {
 
 impl<E: Endianness> FixedVec<E> {
     /// Retrieves the element at the specified index. Access is O(1).
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, index: usize) -> Option<u64> {
         if index >= self.len {
             return None;
@@ -193,6 +193,17 @@ impl<E: Endianness> FixedVec<E> {
             index,
             self.len
         );
+        // Fast path for 64-bit values. This branch is perfectly predicted
+        // by the CPU as `num_bits` is constant for a given FixedVec instance.
+        if self.num_bits == 64 {
+            let val = *self.data.get_unchecked(index);
+            // For Big-Endian, the value was stored with bytes swapped,
+            // so we must swap them back to get the correct native representation.
+            if TypeId::of::<E>() == TypeId::of::<BE>() {
+                return val.to_be();
+            }
+            return val;
+        }
 
         let bit_pos = index as u64 * self.num_bits as u64;
         let word_index = (bit_pos / 64) as usize;
@@ -237,6 +248,7 @@ impl<E: Endianness> FixedVec<E> {
     }
 
     /// Retrieves multiple elements at the specified indices.
+    #[inline(always)]
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<u64>, FixedVecError> {
         for &index in indices {
             if index >= self.len {
@@ -253,6 +265,7 @@ impl<E: Endianness> FixedVec<E> {
     ///
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
+    #[inline(always)]
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<u64> {
         let mut results = Vec::with_capacity(indices.len());
         for &index in indices {
@@ -396,6 +409,26 @@ impl<E: Endianness, T: AsRef<[u64]> + ?Sized> PartialEq<T> for FixedVec<E> {
             return false;
         }
         self.iter().eq(other_slice.iter().copied())
+    }
+}
+
+impl<'a, E: Endianness> IntoIterator for &'a FixedVec<E> {
+    type Item = u64;
+    type IntoIter = FixedVecIter<'a, E>;
+
+    /// Creates an iterator over the values of the `FixedVec`.
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<E: Endianness> IntoIterator for FixedVec<E> {
+    type Item = u64;
+    type IntoIter = std::vec::IntoIter<u64>;
+
+    /// Consumes the `FixedVec` and creates an iterator over its values.
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
     }
 }
 

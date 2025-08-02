@@ -160,3 +160,13 @@ impl<E: Endianness, T: AsRef<[i64]>> PartialEq<T> for SFixedVecSlice<'_, E> {
         self.iter().eq(other_slice.iter().copied())
     }
 }
+
+impl<'a, E: Endianness> IntoIterator for SFixedVecSlice<'a, E> {
+    type Item = i64;
+    type IntoIter = SFixedVecSliceIter<'a, E>;
+
+    /// Creates an iterator over the values of the slice.
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}

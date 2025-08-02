@@ -196,3 +196,13 @@ impl<E: Endianness, T: AsRef<[u64]>> PartialEq<T> for FixedVecSlice<'_, E> {
         self.iter().eq(other_slice.iter().copied())
     }
 }
+
+impl<'a, E: Endianness> IntoIterator for FixedVecSlice<'a, E> {
+    type Item = u64;
+    type IntoIter = FixedVecSliceIter<'a, E>;
+
+    /// Creates an iterator over the values of the slice.
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}

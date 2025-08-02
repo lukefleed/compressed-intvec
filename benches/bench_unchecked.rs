@@ -50,7 +50,7 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 /// The main benchmark function.
 fn benchmark_random_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 10_000_000;
-    const NUM_ACCESSES: usize = 30_000_000;
+    const NUM_ACCESSES: usize = 1_000_000;
 
     // A list of bit widths to test, designed to highlight the
     // performance impact of power-of-two optimizations.

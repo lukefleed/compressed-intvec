@@ -1,7 +1,7 @@
 //! Integration tests for `FixedVecSlice` and `SFixedVecSlice`.
 
 use crate::common::helpers::{generate_random_signed_vec, generate_random_vec};
-use compressed_intvec::{fixed::intvec::BitWidth, prelude::*};
+use compressed_intvec::prelude::*;
 
 #[test]
 fn test_fixedvec_slice_creation_and_access() {
@@ -118,4 +118,37 @@ fn test_slice_iterators() {
     let s_collected: Vec<i64> = s_slice.iter().collect();
     assert_eq!(s_collected.len(), 50);
     assert_eq!(s_slice.get(0), s_fixed_vec.get(20));
+}
+
+#[test]
+fn test_into_iterator_implementations() {
+    // Test for FixedVec by reference
+    let data_u64 = generate_random_vec(50, 100);
+    let fixed_vec_u64 = LEFixedVec::builder(&data_u64).build().unwrap();
+    let mut collected_u64 = Vec::new();
+    for value in &fixed_vec_u64 {
+        collected_u64.push(value);
+    }
+    assert_eq!(collected_u64, data_u64);
+
+    // Test for FixedVec by value
+    let collected_u64_owned: Vec<u64> = fixed_vec_u64.into_iter().collect();
+    assert_eq!(collected_u64_owned, data_u64);
+
+    // Test for SFixedVec by reference
+    let data_i64 = generate_random_signed_vec(50, 100);
+    let s_fixed_vec_i64 = LESFixedVec::builder(&data_i64).build().unwrap();
+    let mut collected_i64 = Vec::new();
+    for value in &s_fixed_vec_i64 {
+        collected_i64.push(value);
+    }
+    assert_eq!(collected_i64, data_i64);
+
+    // Test for FixedVecSlice
+    let slice = s_fixed_vec_i64.slice(10, 20).unwrap();
+    let mut collected_slice = Vec::new();
+    for value in slice {
+        collected_slice.push(value);
+    }
+    assert_eq!(collected_slice, &data_i64[10..30]);
 }

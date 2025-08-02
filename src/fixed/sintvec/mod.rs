@@ -135,6 +135,7 @@ impl<E: Endianness> SFixedVec<E> {
     }
 
     /// Retrieves multiple signed integers at the specified indices.
+    #[inline(always)]
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<i64>, FixedVecError> {
         let unsigned_values = self.inner.get_many(indices)?;
         Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
@@ -146,6 +147,7 @@ impl<E: Endianness> SFixedVec<E> {
     ///
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
+    #[inline(always)]
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<i64> {
         self.inner
             .get_many_unchecked(indices)
@@ -246,6 +248,26 @@ impl<E: Endianness, T: AsRef<[i64]> + ?Sized> PartialEq<T> for SFixedVec<E> {
             return false;
         }
         self.iter().eq(other_slice.iter().copied())
+    }
+}
+
+impl<'a, E: Endianness> IntoIterator for &'a SFixedVec<E> {
+    type Item = i64;
+    type IntoIter = SFixedVecIter<'a, E>;
+
+    /// Creates an iterator over the values of the `SFixedVec`.
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<E: Endianness> IntoIterator for SFixedVec<E> {
+    type Item = i64;
+    type IntoIter = std::vec::IntoIter<i64>;
+
+    /// Consumes the `SFixedVec` and creates an iterator over its values.
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_vec().into_iter()
     }
 }
 
