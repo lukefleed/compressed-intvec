@@ -29,7 +29,8 @@ pub use builder::{SFixedVecBuilder, SFixedVecFromIterBuilder};
 pub use iter::SFixedVecIter;
 pub use slice::SFixedVecSlice;
 
-use dsi_bitstream::prelude::{Endianness, ToInt, BE, LE};
+use common_traits::SignedInt;
+use dsi_bitstream::prelude::{Endianness, ToInt, ToNat, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 use std::cmp::Ordering;
 
@@ -60,11 +61,15 @@ pub struct SFixedVec<E: Endianness> {
 }
 
 impl<E: Endianness> SFixedVec<E> {
-    /// Returns a builder for creating an [`SFixedVec`] from a slice of `i64`.
+    /// Returns a builder for creating an [`SFixedVec`] from a slice of signed integers.
     ///
-    /// This method is generic over `AsRef<[i64]>`, so it can accept `&[i64]`,
-    /// `Vec<i64>`, etc. See [`SFixedVecBuilder`] for more details.
-    pub fn builder<T: AsRef<[i64]> + ?Sized>(input: &T) -> SFixedVecBuilder<E> {
+    /// This method is generic and can accept slices of `i8`, `i16`, `i32`, and `i64`.
+    pub fn builder<I, T>(input: &T) -> SFixedVecBuilder<E, I>
+    where
+        I: ToNat + Copy + SignedInt,
+        <I as SignedInt>::UnsignedInt: Into<u64> + Ord + Copy + Default,
+        T: AsRef<[I]> + ?Sized,
+    {
         SFixedVecBuilder::new(input.as_ref())
     }
 
@@ -229,7 +234,7 @@ impl<E: Endianness> PartialEq for SFixedVec<E> {
 
 impl<E: Endianness> Eq for SFixedVec<E> {}
 
-impl<E: Endianness, T: AsRef<[i64]>> PartialEq<T> for SFixedVec<E> {
+impl<E: Endianness, T: AsRef<[i64]> + ?Sized> PartialEq<T> for SFixedVec<E> {
     /// Checks for equality between an `SFixedVec` and a slice-like type (e.g., `&[i64]`, `Vec<i64>`).
     ///
     /// The comparison first checks for equal length. If lengths match, it performs

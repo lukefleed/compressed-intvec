@@ -300,6 +300,7 @@ name = "compressed-intvec"
 version = "0.4.0"
 dependencies = [
  "bincode",
+ "common_traits 0.12.0",
  "criterion",
  "csv",
  "dsi-bitstream",

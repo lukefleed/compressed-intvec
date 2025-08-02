@@ -92,7 +92,14 @@ pub struct FixedVec<E: Endianness> {
 }
 impl<E: Endianness> FixedVec<E> {
     /// Returns a builder for creating a [`FixedVec`] from a slice of data.
-    pub fn builder<T: AsRef<[u64]> + ?Sized>(input: &T) -> FixedVecBuilder<E> {
+    ///
+    /// The builder is generic over the input integer type `U` (e.g., `u8`, `u16`, `u32`),
+    /// allowing for direct construction without an intermediate conversion to `u64`.
+    pub fn builder<U, T>(input: &T) -> FixedVecBuilder<E, U>
+    where
+        U: Into<u64> + Ord + Copy + Default,
+        T: AsRef<[U]> + ?Sized,
+    {
         FixedVecBuilder::new(input.as_ref())
     }
 
@@ -350,7 +357,7 @@ impl<E: Endianness> PartialEq for FixedVec<E> {
 
 impl<E: Endianness> Eq for FixedVec<E> {}
 
-impl<E: Endianness, T: AsRef<[u64]>> PartialEq<T> for FixedVec<E> {
+impl<E: Endianness, T: AsRef<[u64]> + ?Sized> PartialEq<T> for FixedVec<E> {
     /// Checks for equality between a `FixedVec` and a slice-like type (e.g., `&[u64]`, `Vec<u64>`).
     ///
     /// The comparison first checks for equal length. If lengths match, it performs

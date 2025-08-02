@@ -13,22 +13,27 @@ use std::marker::PhantomData;
 /// Type alias for the writer used internally by `FixedVec`.
 pub type FixedVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
 
-/// A builder for creating a [`FixedVec`] from a slice of `u64`.
+/// A builder for creating a [`FixedVec`] from a slice of integers.
 ///
-/// The builder is highly efficient, as it pre-allocates the exact amount of
+/// The builder is generic over the input integer type `U` (e.g., `u8`, `u16`,
+/// `u32`, `u64`), allowing for direct construction without intermediate allocations.
+/// It is highly efficient, as it pre-allocates the exact amount of
 /// memory required for the final compressed vector, avoiding reallocations.
 #[derive(Debug)]
-pub struct FixedVecBuilder<'a, E: Endianness> {
-    input: &'a [u64],
+pub struct FixedVecBuilder<'a, E: Endianness, U> {
+    input: &'a [U],
     num_bits: Option<usize>,
     _endian: PhantomData<E>,
 }
 
-impl<'a, E: Endianness> FixedVecBuilder<'a, E> {
-    /// Creates a new builder from a slice of `u64`.
+impl<'a, E: Endianness, U> FixedVecBuilder<'a, E, U>
+where
+    U: Into<u64> + Ord + Copy + Default,
+{
+    /// Creates a new builder from a slice of integers.
     ///
     /// This is `pub(super)` and is called by [`FixedVec::builder`].
-    pub(super) fn new(input: &'a [u64]) -> Self {
+    pub(super) fn new(input: &'a [U]) -> Self {
         Self {
             input,
             num_bits: None,
@@ -52,7 +57,8 @@ impl<'a, E: Endianness> FixedVecBuilder<'a, E> {
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
         let final_num_bits = self.num_bits.unwrap_or_else(|| {
-            let max_val = self.input.iter().max().copied().unwrap_or(0);
+            // Determine max value from generic slice, then convert to u64.
+            let max_val: u64 = self.input.iter().max().copied().unwrap_or_default().into();
             if max_val == 0 {
                 1
             } else {
@@ -97,7 +103,8 @@ impl<'a, E: Endianness> FixedVecBuilder<'a, E> {
             u64::MAX
         };
 
-        for (i, &value) in self.input.iter().enumerate() {
+        for (i, &value_u) in self.input.iter().enumerate() {
+            let value: u64 = value_u.into();
             if final_num_bits < 64 && value >= limit {
                 return Err(FixedVecError::ValueTooLarge {
                     value,

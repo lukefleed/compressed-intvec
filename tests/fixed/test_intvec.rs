@@ -164,11 +164,13 @@ test_configuration!(
 #[test]
 fn test_invalid_parameters() {
     // num_bits > 64
-    let result = LEFixedVec::builder(&[1, 2, 3]).num_bits(Some(65)).build();
+    let result = LEFixedVec::builder(&[1u64, 2, 3])
+        .num_bits(Some(65))
+        .build();
     assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
 
     // Value too large for specified bits
-    let input_large = vec![10, 20, 256]; // 256 requires 9 bits
+    let input_large = vec![10u64, 20, 256]; // 256 requires 9 bits
     let result_large = LEFixedVec::builder(&input_large).num_bits(Some(8)).build();
     assert!(matches!(
         result_large,
@@ -178,7 +180,7 @@ fn test_invalid_parameters() {
 
 #[test]
 fn test_out_of_bounds() {
-    let input = vec![10, 20, 30];
+    let input = vec![10u64, 20, 30];
     let fixed_vec = LEFixedVec::builder(&input).build().unwrap();
     assert!(matches!(
         fixed_vec.get_many(&[0, 1, 3]),
@@ -202,4 +204,16 @@ fn test_from_iter_builder() {
     let data_too_large = vec![10, 20, 256];
     let result = LEFixedVec::from_iter_builder(data_too_large, 8).build();
     assert!(matches!(result, Err(FixedVecError::ValueTooLarge { .. })));
+}
+
+#[test]
+fn test_build_from_u32_slice() {
+    let data_u32: Vec<u32> = (0..1000).map(|x| x * 2).collect();
+    let fixed_vec = LEFixedVec::builder(&data_u32).build().unwrap();
+
+    assert_eq!(fixed_vec.len(), data_u32.len());
+    assert_eq!(fixed_vec.get(500), Some(1000));
+
+    let expected_u64: Vec<u64> = data_u32.iter().map(|&x| x as u64).collect();
+    assert_eq!(fixed_vec, expected_u64.as_slice());
 }

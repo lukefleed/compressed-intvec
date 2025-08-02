@@ -10,6 +10,7 @@ use crate::fixed::{
     intvec::{builder::FixedVecBitWriter, FixedVec, FixedVecError},
     sintvec::SFixedVec,
 };
+use common_traits::SignedInt;
 
 /// A builder for creating a [`SFixedVec`] from a slice of `i64`.
 ///
@@ -20,15 +21,19 @@ use crate::fixed::{
 /// Like `FixedVecBuilder`, it can automatically determine the optimal number of
 /// bits if not specified.
 #[derive(Debug)]
-pub struct SFixedVecBuilder<'a, E: Endianness> {
-    input: &'a [i64],
+pub struct SFixedVecBuilder<'a, E: Endianness, I> {
+    input: &'a [I],
     num_bits: Option<usize>,
     _endian: PhantomData<E>,
 }
 
-impl<'a, E: Endianness> SFixedVecBuilder<'a, E> {
-    /// Creates a new builder from a slice of `i64`.
-    pub(super) fn new(input: &'a [i64]) -> Self {
+impl<'a, E: Endianness, I> SFixedVecBuilder<'a, E, I>
+where
+    I: ToNat + Copy + SignedInt,
+    <I as SignedInt>::UnsignedInt: Into<u64> + Ord + Copy + Default,
+{
+    /// Creates a new builder from a slice of signed integers.
+    pub(super) fn new(input: &'a [I]) -> Self {
         Self {
             input,
             num_bits: None,
@@ -51,10 +56,9 @@ impl<'a, E: Endianness> SFixedVecBuilder<'a, E> {
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
-        // Transform the signed integers to unsigned integers using ZigZag encoding.
-        // We need to materialize this into a Vec to allow the underlying
-        // builder to determine the optimal number of bits by finding the max value.
-        let unsigned_data: Vec<u64> = self.input.iter().map(|&x| x.to_nat()).collect();
+        // Transform the signed integers to unsigned integers using ZigZag encoding,
+        // and convert them to u64 for the underlying builder.
+        let unsigned_data: Vec<u64> = self.input.iter().map(|&x| x.to_nat().into()).collect();
 
         // Delegate the actual construction to the FixedVec builder.
         let inner_fixed_vec = FixedVec::<E>::builder(&unsigned_data)

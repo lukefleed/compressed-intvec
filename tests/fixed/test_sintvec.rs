@@ -45,7 +45,7 @@ macro_rules! test_sintvec_configuration {
                 s_fixed_vec.clone(),
                 "PartialEq with self failed"
             );
-            assert_eq!(&s_fixed_vec, input, "PartialEq with slice failed");
+            assert_eq!(s_fixed_vec, input, "PartialEq with slice failed");
 
             // Test as_limbs
             let cloned_limbs = s_fixed_vec.limbs();
@@ -144,12 +144,12 @@ test_sintvec_configuration!(
 );
 
 // Single Element Vector
-test_sintvec_configuration!(test_single_element_le, LE, vec![-42], Some(7)); // -42 -> 83, needs 7 bits
-test_sintvec_configuration!(test_single_element_auto_bits_be, BE, vec![-500], None); // -500 -> 999, needs 10 bits
+test_sintvec_configuration!(test_single_element_le, LE, vec![-42i64], Some(7)); // -42 -> 83, needs 7 bits
+test_sintvec_configuration!(test_single_element_auto_bits_be, BE, vec![-500i64], None); // -500 -> 999, needs 10 bits
 
 // Zeros Vector
-test_sintvec_configuration!(test_zeros_le, LE, vec![0; 1000], Some(1));
-test_sintvec_configuration!(test_zeros_auto_bits_be, BE, vec![0; 1000], None);
+test_sintvec_configuration!(test_zeros_le, LE, vec![0i64; 1000], Some(1));
+test_sintvec_configuration!(test_zeros_auto_bits_be, BE, vec![0i64; 1000], None);
 
 // Mixed positive and negative values
 test_sintvec_configuration!(
@@ -168,16 +168,29 @@ test_sintvec_configuration!(
 #[test]
 fn test_invalid_parameters() {
     // num_bits > 64
-    let result = LESFixedVec::builder(&[-1, 2, -3])
+    let result = LESFixedVec::builder(&[-1i64, 2, -3])
         .num_bits(Some(65))
         .build();
     assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
 
     // Value (after zigzag) too large for specified bits
-    let input_large = vec![-10, 20, 128]; // zigzag(128) = 256, requires 9 bits
+    let input_large = vec![-10i64, 20, 128]; // zigzag(128) = 256, requires 9 bits
     let result_large = LESFixedVec::builder(&input_large).num_bits(Some(8)).build();
     assert!(matches!(
         result_large,
         Err(FixedVecError::ValueTooLarge { .. })
     ));
+}
+
+#[test]
+fn test_build_from_i32_slice() {
+    let data_i32: Vec<i32> = (-500..500).collect();
+    let s_fixed_vec = LESFixedVec::builder(&data_i32).build().unwrap();
+
+    assert_eq!(s_fixed_vec.len(), data_i32.len());
+    assert_eq!(s_fixed_vec.get(0), Some(-500));
+    assert_eq!(s_fixed_vec.get(999), Some(499));
+
+    let expected_i64: Vec<i64> = data_i32.iter().map(|&x| x as i64).collect();
+    assert_eq!(s_fixed_vec, expected_i64.as_slice());
 }
