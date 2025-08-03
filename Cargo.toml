@@ -67,7 +67,6 @@ harness = false
 [[bench]]
 name = "bench_simd"
 harness = false
-required-features = ["simd"]
 
 [profile.bench]
 lto = true

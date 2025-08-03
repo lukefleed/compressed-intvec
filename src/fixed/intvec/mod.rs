@@ -25,9 +25,6 @@ pub mod iter;
 pub mod parallel;
 pub mod slice;
 
-#[cfg(feature = "simd")]
-mod simd;
-
 #[cfg(feature = "serde")]
 mod serde;
 
@@ -373,103 +370,12 @@ impl<E: Endianness, B: AsRef<[u64]>> FixedVec<E, B> {
             }
         }
 
-        // This block is compiled if the "simd" feature is NOT enabled.
-        // It provides the basic, correct, and portable scalar implementation.
-        #[cfg(not(feature = "simd"))]
-        {
-            let mut results = Vec::with_capacity(indices.len());
-            for &index in indices {
-                // SAFETY: The caller guarantees that the index is in bounds.
-                results.push(self.get_unchecked(index));
-            }
-            results
+        let mut results = Vec::with_capacity(indices.len());
+        for &index in indices {
+            // SAFETY: The caller guarantees that the index is in bounds.
+            results.push(self.get_unchecked(index));
         }
-
-        // This block is compiled ONLY if the "simd" feature is enabled.
-        #[cfg(feature = "simd")]
-        {
-            match self.num_bits {
-                // For these byte-aligned bit-widths, we can use a SIMD-accelerated path.
-                8 | 16 | 32 | 64 => {
-                    if indices.is_empty() {
-                        return vec![];
-                    }
-
-                    let mut results = vec![0; indices.len()];
-
-                    // Pair each index with its original position to restore order after sorting.
-                    let mut indexed_indices: Vec<(usize, usize)> = indices
-                        .iter()
-                        .enumerate()
-                        .map(|(original_pos, &idx)| (idx, original_pos))
-                        .collect();
-
-                    // Sort by the access index to create a sequential access pattern.
-                    // If the `parallel` feature is enabled, use a parallel sort for large inputs.
-                    #[cfg(feature = "parallel")]
-                    {
-                        use rayon::prelude::ParallelSliceMut;
-                        indexed_indices.par_sort_unstable_by_key(|&(idx, _)| idx);
-                    }
-                    #[cfg(not(feature = "parallel"))]
-                    {
-                        indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
-                    }
-
-                    let mut i = 0;
-                    while i < indexed_indices.len() {
-                        // Find a contiguous run of indices.
-                        let run_start_index = indexed_indices[i].0;
-                        let mut j = i + 1;
-                        while j < indexed_indices.len()
-                            && indexed_indices[j].0 == indexed_indices[j - 1].0 + 1
-                        {
-                            j += 1;
-                        }
-
-                        let run_len = j - i;
-                        if run_len > 4 {
-                            // Use SIMD only for reasonably long runs.
-                            // This slice contains the (index, original_pos) pairs for the run.
-                            let run_slice = &indexed_indices[i..j];
-                            // We need a temporary buffer to hold the gathered SIMD results.
-                            let mut temp_run_results = vec![0; run_len];
-
-                            // Call the high-performance SIMD gather function.
-                            // SAFETY: We have sorted the indices and verified the run is contiguous.
-                            // The bounds of each index were checked at the start of the function.
-                            simd::gather_simd(self, run_start_index, &mut temp_run_results);
-
-                            // Scatter the results from the temp buffer back to the final
-                            // results vector in their original order.
-                            for (k, &(_, original_pos)) in run_slice.iter().enumerate() {
-                                results[original_pos] = temp_run_results[k];
-                            }
-                        } else {
-                            // For short runs, a scalar loop is often faster.
-                            for k in i..j {
-                                let (idx, original_pos) = indexed_indices[k];
-                                results[original_pos] = self.get_unchecked(idx);
-                            }
-                        }
-
-                        // Move to the start of the next potential run.
-                        i = j;
-                    }
-
-                    results
-                }
-                // For non-byte-aligned bit-widths, fall back to the simple scalar loop.
-                // The compiler optimizes this match away, creating a zero-cost abstraction.
-                _ => {
-                    let mut results = Vec::with_capacity(indices.len());
-                    for &index in indices {
-                        results.push(self.get_unchecked(index));
-                    }
-                    results
-                }
-            }
-        }
+        results
     }
 
     /// Creates a zero-copy slice of this vector.

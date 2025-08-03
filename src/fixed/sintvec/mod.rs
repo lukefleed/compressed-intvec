@@ -163,7 +163,11 @@ impl<E: Endianness, B: AsRef<[u64]>> SFixedVec<E, B> {
         // The underlying get_many checks for out-of-bounds indices.
         let unsigned_values = self.inner.get_many(indices)?;
         // SAFETY: The bounds have been checked by the inner call.
-        Ok(unsafe { self.decode_zigzag(unsigned_values) })
+        Ok(
+            // Convert the unsigned values to signed integers using the ZigZag transformation.
+            // This is fast and can be SIMD-accelerated if the `simd` feature is enabled.
+            unsigned_values.into_iter().map(ToInt::to_int).collect(),
+        )
     }
 
     /// Retrieves multiple signed integers at the specified indices without bounds checking.
@@ -181,62 +185,7 @@ impl<E: Endianness, B: AsRef<[u64]>> SFixedVec<E, B> {
         let unsigned_values = self.inner.get_many_unchecked(indices);
         // Then, apply the inverse ZigZag transformation. This part is also
         // SIMD-accelerated if the `simd` feature is enabled.
-        self.decode_zigzag(unsigned_values)
-    }
-
-    /// Helper function to decode a Vec of ZigZag-encoded u64s into a Vec of i64s.
-    /// This function is accelerated by SIMD when the `simd` feature is enabled.
-    ///
-    /// # Safety
-    /// This function is safe to call as it operates on an owned Vec.
-    /// The `unsafe` keyword is used to satisfy the call from `get_many_unchecked`,
-    /// but the implementation itself is safe.
-    unsafe fn decode_zigzag(&self, unsigned_values: Vec<u64>) -> Vec<i64> {
-        #[cfg(not(feature = "simd"))]
-        {
-            unsigned_values.into_iter().map(ToInt::to_int).collect()
-        }
-
-        #[cfg(feature = "simd")]
-        {
-            use core::simd::Simd;
-
-            const LANES: usize = 8;
-            let len = unsigned_values.len();
-            let mut result = Vec::<i64>::with_capacity(len);
-
-            let (prefix, middle, suffix) = unsigned_values.as_simd::<LANES>();
-
-            // Process prefix elements individually
-            for &val in prefix {
-                result.push(val.to_int());
-            }
-
-            // Process middle chunks with SIMD
-            for chunk in middle {
-                let val_u64: Simd<u64, LANES> = *chunk;
-                let ones = Simd::splat(1);
-
-                let shifted: Simd<u64, LANES> = val_u64 >> Simd::splat(1);
-                let sign_mask: Simd<u64, LANES> = val_u64 & ones;
-
-                // Apply zigzag decoding: result = (val >> 1) ^ (-(val & 1))
-                let negated_sign = -SimdUint::cast::<i64>(sign_mask);
-                let result_i64 = SimdUint::cast::<i64>(shifted) ^ negated_sign;
-
-                // Extract the decoded i64 values and push them to result
-                for i in 0..LANES {
-                    result.push(result_i64[i]);
-                }
-            }
-
-            // Process suffix elements individually
-            for &val in suffix {
-                result.push(val.to_int());
-            }
-
-            result
-        }
+        unsigned_values.into_iter().map(ToInt::to_int).collect()
     }
 
     /// Creates a zero-copy slice of this vector.
