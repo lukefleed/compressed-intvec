@@ -8,9 +8,8 @@
     -   **Rationale**: Enables zero-copy views over existing data buffers (`&[u64]`, memory-mapped files)
 
 - [ ] **Add SIMD-based Access Methods**
-    -   **Action**: Introduce methods for reading multiple elements into a SIMD vector (e.g., `get_simd<const LANES: usize>(&self, index: usize) -> Simd<u64, LANES>`).
+    -   **Action**: Introduce methods for reading multiple elements into a SIMD vector
     -   **Target**: Primarily for `num_bits` values that are byte-aligned (8, 16, 32, 64) where implementation is straightforward.
-    -   **Rationale**: Provides a significant performance increase for workloads involving vectorized computations or block-based data processing.
 
 
 - [ ] **Introduce a Mutable `MutFixedVec` Variant**

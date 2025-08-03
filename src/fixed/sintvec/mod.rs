@@ -21,9 +21,6 @@ pub mod iter;
 pub mod parallel;
 pub mod slice;
 
-#[cfg(feature = "simd")]
-use std::simd::num::SimdUint;
-
 #[cfg(feature = "serde")]
 mod serde;
 
