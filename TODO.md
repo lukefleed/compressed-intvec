@@ -1,4 +1,4 @@
-# FixedVec Development Roadmap
+# Fixed Length Vector
 
 - [x] **Implement Generic Backend Support**
     -   **Action**: Refactor `FixedVec<E>` to `FixedVec<E, B: AsRef<[u64]> = Vec<u64>>`.
@@ -24,3 +24,17 @@
     -   **Action**: Evaluate and add safe abstractions for low-level performance tuning.
     -   **Example**: `try_get_unaligned`, which would check if an unaligned read is possible and safe for the current configuration before executing it.
     -   **Rationale**: Provides access to advanced performance features without exposing raw pointers or requiring `unsafe` blocks from the user.
+
+# Variable Length Vector
+
+
+- [ ] **Implement Generic Backend Support**
+    -   **Action**: Refactor `IntVec<E>` to `IntVec<E, B: AsRef<[u64]>>`.
+    -   **API Changes**:
+        -   Add a public, safe constructor `from_parts` that accepts a data buffer and a samples buffer.
+        -   Define a clear memory layout for `bits` and `samples` to enable true zero-copy views from a single memory region.
+
+- [ ] **Implement Slicing**
+    -   **Action**: Create `IntVecSlice` and `IntVecSliceIter` structs.
+    -   **API Changes**: Add `slice()` and `split_at()` methods to `IntVec`.
+    -   **Dependencies**: Requires completion of Generic Backend Support.

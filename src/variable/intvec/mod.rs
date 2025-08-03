@@ -411,6 +411,72 @@ where
         Ok(results)
     }
 
+    /// Binary searches this vector for a given element.
+    ///
+    /// If the vector is not sorted, the returned result is unspecified and
+    /// meaningless. For `binary_search` to work correctly, the vector must be
+    /// sorted in ascending order.
+    ///
+    /// If the value is found then `Ok(idx)` is returned, containing the
+    /// index of the matching element. If there are multiple matches, then any
+    /// one of the matches could be returned.
+    /// If the value is not found then `Err(idx)` is returned, containing
+    /// the index where a matching element could be inserted while maintaining
+    /// sorted order.
+    pub fn binary_search(&self, value: u64) -> Result<usize, usize> {
+        self.binary_search_by(|probe| probe.cmp(&value))
+    }
+
+    /// Binary searches this vector with a comparator function.
+    ///
+    /// The comparator function should return an `Ordering` that indicates
+    /// whether its argument is `Less`, `Equal` or `Greater` than the desired
+    /// target.
+    /// If the vector is not sorted or if the comparator does not reflect the
+    /// vector's ordering, the returned result is unspecified.
+    ///
+    /// This implementation creates a single, reusable reader to perform the
+    /// search efficiently, avoiding the overhead of creating a new reader
+    /// at each step of the binary search.
+    #[inline]
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(u64) -> std::cmp::Ordering,
+    {
+        let mut low = 0;
+        let mut high = self.len();
+        // Create a single reader instance to be reused throughout the search,
+        // which is significantly more performant than creating one per lookup.
+        let mut reader = self.reader();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            // SAFETY: The binary search algorithm ensures that `mid` is always
+            // within the bounds `0 <= mid < self.len()`.
+            let cmp = f(unsafe { reader.get_unchecked(mid) });
+
+            match cmp {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary searches this vector with a key extraction function.
+    ///
+    /// If the vector is not sorted by the key, the returned result is
+    /// unspecified.
+    #[inline]
+    pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(u64) -> B1,
+        B1: Ord,
+    {
+        self.binary_search_by(|k| f(k).cmp(b))
+    }
+
     /// Consumes the [`IntVec`] and returns a `Vec<u64>`.
     pub fn into_vec(self) -> Vec<u64> {
         self.iter().collect()

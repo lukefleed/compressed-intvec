@@ -1,3 +1,5 @@
 mod test_intvec;
+mod test_macros;
+mod test_search;
 mod test_serde;
 mod test_sintvec;
