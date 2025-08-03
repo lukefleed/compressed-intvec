@@ -56,9 +56,11 @@ where
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
+        // Determine the final number of bits based on the selected strategy.
         let final_num_bits = match self.bit_width {
             BitWidth::Explicit(n) => n,
-            BitWidth::Minimal | BitWidth::ByteAligned => {
+            // For other strategies, we first need to calculate the minimal bits required.
+            _ => {
                 let max_val: u64 = self.input.iter().max().copied().unwrap_or_default().into();
                 let min_bits = if max_val == 0 {
                     1
@@ -66,15 +68,22 @@ where
                     (u64::BITS - max_val.leading_zeros()) as usize
                 };
 
-                if let BitWidth::ByteAligned = self.bit_width {
-                    // Round up to the nearest multiple of 8, capped at 64.
-                    ((min_bits + 7) / 8 * 8).min(64)
-                } else {
-                    min_bits
+                // Apply the selected rounding strategy.
+                match self.bit_width {
+                    BitWidth::Minimal => min_bits,
+                    BitWidth::PowerOfTwo => {
+                        // Find the smallest power of two >= min_bits, capped at 64.
+                        min_bits.next_power_of_two().min(64)
+                    }
+                    BitWidth::Explicit(_) => {
+                        // This case is handled by the outer match and is unreachable.
+                        unreachable!();
+                    }
                 }
             }
         };
 
+        // Validate the calculated number of bits.
         if !self.input.is_empty() && final_num_bits == 0 {
             return Err(FixedVecError::InvalidParameters(
                 "num_bits cannot be zero for a non-empty vector".to_string(),
@@ -87,6 +96,7 @@ where
             ));
         }
 
+        // Handle the case of an empty input vector.
         if self.input.is_empty() {
             // SAFETY: An empty vector with 0 length is always valid.
             return Ok(unsafe { FixedVec::new_unchecked(Vec::new(), 0, final_num_bits) });
@@ -106,6 +116,7 @@ where
             u64::MAX
         };
 
+        // Write the data to the bit buffer.
         for (i, &value_u) in self.input.iter().enumerate() {
             let value: u64 = value_u.into();
             if final_num_bits < 64 && value >= limit {

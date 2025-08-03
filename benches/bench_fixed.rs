@@ -1,34 +1,3 @@
-//! # Micro-Benchmark for Checked vs. Unchecked Random Access
-//!
-//! This benchmark suite is designed to measure and compare the raw performance
-//! of random element access across different fixed-width integer vector
-//! implementations. It aims to answer key performance questions:
-//!
-//! 1.  **Implementation Overhead**: How does the access speed of `LEFixedVec`
-//!     and `BEFixedVec` compare to a standard `Vec<u64>` (our baseline) and
-//!     `sux::BitFieldVec` (a well-regarded external library)?
-//!
-//! 2.  **Checked vs. Unchecked**: What is the performance cost of bounds checking?
-//!     This is measured by comparing `get()` against `get_unchecked()`.
-//!
-//! 3.  **Endianness Impact**: Is there a significant performance difference
-//!     between the Little-Endian (`LE`) and Big-Endian (`BE`) implementations
-//!     of `FixedVec`?
-//!
-//! 4.  **Bit-Width Optimization**: How does performance change with the number
-//!     of bits used per integer? The benchmark specifically tests values that
-//!     are powers of two (e.g., 8, 16, 32, 64), which should enable fast-path
-//!     optimizations (bit-shifts), against values that are not (e.g., 7, 15, 31, 63),
-//!     forcing fallback to slower arithmetic (division/modulo).
-//!
-//! ## Methodology
-//!
-//! - A large vector (`VECTOR_SIZE`) is created with uniformly random data.
-//! - A significant number of random indices (`NUM_ACCESSES`) are pre-generated.
-//! - For each `bit_width` in a predefined set, a benchmark group is created.
-//! - Inside each group, every implementation is benchmarked for both checked
-//!   and unchecked access patterns using the same set of random indices.
-
 use std::time::Duration;
 
 use compressed_intvec::prelude::*;
@@ -52,9 +21,7 @@ fn benchmark_random_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 10_000_000;
     const NUM_ACCESSES: usize = 1_000_000;
 
-    // A list of bit widths to test, designed to highlight the
-    // performance impact of power-of-two optimizations.
-    let bit_widths_to_test = [7, 8, 15, 16, 31, 32];
+    let bit_widths_to_test: Vec<u32> = (8..=64).step_by(2).collect();
 
     // Pre-generate the random indices that will be used for all benchmarks.
     let mut rng = SmallRng::seed_from_u64(1337);
@@ -91,11 +58,11 @@ fn benchmark_random_access(c: &mut Criterion) {
         // Setup data and structures for this specific bit_width.
         let data = generate_random_vec(VECTOR_SIZE, 1 << bit_width.min(63));
         let le_fixed_vec = LEFixedVec::builder(&data)
-            .bit_width(BitWidth::Explicit(bit_width))
+            .bit_width(BitWidth::Explicit(bit_width as usize))
             .build()
             .unwrap();
         let be_fixed_vec = BEFixedVec::builder(&data)
-            .bit_width(BitWidth::Explicit(bit_width))
+            .bit_width(BitWidth::Explicit(bit_width as usize))
             .build()
             .unwrap();
         let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
@@ -108,6 +75,7 @@ fn benchmark_random_access(c: &mut Criterion) {
                 }
             })
         });
+
         group.bench_function("LEFixedVec/Unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -124,6 +92,7 @@ fn benchmark_random_access(c: &mut Criterion) {
                 }
             })
         });
+
         group.bench_function("BEFixedVec/Unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -140,6 +109,7 @@ fn benchmark_random_access(c: &mut Criterion) {
                 }
             })
         });
+
         group.bench_function("sux::BitFieldVec/Unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -156,7 +126,8 @@ criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(10)
-        .measurement_time(Duration::from_secs(15));
+        .warm_up_time(Duration::from_millis(10))
+        .measurement_time(Duration::from_secs(3));
 
     targets = benchmark_random_access
 }

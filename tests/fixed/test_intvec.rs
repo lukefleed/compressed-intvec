@@ -247,33 +247,69 @@ fn test_build_from_u32_slice() {
 }
 
 #[test]
-fn test_bit_width_byte_aligned() {
-    // 11 bits required -> rounds up to 16
-    let data1 = vec![1024u64, 2047]; // max needs 11 bits
-    let vec1 = LEFixedVec::builder(&data1)
-        .bit_width(BitWidth::ByteAligned)
+fn test_bit_width_power_of_two() {
+    // 5 bits required -> rounds up to 8
+    let data0 = vec![1u64, 2, 3, 4, 31]; // max needs 5 bits
+    let vec0 = LEFixedVec::builder(&data0)
+        .bit_width(BitWidth::PowerOfTwo)
         .build()
         .unwrap();
-    assert_eq!(vec1.num_bits(), 16);
+    assert_eq!(vec0.num_bits(), 8);
+    assert_eq!(vec0, &data0[..]);
+
+    // 8 bits required -> remains 8
+    let data1 = vec![1u64, 2, 3, 4, 255]; // max needs 8 bits
+    let vec1 = LEFixedVec::builder(&data1)
+        .bit_width(BitWidth::PowerOfTwo)
+        .build()
+        .unwrap();
+    assert_eq!(vec1.num_bits(), 8);
     assert_eq!(vec1, &data1[..]);
 
-    // 16 bits required -> stays 16
-    let data2 = vec![u16::MAX as u64];
+    // 9 bits required -> rounds up to 16
+    let data2 = vec![1u64, 2, 3, 4, 511]; // max needs 9 bits
     let vec2 = LEFixedVec::builder(&data2)
-        .bit_width(BitWidth::ByteAligned)
+        .bit_width(BitWidth::PowerOfTwo)
         .build()
         .unwrap();
     assert_eq!(vec2.num_bits(), 16);
     assert_eq!(vec2, &data2[..]);
 
-    // 1 bit required -> rounds up to 8
-    let data3 = vec![0u64, 1];
+    // 16 bits required -> remains 16
+    let data3 = vec![1u64, 2, 3, 4, 65535]; // max needs 16 bits
     let vec3 = LEFixedVec::builder(&data3)
-        .bit_width(BitWidth::ByteAligned)
+        .bit_width(BitWidth::PowerOfTwo)
         .build()
         .unwrap();
-    assert_eq!(vec3.num_bits(), 8);
+    assert_eq!(vec3.num_bits(), 16);
     assert_eq!(vec3, &data3[..]);
+
+    // 17 bits required -> rounds up to 32
+    let data4 = vec![1u64, 2, 3, 4, 131071]; // max needs 17 bits
+    let vec4 = LEFixedVec::builder(&data4)
+        .bit_width(BitWidth::PowerOfTwo)
+        .build()
+        .unwrap();
+    assert_eq!(vec4.num_bits(), 32);
+    assert_eq!(vec4, &data4[..]);
+
+    // 32 bits required -> remains 32
+    let data5 = vec![1u64, 2, 3, 4, 4294967295]; // max needs 32 bits
+    let vec5 = LEFixedVec::builder(&data5)
+        .bit_width(BitWidth::PowerOfTwo)
+        .build()
+        .unwrap();
+    assert_eq!(vec5.num_bits(), 32);
+    assert_eq!(vec5, &data5[..]);
+
+    // 33 bits required -> rounds up to 64
+    let data6 = vec![1u64, 2, 3, 4, 8589934591]; // max needs 33 bits
+    let vec6 = LEFixedVec::builder(&data6)
+        .bit_width(BitWidth::PowerOfTwo)
+        .build()
+        .unwrap();
+    assert_eq!(vec6.num_bits(), 64);
+    assert_eq!(vec6, &data6[..]);
 }
 
 #[test]

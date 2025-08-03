@@ -39,30 +39,63 @@ use std::{any::TypeId, cmp::Ordering, error::Error, fmt, marker::PhantomData};
 use crate::fixed::intvec::iter::FixedVecIntoIter;
 
 /// Specifies the strategy for determining the number of bits per integer in a `FixedVec`.
+///
+/// The choice of strategy involves a fundamental trade-off between the memory footprint
+/// of the vector and the speed of random access operations (`get`). This enum provides
+/// clear options to control this trade-off.
+///
+/// For maximum random access performance, bit widths that are a **power of two**
+/// (e.g., 8, 16, 32, 64) are optimal. They allow the underlying access logic to use
+/// highly efficient bit-shift operations instead of slower integer multiplication
+/// and division. The `PowerOfTwo` strategy is designed to enforce this.
+///
+/// # See Also
+/// [`FixedVecBuilder::bit_width`](super::builder::FixedVecBuilder::bit_width)
 #[derive(Debug, Clone, Copy, Default)]
 pub enum BitWidth {
-    /// Use the exact number of bits specified by the user.
-    ///
-    /// The user is responsible for ensuring all values fit within this bit width.
-    /// An error will be returned during build if a value is too large.
-    Explicit(usize),
-
     /// Automatically determine the minimum number of bits required to store the
     /// largest value in the input data.
     ///
-    /// This prioritizes minimal memory usage but may result in bit widths that are
-    /// not aligned to byte boundaries (e.g., 9 bits), which can be slightly
-    /// less performant for access than byte-aligned widths.
+    /// This strategy prioritizes minimal memory usage above all else.
+    ///
+    /// # Trade-off
+    /// The resulting bit width may not be optimal for random access performance
+    /// (e.g., 9 bits, 17 bits).
+    ///
+    /// # Use Case
+    /// Ideal when the memory footprint is the primary concern or when access is
+    /// mostly sequential (e.g., via iterators), where random access speed is less critical.
     #[default]
     Minimal,
 
-    /// Automatically determine the minimum number of bits and round up to the
-    /// nearest multiple of 8 (i.e., a full byte).
+    /// Rounds up the minimal bit width to the next power of two (e.g., 8, 16, 32, 64).
     ///
-    /// This may use slightly more memory than `Minimal` but can lead to faster
-    /// access patterns due to better memory alignment. For example, if the
-    /// minimum required bits is 11, this will use 16.
-    ByteAligned,
+    /// This strategy prioritizes maximum random access speed by ensuring that the
+    /// underlying arithmetic for calculating element positions can be performed
+    /// using highly efficient bit-shift operations.
+    ///
+    /// # Trade-off
+    /// This may use significantly more memory than other strategies. For example, if
+    /// the data requires a minimum of 17 bits, this strategy will select 32.
+    ///
+    /// # Use Case
+    /// Recommended for applications with intensive, latency-sensitive random lookups
+    /// where `get()` performance is critical.
+    PowerOfTwo,
+
+    /// Use the exact number of bits specified by the user.
+    ///
+    /// This strategy gives the user full manual control.
+    ///
+    /// # Trade-off
+    /// The user is responsible for ensuring all values fit within this bit width and
+    /// for understanding the performance implications of their choice. An error will
+    /// be returned during build if a value is too large.
+    ///
+    /// # Use Case
+    /// For expert users who know the exact bit width they need, or to enforce a
+    /// specific storage layout for interoperability.
+    Explicit(usize),
 }
 
 /// Defines the set of errors that can occur in `FixedVec` operations.

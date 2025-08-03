@@ -61,11 +61,7 @@ name = "bench_iter_access"
 harness = false
 
 [[bench]]
-name = "bench_unchecked"
-harness = false
-
-[[bench]]
-name = "bench_simd"
+name = "bench_fixed"
 harness = false
 
 [profile.bench]

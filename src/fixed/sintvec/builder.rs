@@ -51,15 +51,17 @@ where
     ///
     /// This implementation is optimized to avoid intermediate allocations. It makes
     /// two passes over the input data: one to determine the maximum ZigZag-encoded
-    /// value (for `Minimal` and `ByteAligned` strategies), and a second pass
-    /// to write the bits.
+    /// value (for strategies other than `Explicit`), and a second pass to write the bits.
     pub fn build(self) -> Result<SFixedVec<E, Vec<u64>>, FixedVecError>
     where
         FixedVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible>,
     {
+        // Determine the final number of bits based on the selected strategy.
         let final_num_bits = match self.bit_width {
             BitWidth::Explicit(n) => n,
-            BitWidth::Minimal | BitWidth::ByteAligned => {
+            // For other strategies, we first need to calculate the minimal bits required
+            // after ZigZag encoding.
+            _ => {
                 // First pass: find the max ZigZag value without allocating a new Vec.
                 let max_val: u64 = self
                     .input
@@ -74,10 +76,11 @@ where
                     (u64::BITS - max_val.leading_zeros()) as usize
                 };
 
-                if let BitWidth::ByteAligned = self.bit_width {
-                    ((min_bits + 7) / 8 * 8).min(64)
-                } else {
-                    min_bits
+                // Apply the selected rounding strategy.
+                match self.bit_width {
+                    BitWidth::Minimal => min_bits,
+                    BitWidth::PowerOfTwo => min_bits.next_power_of_two().min(64),
+                    BitWidth::Explicit(_) => unreachable!(),
                 }
             }
         };
