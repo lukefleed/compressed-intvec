@@ -35,7 +35,6 @@ macro_rules! test_sintvec_configuration {
             assert_eq!(sintvec.is_empty(), input.is_empty());
 
             // Test full decompression
-            // CORRECTED HERE: Explicit type annotation to resolve ambiguity
             assert_eq!(&sintvec.iter().collect::<Vec<i64>>(), input, "iter failed");
 
             if !input.is_empty() {
@@ -94,9 +93,9 @@ macro_rules! test_sintvec_configuration {
             } else {
                 // Special checks for empty vec
                 assert!(sintvec.get(0).is_none());
-                assert_eq!(sintvec.get_many(&[]).unwrap(), vec![]);
+                assert_eq!(sintvec.get_many(&[]).unwrap(), Vec::<i64>::new());
                 unsafe {
-                    assert_eq!(sintvec.get_many_unchecked(&[]), vec![]);
+                    assert_eq!(sintvec.get_many_unchecked(&[]), Vec::<i64>::new());
                 }
             }
         }

@@ -38,7 +38,6 @@ macro_rules! test_sintvec_configuration {
                 input,
                 "into_vec from owned failed"
             );
-            // CORRECTED HERE: Explicit type annotation to resolve ambiguity
             assert_eq!(
                 &s_fixed_vec.iter().collect::<Vec<i64>>(),
                 input,
@@ -130,9 +129,9 @@ macro_rules! test_sintvec_configuration {
             } else {
                 // Special checks for empty vec
                 assert!(s_fixed_vec.get(0).is_none());
-                assert_eq!(s_fixed_vec.get_many(&[]).unwrap(), vec![]);
+                assert_eq!(s_fixed_vec.get_many(&[]).unwrap(), Vec::<i64>::new());
                 unsafe {
-                    assert_eq!(s_fixed_vec.get_many_unchecked(&[]), vec![]);
+                    assert_eq!(s_fixed_vec.get_many_unchecked(&[]), Vec::<i64>::new());
                 }
             }
         }

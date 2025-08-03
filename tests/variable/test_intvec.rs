@@ -40,7 +40,6 @@ macro_rules! test_configuration {
 
             // Test full decompression
             assert_eq!(&intvec.clone().into_vec(), input, "into_vec failed");
-            // CORRECTED HERE: Explicit type annotation to resolve ambiguity
             assert_eq!(&intvec.iter().collect::<Vec<u64>>(), input, "iter failed");
 
             if !input.is_empty() {
@@ -99,9 +98,9 @@ macro_rules! test_configuration {
             } else {
                 // Special checks for empty vec
                 assert!(intvec.get(0).is_none());
-                assert_eq!(intvec.get_many(&[]).unwrap(), vec![]);
+                assert_eq!(intvec.get_many(&[]).unwrap(), Vec::<u64>::new());
                 unsafe {
-                    assert_eq!(intvec.get_many_unchecked(&[]), vec![]);
+                    assert_eq!(intvec.get_many_unchecked(&[]), Vec::<u64>::new());
                 }
             }
         }
