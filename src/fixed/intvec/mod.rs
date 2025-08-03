@@ -29,7 +29,7 @@ pub mod slice;
 mod simd;
 
 #[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+mod serde;
 
 pub use builder::{FixedVecBuilder, FixedVecFromIterBuilder};
 pub use iter::FixedVecIter;
@@ -115,7 +115,7 @@ impl Error for FixedVecError {}
 /// It is generic over the backend storage `B`, which can be an owned `Vec<u64>`
 /// or a borrowed slice `&[u64]`.
 #[derive(Debug, Clone, MemDbg, MemSize)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+// Rimuovi tutti gli attributi serde da qui
 pub struct FixedVec<E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// The underlying storage for the bit-packed data.
     bits: B,
@@ -126,7 +126,6 @@ pub struct FixedVec<E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// A mask with the lowest `num_bits` bits set to one.
     mask: u64,
     /// Zero-sized markers for endianness and backend type parameters.
-    #[cfg_attr(feature = "serde", serde(skip))]
     _endian: PhantomData<(E, B)>,
 }
 
@@ -409,7 +408,7 @@ impl<E: Endianness, B: AsRef<[u64]>> FixedVec<E, B> {
                     // If the `parallel` feature is enabled, use a parallel sort for large inputs.
                     #[cfg(feature = "parallel")]
                     {
-                        use rayon::prelude::{IntoParallelIterator, ParallelSliceMut};
+                        use rayon::prelude::ParallelSliceMut;
                         indexed_indices.par_sort_unstable_by_key(|&(idx, _)| idx);
                     }
                     #[cfg(not(feature = "parallel"))]
@@ -587,11 +586,14 @@ impl<E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<FixedVec<E, B2>
     for FixedVec<E, B>
 {
     /// Checks for equality between two `FixedVec` instances, regardless of backend.
+    ///
+    /// This comparison is highly efficient as it first checks metadata (`len` and
+    /// `num_bits`) and then performs a direct bit-level comparison of the
+    /// underlying compressed data buffers.
     fn eq(&self, other: &FixedVec<E, B2>) -> bool {
-        if self.len != other.len || self.num_bits != other.num_bits {
-            return false;
-        }
-        self.iter().eq(other.iter())
+        self.len() == other.len()
+            && self.num_bits() == other.num_bits()
+            && self.as_limbs() == other.as_limbs()
     }
 }
 

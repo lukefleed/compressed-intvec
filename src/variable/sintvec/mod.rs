@@ -42,8 +42,6 @@ mod builder;
 mod iter;
 #[cfg(feature = "parallel")]
 mod parallel;
-#[cfg(feature = "serde")]
-mod serde;
 
 pub use builder::SIntVecBuilder;
 
@@ -83,6 +81,8 @@ pub use builder::SIntVecBuilder;
 /// assert_eq!(sintvec.get(0), Some(-10));
 /// ```
 #[derive(Debug, Clone, MemDbg, MemSize)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent, bound = ""))]
 pub struct SIntVec<E: Endianness> {
     /// The inner `IntVec` that stores the ZigZag-encoded `u64` values.
     inner: IntVec<E>,

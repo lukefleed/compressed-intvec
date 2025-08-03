@@ -19,7 +19,7 @@ macro_rules! test_sintvec_configuration {
     ($test_name:ident, $endianness:ty, $input:expr, $k:expr, $codec_spec:expr) => {
         #[test]
         fn $test_name() {
-            let input = &$input;
+            let input: &[i64] = &$input;
             let k = $k;
             let codec_spec = $codec_spec;
 
@@ -35,7 +35,8 @@ macro_rules! test_sintvec_configuration {
             assert_eq!(sintvec.is_empty(), input.is_empty());
 
             // Test full decompression
-            assert_eq!(&sintvec.iter().collect::<Vec<_>>(), input, "iter failed");
+            // CORRECTED HERE: Explicit type annotation to resolve ambiguity
+            assert_eq!(&sintvec.iter().collect::<Vec<i64>>(), input, "iter failed");
 
             if !input.is_empty() {
                 let mut rng = StdRng::seed_from_u64(42);
@@ -75,7 +76,7 @@ macro_rules! test_sintvec_configuration {
                 #[cfg(feature = "parallel")]
                 {
                     assert_eq!(
-                        &sintvec.par_iter().collect::<Vec<_>>(),
+                        &sintvec.par_iter().collect::<Vec<i64>>(),
                         input,
                         "par_iter failed"
                     );
@@ -117,7 +118,7 @@ test_sintvec_configuration!(
 test_sintvec_configuration!(
     test_single_gamma_le,
     LE,
-    vec![-42],
+    vec![-42i64],
     1,
     VariableCodecSpec::Gamma
 );
@@ -172,7 +173,7 @@ fn test_sintvec_all_codecs_systematic() {
             .unwrap_or_else(|e| panic!("Build failed for {:?}: {:?}", codec_spec, e));
 
         assert_eq!(
-            &sintvec.iter().collect::<Vec<_>>(),
+            &sintvec.iter().collect::<Vec<i64>>(),
             &data,
             "iter failed for {:?}",
             codec_spec
@@ -190,7 +191,7 @@ fn test_sintvec_all_codecs_systematic() {
 
 #[test]
 fn test_sintvec_builder_rejects_auto_codecs() {
-    let data = vec![-10, 20, 100];
+    let data = vec![-10i64, 20, 100];
     let codecs_with_auto_params = vec![
         VariableCodecSpec::Auto,
         VariableCodecSpec::Rice { log2_b: None },

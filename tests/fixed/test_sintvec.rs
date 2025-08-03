@@ -16,7 +16,7 @@ macro_rules! test_sintvec_configuration {
     ($test_name:ident, $endianness:ty, $input:expr, $bit_width:expr) => {
         #[test]
         fn $test_name() {
-            let input = &$input;
+            let input: &[i64] = &$input;
             let bit_width = $bit_width;
 
             // Build the SFixedVec
@@ -34,7 +34,13 @@ macro_rules! test_sintvec_configuration {
 
             // Test full decompression
             assert_eq!(
-                &s_fixed_vec.clone().iter().collect::<Vec<_>>(),
+                &s_fixed_vec.clone().into_vec(),
+                input,
+                "into_vec from owned failed"
+            );
+            // CORRECTED HERE: Explicit type annotation to resolve ambiguity
+            assert_eq!(
+                &s_fixed_vec.iter().collect::<Vec<i64>>(),
                 input,
                 "iter failed"
             );
@@ -49,12 +55,12 @@ macro_rules! test_sintvec_configuration {
             assert_eq!(s_fixed_vec, &input[..], "PartialEq with slice failed");
 
             // Test as_limbs
-            let cloned_limbs = s_fixed_vec.as_limbs();
-            assert_eq!(s_fixed_vec.as_limbs(), cloned_limbs);
+            let cloned_limbs = s_fixed_vec.as_limbs().to_vec();
+            assert_eq!(s_fixed_vec.as_limbs(), cloned_limbs.as_slice());
 
             // Test a non-equal case
             if input.len() > 1 && input[0] != input[1] {
-                let mut different_input = input.clone();
+                let mut different_input = input.to_vec();
                 different_input.swap(0, 1);
                 let different_vec = SFixedVec::<$endianness>::builder(&different_input)
                     .bit_width(bit_width)
@@ -104,7 +110,7 @@ macro_rules! test_sintvec_configuration {
                 #[cfg(feature = "parallel")]
                 {
                     assert_eq!(
-                        &s_fixed_vec.par_iter().collect::<Vec<_>>(),
+                        &s_fixed_vec.par_iter().collect::<Vec<i64>>(),
                         input,
                         "par_iter failed"
                     );

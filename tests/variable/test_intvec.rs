@@ -16,7 +16,7 @@ macro_rules! test_configuration {
     ($test_name:ident, $endianness:ty, $input:expr, $k:expr, $codec_spec:expr) => {
         #[test]
         fn $test_name() {
-            let input = &$input;
+            let input: &[u64] = &$input;
             let k = $k;
             let codec_spec = $codec_spec;
 
@@ -40,7 +40,8 @@ macro_rules! test_configuration {
 
             // Test full decompression
             assert_eq!(&intvec.clone().into_vec(), input, "into_vec failed");
-            assert_eq!(&intvec.iter().collect::<Vec<_>>(), input, "iter failed");
+            // CORRECTED HERE: Explicit type annotation to resolve ambiguity
+            assert_eq!(&intvec.iter().collect::<Vec<u64>>(), input, "iter failed");
 
             if !input.is_empty() {
                 let mut rng = StdRng::seed_from_u64(42);
@@ -80,7 +81,7 @@ macro_rules! test_configuration {
                 #[cfg(feature = "parallel")]
                 {
                     assert_eq!(
-                        &intvec.par_iter().collect::<Vec<_>>(),
+                        &intvec.par_iter().collect::<Vec<u64>>(),
                         input,
                         "par_iter failed"
                     );
@@ -129,14 +130,14 @@ test_configuration!(
 test_configuration!(
     test_single_gamma_le,
     LE,
-    vec![42],
+    vec![42u64],
     1,
     VariableCodecSpec::Gamma
 );
 test_configuration!(
     test_single_gamma_be,
     BE,
-    vec![42],
+    vec![42u64],
     1,
     VariableCodecSpec::Gamma
 );
@@ -145,14 +146,14 @@ test_configuration!(
 test_configuration!(
     test_zeros_auto_le,
     LE,
-    vec![0; 1000],
+    vec![0u64; 1000],
     16,
     VariableCodecSpec::Auto
 );
 test_configuration!(
     test_zeros_unary_be,
     BE,
-    vec![0; 1000],
+    vec![0u64; 1000],
     16,
     VariableCodecSpec::Unary
 );
@@ -225,7 +226,7 @@ test_configuration!(
 
 #[test]
 fn test_invalid_parameters() {
-    let input = vec![1, 2, 3];
+    let input = vec![1u64, 2, 3];
     // k=0 is invalid
     let result = IntVec::<LE>::builder(&input)
         .k(0)
@@ -236,7 +237,7 @@ fn test_invalid_parameters() {
 
 #[test]
 fn test_out_of_bounds() {
-    let input = vec![10, 20, 30];
+    let input = vec![10u64, 20, 30];
     let intvec = IntVec::<LE>::builder(&input).build().unwrap();
     assert!(matches!(
         intvec.get_many(&[0, 1, 3]),

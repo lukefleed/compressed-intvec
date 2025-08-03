@@ -2,22 +2,18 @@
 
 #[cfg(all(test, feature = "serde"))]
 mod test_serde {
+    use crate::common::helpers::{generate_random_signed_vec, generate_random_vec};
     use compressed_intvec::prelude::*;
     use dsi_bitstream::prelude::{BE, LE};
 
-    // Import helper functions from the common module.
-    #[path = "../common/mod.rs"]
-    mod common;
-    use common::helpers::{generate_random_signed_vec, generate_random_vec};
-
     /// A helper macro to generate round-trip serialization tests for `FixedVec`.
     macro_rules! test_fixedvec_serde_roundtrip {
-        ($test_name:ident, $endianness:ty, $input:expr, $num_bits:expr) => {
+        ($test_name:ident, $endianness:ty, $input:expr, $bit_width:expr) => {
             #[test]
             fn $test_name() {
                 let input_data = &$input;
                 let original_vec = FixedVec::<$endianness>::builder(input_data)
-                    .num_bits($num_bits)
+                    .bit_width($bit_width)
                     .build()
                     .unwrap();
 
@@ -27,14 +23,8 @@ mod test_serde {
                     bincode::deserialize(&encoded_bincode).unwrap();
 
                 assert_eq!(
-                    original_vec.iter().collect::<Vec<_>>(),
-                    decoded_bincode.iter().collect::<Vec<_>>(),
+                    original_vec, decoded_bincode,
                     "Bincode round-trip failed: vectors do not match"
-                );
-                assert_eq!(
-                    original_vec.num_bits(),
-                    decoded_bincode.num_bits(),
-                    "Bincode round-trip failed: num_bits do not match"
                 );
 
                 // 2. Test with serde_json (text format)
@@ -43,14 +33,8 @@ mod test_serde {
                     serde_json::from_str(&encoded_json).unwrap();
 
                 assert_eq!(
-                    original_vec.iter().collect::<Vec<_>>(),
-                    decoded_json.iter().collect::<Vec<_>>(),
+                    original_vec, decoded_json,
                     "JSON round-trip failed: vectors do not match"
-                );
-                assert_eq!(
-                    original_vec.num_bits(),
-                    decoded_json.num_bits(),
-                    "JSON round-trip failed: num_bits do not match"
                 );
             }
         };
@@ -58,12 +42,12 @@ mod test_serde {
 
     /// A helper macro to generate round-trip serialization tests for `SFixedVec`.
     macro_rules! test_sfixedvec_serde_roundtrip {
-        ($test_name:ident, $endianness:ty, $input:expr, $num_bits:expr) => {
+        ($test_name:ident, $endianness:ty, $input:expr, $bit_width:expr) => {
             #[test]
             fn $test_name() {
                 let input_data = &$input;
                 let original_vec = SFixedVec::<$endianness>::builder(input_data)
-                    .num_bits($num_bits)
+                    .bit_width($bit_width)
                     .build()
                     .unwrap();
 
@@ -73,14 +57,8 @@ mod test_serde {
                     bincode::deserialize(&encoded_bincode).unwrap();
 
                 assert_eq!(
-                    original_vec.iter().collect::<Vec<_>>(),
-                    decoded_bincode.iter().collect::<Vec<_>>(),
+                    original_vec, decoded_bincode,
                     "Bincode round-trip failed: vectors do not match"
-                );
-                assert_eq!(
-                    original_vec.num_bits(),
-                    decoded_bincode.num_bits(),
-                    "Bincode round-trip failed: num_bits do not match"
                 );
 
                 // 2. Test with serde_json
@@ -89,47 +67,56 @@ mod test_serde {
                     serde_json::from_str(&encoded_json).unwrap();
 
                 assert_eq!(
-                    original_vec.iter().collect::<Vec<_>>(),
-                    decoded_json.iter().collect::<Vec<_>>(),
+                    original_vec, decoded_json,
                     "JSON round-trip failed: vectors do not match"
-                );
-                assert_eq!(
-                    original_vec.num_bits(),
-                    decoded_json.num_bits(),
-                    "JSON round-trip failed: num_bits do not match"
                 );
             }
         };
     }
 
     // --- FixedVec Test Suite ---
-    test_fixedvec_serde_roundtrip!(test_fixedvec_empty_le, LE, Vec::<u64>::new(), Some(8));
+    test_fixedvec_serde_roundtrip!(
+        test_fixedvec_empty_le,
+        LE,
+        Vec::<u64>::new(),
+        BitWidth::Explicit(8)
+    );
     test_fixedvec_serde_roundtrip!(
         test_fixedvec_uniform_small_auto_le,
         LE,
         generate_random_vec(1000, 100),
-        None
+        BitWidth::Minimal
     );
     test_fixedvec_serde_roundtrip!(
         test_fixedvec_uniform_large_explicit_be,
         BE,
         generate_random_vec(1000, 1_000_000),
-        Some(20) // 1_000_000 fits in 20 bits
+        BitWidth::Explicit(20) // 1_000_000 fits in 20 bits
     );
-    test_fixedvec_serde_roundtrip!(test_fixedvec_full_64_bits_le, LE, vec![u64::MAX], Some(64));
+    test_fixedvec_serde_roundtrip!(
+        test_fixedvec_full_64_bits_le,
+        LE,
+        vec![u64::MAX],
+        BitWidth::Explicit(64)
+    );
 
     // --- SFixedVec Test Suite ---
-    test_sfixedvec_serde_roundtrip!(test_sfixedvec_empty_le, LE, Vec::<i64>::new(), Some(8));
+    test_sfixedvec_serde_roundtrip!(
+        test_sfixedvec_empty_le,
+        LE,
+        Vec::<i64>::new(),
+        BitWidth::Explicit(8)
+    );
     test_sfixedvec_serde_roundtrip!(
         test_sfixedvec_mixed_auto_be,
         BE,
         generate_random_signed_vec(1000, 1000),
-        None
+        BitWidth::Minimal
     );
     test_sfixedvec_serde_roundtrip!(
         test_sfixedvec_mixed_explicit_le,
         LE,
         vec![-128, 0, 127], // Zigzag of -128 is 255. Fits in 8 bits.
-        Some(8)
+        BitWidth::Explicit(8)
     );
 }

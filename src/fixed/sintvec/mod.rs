@@ -21,11 +21,13 @@ pub mod iter;
 pub mod parallel;
 pub mod slice;
 
+#[cfg(feature = "simd")]
+use std::simd::num::SimdUint;
+
 #[cfg(feature = "serde")]
 mod serde;
 
-#[cfg(feature = "simd")]
-use std::simd::num::SimdUint;
+use crate::fixed::sintvec::iter::SFixedVecIntoIter;
 
 use super::intvec::{FixedVec, FixedVecError};
 pub use builder::{SFixedVecBuilder, SFixedVecFromIterBuilder};
@@ -37,6 +39,15 @@ use dsi_bitstream::prelude::{BitWrite, Endianness, ToInt, ToNat, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 use std::cmp::Ordering;
 
+/// A compressed, randomly accessible vector of `i64` integers with fixed-width encoding.
+///
+/// `SFixedVec` acts as a wrapper around a [`FixedVec`] and handles the transparent
+/// ZigZag encoding of signed integers. The performance characteristics of its
+/// methods are nearly identical to their [`FixedVec`] counterparts, with only
+/// the negligible overhead of the ZigZag transformation.
+///
+/// It is generic over the backend storage `B`, which can be an owned `Vec<u64>`
+/// or a borrowed slice `&[u64]`.
 /// A compressed, randomly accessible vector of `i64` integers with fixed-width encoding.
 ///
 /// `SFixedVec` acts as a wrapper around a [`FixedVec`] and handles the transparent
@@ -286,11 +297,7 @@ impl<E: Endianness, B: AsRef<[u64]>> SFixedVec<E, B> {
 impl<E: Endianness> SFixedVec<E, Vec<u64>> {
     /// Consumes the owned [`SFixedVec`] and returns the underlying `Vec<i64>`.
     pub fn into_vec(self) -> Vec<i64> {
-        self.inner
-            .into_vec()
-            .into_iter()
-            .map(ToInt::to_int)
-            .collect()
+        self.into_iter().collect()
     }
 }
 
@@ -308,12 +315,6 @@ impl<E: Endianness, B: AsRef<[u64]>> Eq for SFixedVec<E, B> {}
 
 macro_rules! impl_partial_eq_for_sint_slice {
     ($($t:ty),*) => {$(
-        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for SFixedVec<E, B> {
-            fn eq(&self, other: &Vec<$t>) -> bool {
-                self.eq(&other[..])
-            }
-        }
-
         impl<E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for SFixedVec<E, B> {
             fn eq(&self, other: &&[$t]) -> bool {
                 self.eq(*other)
@@ -345,11 +346,11 @@ impl<'a, E: Endianness, B: AsRef<[u64]>> IntoIterator for &'a SFixedVec<E, B> {
 
 impl<E: Endianness> IntoIterator for SFixedVec<E, Vec<u64>> {
     type Item = i64;
-    type IntoIter = std::vec::IntoIter<i64>;
+    type IntoIter = SFixedVecIntoIter<E>;
 
     /// Consumes the `SFixedVec` and creates an iterator over its values.
     fn into_iter(self) -> Self::IntoIter {
-        self.into_vec().into_iter()
+        SFixedVecIntoIter::new(self)
     }
 }
 
