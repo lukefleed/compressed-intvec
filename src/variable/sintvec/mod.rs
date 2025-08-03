@@ -136,6 +136,51 @@ where
     pub fn limbs(&self) -> Vec<u64> {
         self.inner.limbs()
     }
+
+    /// Binary searches this vector for a given element.
+    ///
+    /// If the vector is not sorted, the returned result is unspecified and
+    /// meaningless. For `binary_search` to work correctly, the vector must be
+    /// sorted in ascending order.
+    pub fn binary_search(&self, value: i64) -> Result<usize, usize> {
+        self.binary_search_by(|probe| probe.cmp(&value))
+    }
+
+    /// Binary searches this vector with a comparator function.
+    ///
+    /// The comparator function should return an `Ordering` that indicates
+    /// whether its argument is `Less`, `Equal` or `Greater` than the desired
+    /// target. If the vector is not sorted or if the comparator does not
+    /// reflect the vector's ordering, the returned result is unspecified.
+    ///
+    /// # Implementation Notes
+    /// This search operates on the underlying compressed `u64` data but performs
+    /// comparisons on the decoded `i64` values. It delegates to the efficient
+    /// `binary_search_by` of the inner `IntVec`.
+    #[inline]
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(i64) -> std::cmp::Ordering,
+    {
+        // The search is performed on the inner `IntVec`. The comparator function
+        // must decode the `u64` value (from ZigZag) back to an `i64` before
+        // the user-provided comparison logic can be applied.
+        self.inner
+            .binary_search_by(|probe_unsigned| f(probe_unsigned.to_int()))
+    }
+
+    /// Binary searches this vector with a key extraction function.
+    ///
+    /// If the vector is not sorted by the key, the returned result is
+    /// unspecified.
+    #[inline]
+    pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(i64) -> B1,
+        B1: Ord,
+    {
+        self.binary_search_by(|k| f(k).cmp(b))
+    }
 }
 
 impl<E: Endianness> SIntVec<E>
@@ -154,11 +199,13 @@ where
     ///
     /// # Safety
     /// Calling this method with an out-of-bounds index is undefined behavior.
-    #[inline]
+    #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> i64 {
         self.inner.get_unchecked(index).to_int()
     }
 
+    /// Retrieves multiple signed integers at the specified indices.
+    #[inline]
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<i64>, IntVecError> {
         let unsigned_values = self.inner.get_many(indices)?;
         Ok(unsigned_values.into_iter().map(ToInt::to_int).collect())
@@ -168,6 +215,7 @@ where
     ///
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior.
+    #[inline(always)]
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<i64> {
         self.inner
             .get_many_unchecked(indices)

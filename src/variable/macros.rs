@@ -67,3 +67,69 @@ macro_rules! int_vec {
         }
     };
 }
+
+/// Creates a [`LESIntVec`] containing the given elements.
+///
+/// `sint_vec!` allows for concise initialization of a `LESIntVec`. It uses a
+/// set of reasonable defaults for its build parameters:
+/// - **Codec**: `VariableCodecSpec::Delta` is used as a safe, parameter-free default.
+///   `SIntVec` does not support automatic codec selection.
+/// - **Sampling Rate (`k`)**: A default value of `32` is used.
+///
+/// For fine-grained control over these parameters, please use the
+/// [`SIntVec::builder`].
+///
+/// # Syntax
+///
+/// - Create an empty `LESIntVec`:
+///   ```
+///   # use compressed_intvec::sint_vec;
+///   # use compressed_intvec::prelude::*;
+///   let v: LESIntVec = sint_vec![];
+///   assert!(v.is_empty());
+///   ```
+///
+/// - Create an `LESIntVec` from a list of elements:
+///   ```
+///   # use compressed_intvec::sint_vec;
+///   # use compressed_intvec::prelude::*;
+///   let v = sint_vec![-100, 200, -300];
+///   assert_eq!(v.len(), 3);
+///   assert_eq!(v.get(2), Some(-300));
+///   ```
+///
+/// - Create an `LESIntVec` with a repeated element and a given length:
+///   ```
+///   # use compressed_intvec::sint_vec;
+///   # use compressed_intvec::prelude::*;
+///   let v = sint_vec![-42; 100];
+///   assert_eq!(v.len(), 100);
+///   assert_eq!(v.get(50), Some(-42));
+///   ```
+#[macro_export]
+macro_rules! sint_vec {
+    () => {
+        $crate::prelude::LESIntVec::builder(&[0i64; 0]).build().unwrap()
+    };
+    ($($elem:expr),* $(,)?) => {
+        // Ensure literals are treated as i64
+        $crate::prelude::LESIntVec::builder(&[$($elem as i64),*])
+            // Use reasonable defaults. Auto is not supported for SIntVec.
+            .codec($crate::prelude::VariableCodecSpec::Delta)
+            .k(32)
+            .build()
+            .unwrap()
+    };
+    ($elem:expr; $len:expr) => {
+        {
+            let mut v = ::std::vec::Vec::with_capacity($len);
+            // Ensure the element is i64
+            v.resize($len, $elem as i64);
+            $crate::prelude::LESIntVec::builder(&v)
+                .codec($crate::prelude::VariableCodecSpec::Delta)
+                .k(32)
+                .build()
+                .unwrap()
+        }
+    };
+}

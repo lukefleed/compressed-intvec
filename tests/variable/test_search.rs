@@ -107,3 +107,80 @@ fn test_intvec_binary_search_by_key() {
     // Search for key 8. Keys are [1, 2, 3, 4, 5, 6, 7]. Insertion point is after 7.
     assert_eq!(vec.binary_search_by_key(&8, f), Err(7));
 }
+
+#[test]
+fn test_sintvec_binary_search_simple() {
+    let data: Vec<i64> = (-50..50).map(|x| x * 2).collect(); // A sorted range of even numbers
+    let vec = LESIntVec::builder(&data)
+        .codec(VariableCodecSpec::Delta)
+        .k(8)
+        .build()
+        .unwrap();
+
+    // Found cases
+    assert_eq!(vec.binary_search(-20), Ok(40)); // -20 is at index 40
+    assert_eq!(vec.binary_search(-100), Ok(0));
+    assert_eq!(vec.binary_search(98), Ok(99));
+    assert_eq!(vec.binary_search(0), Ok(50));
+
+    // Not found cases
+    assert_eq!(vec.binary_search(-101), Err(0)); // Before first element
+    assert_eq!(vec.binary_search(1), Err(51)); // Between 0 and 2
+    assert_eq!(vec.binary_search(99), Err(100)); // After last element
+    assert_eq!(vec.binary_search(i64::MAX), Err(100));
+}
+
+#[test]
+fn test_sintvec_binary_search_with_duplicates() {
+    let data: Vec<i64> = vec![-20, -10, -10, 0, 0, 0, 10];
+    let vec = LESIntVec::builder(&data)
+        .codec(VariableCodecSpec::Gamma)
+        .build()
+        .unwrap();
+
+    // Search for a duplicate value
+    let res_minus_10 = vec.binary_search(-10);
+    assert!(res_minus_10.is_ok());
+    let index_minus_10 = res_minus_10.unwrap();
+    assert!(
+        (1..=2).contains(&index_minus_10),
+        "Expected index for -10 to be 1 or 2, but got {}",
+        index_minus_10
+    );
+
+    let res_0 = vec.binary_search(0);
+    assert!(res_0.is_ok());
+    let index_0 = res_0.unwrap();
+    assert!(
+        (3..=5).contains(&index_0),
+        "Expected index for 0 to be between 3 and 5, but got {}",
+        index_0
+    );
+
+    // Search for non-existent values
+    assert_eq!(vec.binary_search(-15), Err(1));
+    assert_eq!(vec.binary_search(5), Err(6));
+}
+
+#[test]
+fn test_sintvec_binary_search_by_key() {
+    // A vector of numbers sorted by their absolute value
+    let data: Vec<i64> = vec![-1, 2, -3, 4, -5, 10];
+    let vec = LESIntVec::builder(&data)
+        .codec(VariableCodecSpec::Zeta { k: Some(3) })
+        .build()
+        .unwrap();
+
+    // Search for a key `k` such that `abs(v) == k`.
+    let f = |v: i64| v.abs();
+
+    // Found cases
+    assert_eq!(vec.binary_search_by_key(&3, f), Ok(2));
+    assert_eq!(vec.binary_search_by_key(&1, f), Ok(0));
+    assert_eq!(vec.binary_search_by_key(&10, f), Ok(5));
+
+    // Not found cases
+    // Keys are [1, 2, 3, 4, 5, 10]. Insertion point for key 6 is at index 5.
+    assert_eq!(vec.binary_search_by_key(&6, f), Err(5));
+    assert_eq!(vec.binary_search_by_key(&0, f), Err(0));
+}
