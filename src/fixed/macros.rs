@@ -11,7 +11,7 @@
 ///   ```
 ///   # use compressed_intvec::prelude::*;
 ///   # use compressed_intvec::fixed_vec;
-///   let v: LEFixedVec = fixed_vec!;
+///   let v: LEFixedVec = fixed_vec!; // or fixed_vec![8;]
 ///   assert!(v.is_empty());
 ///   assert_eq!(v.num_bits(), 8);
 ///   ```
@@ -44,9 +44,9 @@ macro_rules! fixed_vec {
             .build()
             .unwrap()
     };
-    ($bit_width:expr; $($elem:expr),+ $(,)?) => {
+    ($bit_width:expr; $($elem:expr),* $(,)?) => {
         // Ensure literals are treated as u64 to satisfy trait bounds
-        $crate::prelude::LEFixedVec::builder(&[$($elem as u64),+])
+        $crate::prelude::LEFixedVec::builder(&[$($elem as u64),*])
             .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
             .build()
             .unwrap()
@@ -106,9 +106,9 @@ macro_rules! s_fixed_vec {
             .build()
             .unwrap()
     };
-    ($bit_width:expr; $($elem:expr),+ $(,)?) => {
+    ($bit_width:expr; $($elem:expr),* $(,)?) => {
         // Ensure literals are treated as i64
-        $crate::prelude::LESFixedVec::builder(&[$($elem as i64),+])
+        $crate::prelude::LESFixedVec::builder(&[$($elem as i64),*])
             .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
             .build()
             .unwrap()

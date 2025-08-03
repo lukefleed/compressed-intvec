@@ -39,6 +39,8 @@ use dsi_bitstream::prelude::{BitWrite, Endianness, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
 use std::{any::TypeId, cmp::Ordering, error::Error, fmt, marker::PhantomData};
 
+use crate::fixed::intvec::iter::FixedVecIntoIter;
+
 /// Specifies the strategy for determining the number of bits per integer in a `FixedVec`.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum BitWidth {
@@ -404,7 +406,16 @@ impl<E: Endianness, B: AsRef<[u64]>> FixedVec<E, B> {
                         .collect();
 
                     // Sort by the access index to create a sequential access pattern.
-                    indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
+                    // If the `parallel` feature is enabled, use a parallel sort for large inputs.
+                    #[cfg(feature = "parallel")]
+                    {
+                        use rayon::prelude::{IntoParallelIterator, ParallelSliceMut};
+                        indexed_indices.par_sort_unstable_by_key(|&(idx, _)| idx);
+                    }
+                    #[cfg(not(feature = "parallel"))]
+                    {
+                        indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
+                    }
 
                     let mut i = 0;
                     while i < indexed_indices.len() {
@@ -567,7 +578,7 @@ impl<E: Endianness> FixedVec<E, Vec<u64>> {
 
     /// Consumes the owned [`FixedVec`] and returns a `Vec<u64>` of its decoded values.
     pub fn into_vec(self) -> Vec<u64> {
-        self.iter().collect()
+        self.into_iter().collect()
     }
 }
 
@@ -588,12 +599,6 @@ impl<E: Endianness, B: AsRef<[u64]>> Eq for FixedVec<E, B> {}
 
 macro_rules! impl_partial_eq_for_uint_slice {
     ($($t:ty),*) => {$(
-        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for FixedVec<E, B> {
-            fn eq(&self, other: &Vec<$t>) -> bool {
-                self.eq(&other[..])
-            }
-        }
-
         impl<E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for FixedVec<E, B> {
             fn eq(&self, other: &&[$t]) -> bool {
                 self.eq(*other)
@@ -625,11 +630,14 @@ impl<'a, E: Endianness, B: AsRef<[u64]>> IntoIterator for &'a FixedVec<E, B> {
 
 impl<E: Endianness> IntoIterator for FixedVec<E, Vec<u64>> {
     type Item = u64;
-    type IntoIter = std::vec::IntoIter<u64>;
+    type IntoIter = FixedVecIntoIter<E>;
 
-    /// Consumes the `FixedVec` and creates an iterator over its values.
+    /// Consumes the `FixedVec` and creates an iterator over its decompressed values.
+    ///
+    /// This implementation is "lazy" and decodes values on the fly without
+    /// allocating an intermediate `Vec<u64>`.
     fn into_iter(self) -> Self::IntoIter {
-        self.into_vec().into_iter()
+        FixedVecIntoIter::new(self)
     }
 }
 
