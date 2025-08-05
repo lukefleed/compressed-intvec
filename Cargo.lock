@@ -312,6 +312,7 @@ dependencies = [
  "csv",
  "dsi-bitstream",
  "mem_dbg",
+ "num-traits",
  "rand",
  "rand_distr",
  "rayon",
