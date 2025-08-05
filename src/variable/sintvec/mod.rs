@@ -9,7 +9,8 @@ use crate::{prelude::VariableCodecSpec, variable::{
         builder::SIntVecFromIterBuilder, iter::SIntVecIter, slice::SIntVecSlice
     },
 }};
-use dsi_bitstream::{prelude::{BitRead, BitSeek, Codes, CodesRead, CodesWrite, Endianness, ToInt, BE, LE}, traits::BitWrite};
+use common_traits::SignedInt;
+use dsi_bitstream::{codes::ToNat, prelude::{BitRead, BitSeek, Codes, CodesRead, CodesWrite, Endianness, ToInt, BE, LE}, traits::BitWrite};
 use mem_dbg::{MemDbg, MemSize};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -59,7 +60,13 @@ impl<'de, E: Endianness> Deserialize<'de> for SIntVec<E, Vec<u64>> {
 
 impl<E: Endianness> SIntVec<E, Vec<u64>> {
     /// Returns a builder for creating an [`SIntVec`] from a slice of data.
-    pub fn builder<T: AsRef<[i64]> + ?Sized>(input: &T) -> SIntVecBuilder<E> {
+    /// This is generic over the input integer type (e.g., `i8`, `i16`, `i32`, `i64`).
+    pub fn builder<I, T>(input: &T) -> SIntVecBuilder<E, I>
+    where
+        I: SignedInt + ToNat + Copy,
+        <I as SignedInt>::UnsignedInt: Into<u64>,
+        T: AsRef<[I]> + ?Sized,
+    {
         SIntVecBuilder::new(input.as_ref())
     }
 
@@ -72,10 +79,11 @@ impl<E: Endianness> SIntVec<E, Vec<u64>> {
     ///
     /// This is a convenient alias for `SIntVec::builder(slice).build()`.
     /// `VariableCodecSpec::Delta` and a default sampling rate of `k=16` will be used.
-    /// To specify different parameters, use the builder directly.
-    pub fn from_slice<T>(slice: &T) -> Result<Self, IntVecError>
+    pub fn from_slice<I, T>(slice: &T) -> Result<Self, IntVecError>
     where
-        T: AsRef<[i64]> + ?Sized,
+        I: SignedInt + ToNat + Copy,
+        <I as SignedInt>::UnsignedInt: Into<u64>,
+        T: AsRef<[I]> + ?Sized,
         for<'a> crate::variable::intvec::IntVecBitWriter<E>:
             BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {

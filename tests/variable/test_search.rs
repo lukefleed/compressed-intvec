@@ -69,8 +69,8 @@ fn test_intvec_binary_search_empty_and_single() {
     let empty_vec = LEIntVec::builder(&empty_data).build().unwrap();
     assert_eq!(empty_vec.binary_search(10), Err(0));
 
-    // Single element vector, found
-    let single_data = vec![42];
+    // Single element vector of u32, found
+    let single_data: Vec<u32> = vec![42];
     let single_vec = LEIntVec::builder(&single_data).build().unwrap();
     assert_eq!(single_vec.binary_search(42), Ok(0));
 
