@@ -11,7 +11,6 @@
     -   **Action**: Introduce methods for reading multiple elements into a SIMD vector
     -   **Target**: Primarily for `num_bits` values that are byte-aligned (8, 16, 32, 64) where implementation is straightforward.
 
-
 - [ ] **Introduce a Mutable `MutFixedVec` Variant**
     -   **Action**: Design and implement a new `MutFixedVec` struct that supports in-place modifications (`set`) and resizing (`push`, `pop`, `resize`).
     -   **Architecture**: This will be a distinct type from the immutable `FixedVec` to maintain clear compile-time guarantees. It will require `AsMut<[u64]>` on its backend type.
@@ -33,7 +32,7 @@
         -   Add a public, safe constructor `from_parts` that accepts a data buffer and a samples buffer.
         -   Define a clear memory layout for `bits` and `samples` to enable true zero-copy views from a single memory region.
 
-- [ ] **Implement Slicing**
+- [x] **Implement Slicing**
     -   **Action**: Create `IntVecSlice` and `IntVecSliceIter` structs.
     -   **API Changes**: Add `slice()` and `split_at()` methods to `IntVec`.
     -   **Dependencies**: Requires completion of Generic Backend Support.

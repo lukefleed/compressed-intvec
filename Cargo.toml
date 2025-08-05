@@ -71,4 +71,3 @@ lto = true
 default = ["parallel"]
 parallel = ["rayon"]
 serde = ["dep:serde"]
-simd = ["bytemuck"]

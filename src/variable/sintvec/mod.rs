@@ -5,7 +5,9 @@
 
 use crate::variable::{
     intvec::{IntVec, IntVecBitReader, IntVecError},
-    sintvec::{builder::SIntVecFromIterBuilder, iter::SIntVecIter},
+    sintvec::{
+        builder::SIntVecFromIterBuilder, iter::SIntVecIter, slice::SIntVecSlice
+    },
 };
 use dsi_bitstream::prelude::{BitRead, BitSeek, Codes, CodesRead, Endianness, ToInt, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
@@ -17,6 +19,7 @@ mod builder;
 mod iter;
 #[cfg(feature = "parallel")]
 mod parallel;
+pub mod slice; // Make the module public
 
 pub use builder::SIntVecBuilder;
 
@@ -145,6 +148,28 @@ impl<E: Endianness, B: AsRef<[u64]>> SIntVec<E, B> {
     {
         self.binary_search_by(|k| f(k).cmp(b))
     }
+
+    /// Creates a zero-copy slice of this vector.
+    pub fn slice(&self, start: usize, len: usize) -> Option<SIntVecSlice<E, B>>
+    where
+        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        self.inner.slice(start, len).map(SIntVecSlice::new)
+    }
+
+    /// Splits the vector into two slices at a given index.
+    pub fn split_at(&self, mid: usize) -> Option<(SIntVecSlice<E, B>, SIntVecSlice<E, B>)>
+    where
+        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        self.inner
+            .split_at(mid)
+            .map(|(left, right)| (SIntVecSlice::new(left), SIntVecSlice::new(right)))
+    }
 }
 
 impl<E: Endianness, B: AsRef<[u64]>> SIntVec<E, B>
@@ -200,6 +225,48 @@ where
         SIntVecIter::new(self)
     }
 }
+
+macro_rules! impl_partial_eq_for_sint_slice {
+    ($($t:ty),*) => {$(
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for SIntVec<E, B>
+        where
+            for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+                + CodesRead<E>
+                + BitSeek<Error = core::convert::Infallible>,
+        {
+            fn eq(&self, other: &Vec<$t>) -> bool {
+                self.eq(&other[..])
+            }
+        }
+
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for SIntVec<E, B>
+        where
+            for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+                + CodesRead<E>
+                + BitSeek<Error = core::convert::Infallible>,
+        {
+            fn eq(&self, other: &&[$t]) -> bool {
+                self.eq(*other)
+            }
+        }
+
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<[$t]> for SIntVec<E, B>
+        where
+            for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+                + CodesRead<E>
+                + BitSeek<Error = core::convert::Infallible>,
+        {
+            fn eq(&self, other: &[$t]) -> bool {
+                if self.len() != other.len() {
+                    return false;
+                }
+                self.iter().eq(other.iter().map(|&x| x as i64))
+            }
+        }
+    )*};
+}
+
+impl_partial_eq_for_sint_slice!(i8, i16, i32, i64);
 
 /// A type alias for an [`SIntVec`] with Big-Endian ([`BE`]) bitstream encoding.
 pub type BESIntVec = SIntVec<BE>;

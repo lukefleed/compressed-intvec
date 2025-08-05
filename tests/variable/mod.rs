@@ -4,3 +4,4 @@ mod test_search;
 mod test_serde;
 mod test_sintvec;
 mod test_backend;
+mod test_slice;

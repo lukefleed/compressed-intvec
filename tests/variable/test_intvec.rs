@@ -42,6 +42,20 @@ macro_rules! test_configuration {
             assert_eq!(&intvec.clone().into_vec(), input, "into_vec failed");
             assert_eq!(&intvec.iter().collect::<Vec<u64>>(), input, "iter failed");
 
+            // Test PartialEq implementations against native slices
+            assert_eq!(intvec, &input[..], "PartialEq with slice failed");
+            assert_eq!(intvec, input.to_vec(), "PartialEq with Vec failed");
+
+            if !input.is_empty() {
+                let mut different_input = input.to_vec();
+                different_input[0] = different_input[0].wrapping_add(1);
+                assert_ne!(
+                    intvec,
+                    &different_input[..],
+                    "PartialEq with different slice should fail"
+                );
+            }
+
             if !input.is_empty() {
                 let mut rng = StdRng::seed_from_u64(42);
                 let num_indices = 100.min(input.len());

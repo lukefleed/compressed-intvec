@@ -37,6 +37,20 @@ macro_rules! test_sintvec_configuration {
             // Test full decompression
             assert_eq!(&sintvec.iter().collect::<Vec<i64>>(), input, "iter failed");
 
+            // Test PartialEq implementations against native slices
+            assert_eq!(sintvec, &input[..], "PartialEq with slice failed");
+            assert_eq!(sintvec, input.to_vec(), "PartialEq with Vec failed");
+
+            if !input.is_empty() {
+                let mut different_input = input.to_vec();
+                different_input[0] = different_input[0].wrapping_add(1);
+                assert_ne!(
+                    sintvec,
+                    &different_input[..],
+                    "PartialEq with different slice should fail"
+                );
+            }
+
             if !input.is_empty() {
                 let mut rng = StdRng::seed_from_u64(42);
                 let num_indices = 100.min(input.len());

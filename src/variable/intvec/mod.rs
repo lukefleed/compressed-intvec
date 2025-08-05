@@ -26,6 +26,7 @@ mod iter;
 #[cfg(feature = "parallel")]
 mod parallel;
 mod reader;
+mod slice;
 mod seq_reader;
 #[cfg(feature = "serde")]
 mod serde;
@@ -34,6 +35,7 @@ pub use builder::{IntVecBuilder, IntVecFromIterBuilder};
 pub use iter::IntVecIter;
 pub use reader::IntVecReader;
 pub use seq_reader::IntVecSeqReader;
+pub use slice::IntVecSlice;
 
 /// Defines the set of errors that can occur in `IntVec` operations.
 #[derive(Debug)]
@@ -184,6 +186,39 @@ impl<E: Endianness, B: AsRef<[u64]>> IntVec<E, B> {
             encoding,
             endian: PhantomData,
         }
+    }
+
+    /// Creates a zero-copy slice of this vector.
+    ///
+    /// # Arguments
+    /// * `start`: The starting index of the slice.
+    /// * `len`: The number of elements in the slice.
+    ///
+    /// # Returns
+    /// An `Option` containing the [`IntVecSlice`] if the specified range is
+    /// within the bounds of the vector, or `None` otherwise.
+    pub fn slice(&self, start: usize, len: usize) -> Option<IntVecSlice<E, B>> {
+        if start + len > self.len {
+            return None;
+        }
+        Some(IntVecSlice::new(self, start..start + len))
+    }
+
+    /// Splits the vector into two slices at a given index.
+    ///
+    /// # Arguments
+    /// * `mid`: The index at which to split the vector.
+    ///
+    // # Returns
+    /// An `Option` containing a tuple of two [`IntVecSlice`]s if `mid` is
+    /// within the bounds of the vector, or `None` otherwise.
+    pub fn split_at(&self, mid: usize) -> Option<(IntVecSlice<E, B>, IntVecSlice<E, B>)> {
+        if mid > self.len {
+            return None;
+        }
+        let left = IntVecSlice::new(self, 0..mid);
+        let right = IntVecSlice::new(self, mid..self.len);
+        Some((left, right))
     }
 
     /// Returns the number of integers in the vector.
@@ -437,6 +472,48 @@ where
         self.binary_search_by(|k| f(k).cmp(b))
     }
 }
+
+macro_rules! impl_partial_eq_for_uint_slice {
+    ($($t:ty),*) => {$(
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<Vec<$t>> for IntVec<E, B>
+        where
+            for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+                + CodesRead<E>
+                + BitSeek<Error = core::convert::Infallible>,
+        {
+            fn eq(&self, other: &Vec<$t>) -> bool {
+                self.eq(&other[..])
+            }
+        }
+
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<&[$t]> for IntVec<E, B>
+        where
+            for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+                + CodesRead<E>
+                + BitSeek<Error = core::convert::Infallible>,
+        {
+            fn eq(&self, other: &&[$t]) -> bool {
+                self.eq(*other)
+            }
+        }
+
+        impl<E: Endianness, B: AsRef<[u64]>> PartialEq<[$t]> for IntVec<E, B>
+        where
+            for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+                + CodesRead<E>
+                + BitSeek<Error = core::convert::Infallible>,
+        {
+            fn eq(&self, other: &[$t]) -> bool {
+                if self.len() != other.len() {
+                    return false;
+                }
+                self.iter().eq(other.iter().map(|&x| x as u64))
+            }
+        }
+    )*};
+}
+
+impl_partial_eq_for_uint_slice!(u8, u16, u32, u64);
 
 /// A type alias for an [`IntVec`] with Big-Endian ([`BE`]) bitstream encoding.
 pub type BEIntVec = IntVec<BE>;

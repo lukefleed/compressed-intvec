@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install fontconfig
         run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+      - name: Switch to nightly toolchain
+        run: rustup default nightly
       - name: Build
         run: cargo build --verbose
       # - name: Run tests
