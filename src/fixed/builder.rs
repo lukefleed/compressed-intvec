@@ -9,7 +9,6 @@ use dsi_bitstream::{
     impls::{BufBitWriter, MemWordWriterVec},
     prelude::{BitWrite, Endianness},
 };
-use num_traits::{Bounded, ToPrimitive};
 use std::marker::PhantomData;
 
 /// A builder for creating an owned [`FixedVec<T, W, E, Vec<W>>`] from a slice of integers.

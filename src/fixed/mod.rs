@@ -20,11 +20,40 @@ pub mod atomic;
 #[cfg(feature = "serde")]
 mod serde;
 
-use dsi_bitstream::prelude::Endianness;
+use dsi_bitstream::{prelude::Endianness, traits::{BE, LE}};
 use mem_dbg::{MemDbg, MemSize};
-use num_traits::Bounded;
 use std::{error::Error as StdError, fmt, marker::PhantomData};
 use traits::{Storable, Word};
+
+// Type aliases for common `FixedVec` configurations.
+
+/// A generic fixed-width vector for unsigned integers, using `usize` as the
+/// storage word and Little-Endian byte order.
+///
+/// This is the recommended alias for general-purpose use with unsigned types.
+/// `T` can be `u8`, `u16`, `u32`, `u64`, `u128`, or `usize`.
+pub type UFixedVec<T, B = Vec<usize>> = FixedVec<T, usize, LE, B>;
+
+/// A generic fixed-width vector for signed integers, using `usize` as the
+/// storage word and Little-Endian byte order.
+///
+/// This is the recommended alias for general-purpose use with signed types.
+/// `T` can be `i8`, `i16`, `i32`, `i64`, `i128`, or `isize`.
+pub type SFixedVec<T, B = Vec<usize>> = FixedVec<T, usize, LE, B>;
+
+// --- Concrete Aliases for `u64`/`i64` elements with a `u64` backend ---
+// These are provided for backward compatibility and for cases where a `u64`
+// storage word is explicitly required.
+
+/// A `FixedVec` for `u64` elements with a `u64` backend and Little-Endian layout.
+pub type LEFixedVec<B = Vec<u64>> = FixedVec<u64, u64, LE, B>;
+/// A `FixedVec` for `i64` elements with a `u64` backend and Little-Endian layout.
+pub type LESFixedVec<B = Vec<u64>> = FixedVec<i64, u64, LE, B>;
+
+/// A `FixedVec` for `u64` elements with a `u64` backend and Big-Endian layout.
+pub type BEFixedVec<B = Vec<u64>> = FixedVec<u64, u64, BE, B>;
+/// A `FixedVec` for `i64` elements with a `u64` backend and Big-Endian layout.
+pub type BESFixedVec<B = Vec<u64>> = FixedVec<i64, u64, BE, B>;
 
 /// Specifies the strategy for determining the number of bits per integer in a `FixedVec`.
 ///
@@ -270,6 +299,39 @@ where
     pub unsafe fn iter_unchecked(&self) -> iter::FixedVecUncheckedIter<T, W, E, B> {
         iter::FixedVecUncheckedIter::new(self)
     }
+
+        /// Creates a zero-copy immutable view (slice) of this vector.
+    ///
+    /// # Arguments
+    /// * `start`: The starting index of the slice.
+    /// * `len`: The number of elements in the slice.
+    ///
+    /// # Returns
+    /// An `Option` containing the [`FixedVecView`] if the specified range is
+    /// within the bounds of the vector, or `None` otherwise.
+    pub fn slice(&self, start: usize, len: usize) -> Option<view::FixedVecView<T, W, E, B>> {
+        if start.saturating_add(len) > self.len {
+            return None;
+        }
+        Some(view::FixedVecView::new(self, start..start + len))
+    }
+
+    /// Splits the vector into two views at a given index.
+    ///
+    /// # Arguments
+    /// * `mid`: The index at which to split the vector.
+    ///
+    /// # Returns
+    /// An `Option` containing a tuple of two [`FixedVecView`]s if `mid` is
+    /// within the bounds of the vector, or `None` otherwise.
+    pub fn split_at(&self, mid: usize) -> Option<(view::FixedVecView<T, W, E, B>, view::FixedVecView<T, W, E, B>)> {
+        if mid > self.len {
+            return None;
+        }
+        let left = view::FixedVecView::new(self, 0..mid);
+        let right = view::FixedVecView::new(self, mid..self.len);
+        Some((left, right))
+    }
 }
 
 /// Implements `IntoIterator` for a borrowed `FixedVec`.
@@ -307,5 +369,214 @@ where
     /// allocating an intermediate `Vec<T>`.
     fn into_iter(self) -> Self::IntoIter {
         iter::FixedVecIntoIter::new(self)
+    }
+}
+
+// This block implements mutable, in-place operations for `FixedVec` instances
+// that have a mutable backend (e.g., `Vec<W>` or `&mut [W]`).
+impl<T, W, E, B> FixedVec<T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    /// Sets the value of an element at a given index.
+    ///
+    /// # Panics
+    /// Panics if `index` is out of bounds. Also panics if the provided `value`
+    /// does not fit within the configured `bit_width`.
+    pub fn set(&mut self, index: usize, value: T) {
+        assert!(index < self.len, "Index out of bounds: expected index < {}, got {}", self.len, index);
+        
+        let value_w = <T as Storable<W>>::into_word(value);
+        let bits_per_word = <W as traits::Word>::BITS;
+
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
+
+        if self.bit_width < bits_per_word && value_w >= limit {
+            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+        }
+
+        let bit_pos = index * self.bit_width;
+        let word_index = bit_pos / bits_per_word;
+        let bit_offset = bit_pos % bits_per_word;
+        
+        let limbs = self.bits.as_mut();
+
+        // This is a read-modify-write operation on the underlying words.
+        if E::IS_LITTLE {
+            if bit_offset + self.bit_width <= bits_per_word {
+                // Fast path: element is within a single word.
+                let original_word = &mut limbs[word_index];
+                *original_word &= !(self.mask << bit_offset); // Clear the bits
+                *original_word |= value_w << bit_offset;     // Set the new bits
+            } else {
+                // Slow path: element spans two words.
+                let (left, right) = limbs.split_at_mut(word_index + 1);
+                let low_word = &mut left[word_index];
+                let high_word = &mut right[0];
+
+                // Clear and set bits in the low word
+                *low_word &= !(self.mask << bit_offset);
+                *low_word |= value_w << bit_offset;
+
+                // Clear and set bits in the high word
+                let bits_in_high = (bit_offset + self.bit_width) - bits_per_word;
+                let high_mask = self.mask >> (self.bit_width - bits_in_high);
+                *high_word &= !high_mask;
+                *high_word |= value_w >> (self.bit_width - bits_in_high);
+            }
+        } else {
+            // Big-Endian logic is significantly more complex to write manually
+            // and is often less performant. For now, we delegate to a simpler get/set pattern.
+            // TODO: Implement optimized Big-Endian set logic.
+            unimplemented!("Mutable Big-Endian operations are not yet implemented.");
+        }
+    }
+}
+
+use std::ops::{Index, IndexMut};
+
+/// Implements `Index` for read-only bracket access (`vec[i]`).
+///
+/// Due to Rust's borrowing rules, this trait cannot be implemented in a way
+/// that returns a true reference (`&T`) without significant overhead or unsafe
+/// practices for a bit-packed structure. The `get()` method is the idiomatic
+/// and efficient way to access elements.
+impl<T, W, E, B> Index<usize> for FixedVec<T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    type Output = T;
+
+    #[inline]
+    fn index(&self, _index: usize) -> &Self::Output {
+        // This pattern is an anti-pattern in Rust for types that don't have
+        // stable references to return. It involves leaking memory or thread_local
+        // storage, both of which are undesirable.
+        panic!("Direct indexing that returns a temporary owned value is not supported. Use .get(index) instead.");
+    }
+}
+
+
+/// Implements `IndexMut` for mutable bracket access (`vec[i] = new_val`).
+///
+/// This implementation is intentionally omitted. Returning a mutable proxy object
+/// (`&mut T`) that correctly interacts with Rust's borrow checker and lifetimes
+/// is highly complex and often requires language features like Generic Associated
+/// Types (GATs) to be implemented cleanly and safely.
+/// The `set(index, value)` method is the recommended way to mutate elements.
+impl<T, W, E, B> IndexMut<usize> for FixedVec<T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    #[inline]
+    fn index_mut(&mut self, _index: usize) -> &mut Self::Output {
+        unimplemented!("IndexMut is not implemented. Please use the .set(index, value) method for mutable access.");
+    }
+}
+
+use num_traits::ToPrimitive; // Aggiungi questo in cima al file `mod.rs`
+
+// ... (resto del file)
+
+// This block implements resizing and capacity management methods for `FixedVec`
+// instances that have an owned `Vec<W>` backend.
+impl<T, W, E> FixedVec<T, W, E, Vec<W>>
+where
+    T: Storable<W> + ToPrimitive, // Aggiunto ToPrimitive per la conversione a u64
+    W: Word,
+    E: Endianness,
+{
+    /// Creates a new, empty `FixedVec` with a specified bit width.
+    pub fn new(bit_width: usize) -> Result<Self, Error> {
+        if bit_width > <W as traits::Word>::BITS {
+            return Err(Error::InvalidParameters(format!(
+                "bit_width ({}) cannot be greater than the word size ({})",
+                bit_width, <W as traits::Word>::BITS
+            )));
+        }
+        // SAFETY: A new vector is always valid.
+        Ok(unsafe { Self::new_unchecked(Vec::new(), 0, bit_width) })
+    }
+
+    /// Appends an element to the back of the vector.
+    ///
+    /// This operation may reallocate the underlying buffer if it is full.
+    ///
+    /// # Panics
+    /// Panics if the `value` does not fit within the configured `bit_width`.
+    pub fn push(&mut self, value: T) {
+        let value_w = <T as Storable<W>>::into_word(value);
+        let bits_per_word = <W as traits::Word>::BITS;
+
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
+
+        if self.bit_width < bits_per_word && value_w >= limit {
+            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+        }
+
+        let bit_pos = self.len * self.bit_width;
+        let required_total_bits = bit_pos + self.bit_width;
+        let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+
+        // Ensure there is space for data + 1 padding word.
+        if required_words + 1 > self.bits.len() {
+            // Reallocate with a growth factor.
+            let new_capacity_words = (self.bits.len() * 2).max(required_words + 1);
+            self.bits.resize(new_capacity_words, W::ZERO);
+        }
+        
+        // Manual bit-writing logic, similar to `set`.
+        let word_index = bit_pos / bits_per_word;
+        let bit_offset = bit_pos % bits_per_word;
+
+        if E::IS_LITTLE {
+            if bit_offset + self.bit_width <= bits_per_word {
+                // Fast path: element fits within a single word.
+                self.bits[word_index] |= value_w << bit_offset;
+            } else {
+                // Slow path: element spans two words.
+                self.bits[word_index] |= value_w << bit_offset;
+                self.bits[word_index + 1] |= value_w >> (bits_per_word - bit_offset);
+            }
+        } else {
+            // Big-Endian logic
+            unimplemented!("push for Big-Endian is not yet implemented.");
+        }
+        
+        self.len += 1;
+    }
+
+    /// Removes the last element from the vector and returns it, or `None` if it is empty.
+    pub fn pop(&mut self) -> Option<T> {
+        if self.is_empty() {
+            return None;
+        }
+        // get() is safe to unwrap because we checked is_empty()
+        let value = self.get(self.len - 1).unwrap(); 
+        self.len -= 1;
+        Some(value)
+    }
+
+    /// Removes all elements from the vector.
+    pub fn clear(&mut self) {
+        self.len = 0;
+        self.bits.fill(W::ZERO);
     }
 }
