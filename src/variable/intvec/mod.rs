@@ -153,7 +153,7 @@ impl<E: Endianness, B: AsRef<[u64]>> IntVec<E, B> {
                 "Sampling rate k cannot be zero".to_string(),
             ));
         }
-        let expected_samples = if len == 0 { 0 } else { (len + k - 1) / k };
+        let expected_samples = if len == 0 { 0 } else { len.div_ceil(k) };
         if samples.len() != expected_samples {
             return Err(crate::fixed::intvec::FixedVecError::InvalidParameters(
                 format!(

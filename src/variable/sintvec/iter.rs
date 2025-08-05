@@ -45,7 +45,7 @@ where
     }
 }
 
-impl<'a, E, B> Iterator for SIntVecIter<'a, E, B>
+impl<E, B> Iterator for SIntVecIter<'_, E, B>
 where
     E: Endianness,
     B: AsRef<[u64]>,
@@ -69,7 +69,7 @@ where
     }
 }
 
-impl<'a, E, B> std::iter::ExactSizeIterator for SIntVecIter<'a, E, B>
+impl<E, B> std::iter::ExactSizeIterator for SIntVecIter<'_, E, B>
 where
     E: Endianness,
     B: AsRef<[u64]>,

@@ -107,7 +107,7 @@ impl<'a, E: Endianness, B: AsRef<[u64]>> SFixedVecSliceIter<'a, E, B> {
     }
 }
 
-impl<'a, E: Endianness, B: AsRef<[u64]>> Iterator for SFixedVecSliceIter<'a, E, B> {
+impl<E: Endianness, B: AsRef<[u64]>> Iterator for SFixedVecSliceIter<'_, E, B> {
     type Item = i64;
 
     #[inline]
@@ -127,23 +127,23 @@ impl<'a, E: Endianness, B: AsRef<[u64]>> Iterator for SFixedVecSliceIter<'a, E, 
     }
 }
 
-impl<'a, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for SFixedVecSliceIter<'a, E, B> {
+impl<E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for SFixedVecSliceIter<'_, E, B> {
     fn len(&self) -> usize {
         self.slice.len().saturating_sub(self.current_index)
     }
 }
 
 // Implementations of traits from the standard library
-impl<'a, E: Endianness, B: AsRef<[u64]>> PartialEq for SFixedVecSlice<'a, E, B> {
+impl<E: Endianness, B: AsRef<[u64]>> PartialEq for SFixedVecSlice<'_, E, B> {
     fn eq(&self, other: &Self) -> bool {
         self.inner == other.inner
     }
 }
 
-impl<'a, E: Endianness, B: AsRef<[u64]>> Eq for SFixedVecSlice<'a, E, B> {}
+impl<E: Endianness, B: AsRef<[u64]>> Eq for SFixedVecSlice<'_, E, B> {}
 
-impl<'a, E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<SFixedVec<E, B2>>
-    for SFixedVecSlice<'a, E, B>
+impl<E: Endianness, B: AsRef<[u64]>, B2: AsRef<[u64]>> PartialEq<SFixedVec<E, B2>>
+    for SFixedVecSlice<'_, E, B>
 {
     fn eq(&self, other: &SFixedVec<E, B2>) -> bool {
         if self.len() != other.len() {

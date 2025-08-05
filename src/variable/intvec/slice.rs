@@ -154,7 +154,7 @@ impl<'a, E: Endianness, B: AsRef<[u64]>> IntVecSliceIter<'a, E, B> {
     }
 }
 
-impl<'a, E, B> Iterator for IntVecSliceIter<'a, E, B>
+impl<E, B> Iterator for IntVecSliceIter<'_, E, B>
 where
     E: Endianness,
     B: AsRef<[u64]>,
@@ -181,7 +181,7 @@ where
     }
 }
 
-impl<'a, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for IntVecSliceIter<'a, E, B>
+impl<E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for IntVecSliceIter<'_, E, B>
 where
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
@@ -193,7 +193,7 @@ where
 }
 
 // Implementations of traits from the standard library
-impl<'a, E, B, B2> PartialEq<IntVec<E, B2>> for IntVecSlice<'a, E, B>
+impl<E, B, B2> PartialEq<IntVec<E, B2>> for IntVecSlice<'_, E, B>
 where
     E: Endianness,
     B: AsRef<[u64]>,

@@ -132,7 +132,7 @@ impl<'a, E: Endianness> IntVecBuilder<'a, E> {
         let code_writer = FuncCodeWriter::new(resolved_code)
             .map_err(|e| IntVecError::CodecDispatch(e.to_string()))?;
 
-        let sample_capacity = (self.input.len() + self.k - 1) / self.k;
+        let sample_capacity = self.input.len().div_ceil(self.k);
         let mut temp_samples = Vec::with_capacity(sample_capacity);
         let mut current_bit_offset = 0;
 
