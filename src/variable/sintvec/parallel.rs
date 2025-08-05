@@ -5,34 +5,24 @@
 //! parallel implementations of the inner [`IntVec`] and leverage the [Rayon]
 //! library to exploit parallelism in access patterns.
 //!
-//! ## Implementation
-//!
-//! Both [`par_iter`] and [`par_get_many`] are implemented as lightweight
-//! wrappers around their [`IntVec`] counterparts. They delegate the heavy
-//! lifting of parallel decompression and access to the inner `IntVec` and then
-//! apply the inverse ZigZag transformation ([`ToInt`]) to the resulting `u64`
-//! values. Since this transformation is a trivial bitwise operation, the
-//! performance characteristics and trade-offs of these methods are identical
-//! to those of the underlying `IntVec`'s parallel methods.
-//!
-//! [Rayon]: https://docs.rs/rayon/latest/rayon/
-//! [`SIntVec`]: crate::sintvec::SIntVec
+//! [`SIntVec`]: crate::variable::sintvec::SIntVec
 //! [`IntVec`]: crate::variable::intvec::IntVec
-//! [`par_iter`]: crate::sintvec::SIntVec::par_iter
-//! [`par_get_many`]: crate::sintvec::SIntVec::par_get_many
-//! [`ToInt`]: dsi_bitstream::prelude::ToInt
+//! [`par_iter`]: crate::variable::sintvec::SIntVec::par_iter
+//! [`par_get_many`]: crate::variable::sintvec::SIntVec::par_get_many
 
 use super::{IntVecError, SIntVec};
-use dsi_bitstream::prelude::{Endianness, ToInt};
+use crate::variable::intvec::IntVecBitReader;
+use dsi_bitstream::prelude::{BitRead, BitSeek, CodesRead, Endianness, ToInt};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 #[cfg(feature = "parallel")]
-impl<E> SIntVec<E>
+impl<E, B> SIntVec<E, B>
 where
     E: Endianness + Send + Sync,
-    for<'a> crate::variable::intvec::IntVecBitReader<'a, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
-        + dsi_bitstream::dispatch::CodesRead<E>
-        + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>
+    B: AsRef<[u64]> + Send + Sync,
+    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>
         + Send,
 {
     /// Returns a parallel iterator over the decompressed `i64` values.
@@ -41,8 +31,7 @@ where
     /// the inverse ZigZag transformation to each element on the fly.
     ///
     /// See [`IntVec::par_iter`](crate::variable::intvec::IntVec::par_iter) for a detailed
-    /// discussion of performance characteristics. The overhead of the `to_int`
-    /// mapping is negligible.
+    /// discussion of performance characteristics.
     pub fn par_iter(&self) -> impl ParallelIterator<Item = i64> + '_ {
         self.inner
             .par_iter()
@@ -55,11 +44,9 @@ where
     /// ZigZag transformation to the results in parallel.
     ///
     /// See [`IntVec::par_get_many`](crate::variable::intvec::IntVec::par_get_many) for a detailed
-    /// discussion of performance characteristics. The overhead of the final
-    /// `to_int` mapping is negligible.
+    /// discussion of performance characteristics.
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<i64>, IntVecError> {
         let unsigned_values = self.inner.par_get_many(indices)?;
-        // This conversion is fast and can be parallelized.
         let signed_values = unsigned_values
             .into_par_iter()
             .map(|unsigned_val| unsigned_val.to_int())
@@ -67,10 +54,14 @@ where
         Ok(signed_values)
     }
 
-    pub fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<i64> {
-        // SAFETY: The caller must ensure that all indices are valid.
-        let unsigned_values = unsafe { self.inner.par_get_many_unchecked(indices) };
-        // This conversion is fast and can be parallelized.
+    /// Retrieves multiple signed integers in parallel without bounds checking.
+    ///
+    /// In debug builds, this method will panic if any index is out of bounds.
+    ///
+    /// # Safety
+    /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
+    pub unsafe fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<i64> {
+        let unsigned_values = self.inner.par_get_many_unchecked(indices);
         unsigned_values
             .into_par_iter()
             .map(|unsigned_val| unsigned_val.to_int())

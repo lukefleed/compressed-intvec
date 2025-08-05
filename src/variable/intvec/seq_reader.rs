@@ -42,33 +42,16 @@ use dsi_bitstream::{
 /// highly efficient for sequential or mostly-forward access patterns. By avoiding
 /// redundant bitstream seeks when accessing consecutive or nearby elements, it
 /// can significantly outperform other random-access methods in these scenarios.
-///
-/// # Example
-///
-/// ```rust
-/// use compressed_intvec::prelude::*;
-///
-/// let data: &[u64] = &;
-/// let intvec = LEIntVec::builder(data).k(4).build().unwrap();
-///
-/// // Create a reusable sequential reader.
-/// let mut seq_reader = intvec.seq_reader();
-///
-/// // Accessing elements sequentially is highly efficient.
-/// assert_eq!(seq_reader.get(2).unwrap(), Some(30)); // Seeks to sample 0, decodes 3 elements.
-/// assert_eq!(seq_reader.get(3).unwrap(), Some(40)); // Decodes 1 more element, no seek.
-///
-/// // Jumping to a new block will trigger a seek.
-/// assert_eq!(seq_reader.get(8).unwrap(), Some(90)); // Seeks to sample 2, decodes 1 element.
-/// ```
-pub struct IntVecSeqReader<'a, E: Endianness>
+pub struct IntVecSeqReader<'a, E, B>
 where
+    E: Endianness,
+    B: AsRef<[u64]>,
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// Immutable reference to the parent IntVec.
-    intvec: &'a IntVec<E>,
+    intvec: &'a IntVec<E, B>,
     /// The stateful, reusable bitstream reader.
     reader: IntVecBitReader<'a, E>,
     /// The pre-configured code reader, created once to avoid overhead.
@@ -78,8 +61,10 @@ where
     current_index: usize,
 }
 
-impl<'a, E: Endianness> IntVecSeqReader<'a, E>
+impl<'a, E, B> IntVecSeqReader<'a, E, B>
 where
+    E: Endianness,
+    B: AsRef<[u64]>,
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
@@ -87,12 +72,14 @@ where
     /// Creates a new `IntVecSeqReader`.
     ///
     /// This is `pub(super)` and is called by [`IntVec::seq_reader`].
-    pub(super) fn new(intvec: &'a IntVec<E>) -> Self {
+    pub(super) fn new(intvec: &'a IntVec<E, B>) -> Self {
         let code_reader = FuncCodeReader::new(intvec.encoding)
             .expect("Failed to create code reader for DSI encoding.");
         Self {
             intvec,
-            reader: IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(&intvec.data)),
+            reader: IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+                intvec.data.as_ref(),
+            )),
             code_reader,
             // The reader is initialized at bit position 0, which corresponds
             // to the start of the logical element sequence at index 0.
@@ -133,8 +120,7 @@ where
             self.intvec.len
         );
 
-        let k = self.intvec.k.unwrap();
-        let samples = self.intvec.samples.as_ref().unwrap();
+        let k = self.intvec.k;
 
         let target_sample_block = index / k;
         // Determine the block of the current position. Handle edge case where
@@ -150,7 +136,9 @@ where
         // to a different sample block entirely.
         if index < self.current_index || target_sample_block != current_sample_block {
             // Slow Path: A seek is required.
-            let start_bit = samples.get(target_sample_block).unwrap();
+            // SAFETY: The caller guarantees that `index` is in bounds, which implies
+            // that `target_sample_block` is also a valid index into the samples vector.
+            let start_bit = self.intvec.samples.get_unchecked(target_sample_block);
             self.reader.set_bit_pos(start_bit).unwrap();
             // Update our logical position to the start of this sample block.
             self.current_index = target_sample_block * k;

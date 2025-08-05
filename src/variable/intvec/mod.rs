@@ -5,54 +5,9 @@
 //! sequences. It achieves compression by leveraging a variety of instantaneous,
 //! variable-length codes from the [`dsi-bitstream`] crate.
 //!
-//! ## Core Functionality
-//!
-//! - **Compression**: Employs codecs like Gamma (γ), Delta (δ), and Zeta (ζ) for
-//!   data with skewed distributions.
-//! - **Fast Random Access**: Uses a sampling mechanism to provide fast random
-//!   access. The sampling rate, `k`, determines the trade-off between access
-//!   speed and memory overhead.
-//! - **Flexible Construction**: Provides a builder API that can construct an
-//!   [`IntVec`] from a slice or iterator, with support for automatic codec selection.
-//! - **High-Performance Lookups**: Offers optimized methods for various access
-//!   patterns, including a reusable [`IntVecReader`] for dynamic lookups, and
-//!   efficient batch methods like [`get_many`] and [`par_get_many`].
-//!
-//! The main struct, [`IntVec`], is generic over [`Endianness`], allowing
-//! users to choose between Little-Endian ([`LEIntVec`]) and Big-Endian ([`BEIntVec`])
-//! representations to optimize for specific hardware architectures.
-//!
-//! ## Example
-//!
-//! ```rust
-//! use compressed_intvec::prelude::*;
-//!
-//! // A small vector of integers to be compressed.
-//! let data: &[u64] = &;
-//!
-//! // Use the builder to create an IntVec.
-//! // `VariableCodecSpec::Auto` will analyze the data and select the best DSI codec.
-//! let intvec = LEIntVec::builder(&data)
-//!     .k(2) // Use a small sampling rate for this vector.
-//!     .codec(VariableCodecSpec::Auto)
-//!     .build()
-//!     .unwrap();
-//!
-//! // Verify the length and access some elements.
-//! assert_eq!(intvec.len(), data.len());
-//! assert_eq!(intvec.get(1), Some(200));
-//! assert_eq!(intvec.get(6), Some(1023));
-//! ```
-//!
-//! ## Tip for Efficient Access
-//!
-//! Use `k` as a power of two! It's faster when accessing sequentially close indices.
-//! Values like 16 and 32 usually provide a good balance between memory usage and access speed.
-//!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
-//! [`Endianness`]: dsi_bitstream::prelude::Endianness
-//! [`get_many`]: IntVec::get_many
-//! [`par_get_many`]: IntVec::par_get_many
+
+use crate::fixed::intvec::FixedVec;
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
     prelude::{
@@ -61,7 +16,7 @@ use dsi_bitstream::{
     },
     traits::{BE, LE},
 };
-use mem_dbg::{DbgFlags, MemDbg, MemDbgImpl, MemSize, SizeFlags};
+use mem_dbg::{MemDbg, MemSize};
 use rayon::slice::ParallelSliceMut;
 use std::{error::Error, fmt, marker::PhantomData};
 
@@ -83,18 +38,15 @@ pub use seq_reader::IntVecSeqReader;
 /// Defines the set of errors that can occur in `IntVec` operations.
 #[derive(Debug)]
 pub enum IntVecError {
-    /// An error occurred during an I/O operation, typically forwarded from the
-    /// underlying bitstream library.
+    /// An error occurred during an I/O operation.
     Io(std::io::Error),
-    /// A generic error originating from the `dsi-bitstream` library.
+    /// A generic error from the `dsi-bitstream` library.
     Bitstream(Box<dyn Error + Send + Sync>),
-    /// An error indicating that the provided parameters are invalid for the
-    /// requested operation, such as a sampling rate of `0`.
+    /// An error indicating invalid parameters.
     InvalidParameters(String),
-    /// An error during the dispatch of a compression or decompression function.
+    /// An error during codec function dispatch.
     CodecDispatch(String),
-    /// An error indicating that a requested index is outside the valid bounds
-    /// of the vector.
+    /// An error for out-of-bounds index access.
     IndexOutOfBounds(usize),
 }
 
@@ -132,132 +84,172 @@ impl From<core::convert::Infallible> for IntVecError {
     }
 }
 
-/// An enum to hold sample offsets, dynamically choosing `u32` or `u64`
-/// to save space on smaller vectors.
-#[derive(Debug, Clone)]
-#[cfg_attr(feature = "serde", derive(::serde::Serialize, ::serde::Deserialize))]
-pub(crate) enum Samples {
-    U32(Vec<u32>),
-    U64(Vec<u64>),
-}
-
-impl Samples {
-    /// Get the offset at a given index.
-    pub(crate) fn get(&self, index: usize) -> Option<u64> {
-        match self {
-            Samples::U32(v) => v.get(index).map(|&x| x as u64),
-            Samples::U64(v) => v.get(index).copied(),
-        }
-    }
-    /// Get the number of samples.
-    pub(crate) fn len(&self) -> usize {
-        match self {
-            Samples::U32(v) => v.len(),
-            Samples::U64(v) => v.len(),
-        }
-    }
-}
-
-// Manual impl to handle the enum variants correctly for MemDbg.
-impl MemDbgImpl for Samples {
-    fn _mem_dbg_rec_on(
-        &self,
-        writer: &mut impl fmt::Write,
-        total_size: usize,
-        max_depth: usize,
-        prefix: &mut String,
-        is_last: bool,
-        flags: DbgFlags,
-    ) -> fmt::Result {
-        match self {
-            Samples::U32(v) => {
-                v._mem_dbg_rec_on(writer, total_size, max_depth, prefix, is_last, flags)
-            }
-            Samples::U64(v) => {
-                v._mem_dbg_rec_on(writer, total_size, max_depth, prefix, is_last, flags)
-            }
-        }
-    }
-}
-
-impl MemSize for Samples {
-    fn mem_size(&self, flags: SizeFlags) -> usize {
-        match self {
-            Samples::U32(v) => v.mem_size(flags),
-            Samples::U64(v) => v.mem_size(flags),
-        }
-    }
-}
-
 /// A compressed, randomly accessible vector of `u64` integers.
 ///
-/// [`IntVec`] uses instantaneous codes from the [`dsi-bitstream`] crate to compress a
-/// vector of `u64` integers. To provide efficient random access, it stores sample
-/// points of the underlying bitstream at regular intervals, defined by the sampling
-/// rate `k`. This creates a trade-off: a smaller `k` results in faster random
-/// access but higher memory overhead, while a larger `k` reduces memory usage at
-/// the cost of slower access.
-///
-/// The most convenient way to create an [`IntVec`] is through its [builder](IntVec::builder),
-/// which allows for easy configuration of the sampling rate and compression codec,
-/// including automatic parameter selection.
-///
-/// The generic parameter `E` specifies the [`Endianness`] of the underlying bitstream.
-/// For convenience, the type aliases [`LEIntVec`] and [`BEIntVec`] are provided for
-/// little-endian and big-endian configurations, respectively.
+/// It uses instantaneous codes for compression and a sampling mechanism for
+/// fast random access, configurable via the sampling rate `k`.
 #[derive(Debug, Clone, MemDbg, MemSize)]
-pub struct IntVec<E: Endianness> {
-    /// The raw compressed data, stored as a `Vec<u64>`.
-    pub(super) data: Vec<u64>,
+pub struct IntVec<E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
+    /// The raw compressed data.
+    pub(super) data: B,
     /// Bit offsets of sampled elements.
-    pub(super) samples: Option<Samples>,
-    /// The sampling rate `k`, which determines the interval between samples.
-    pub(super) k: Option<usize>,
+    pub(super) samples: FixedVec<LE, B>,
+    /// The sampling rate `k`.
+    pub(super) k: usize,
     /// The number of elements in the vector.
     pub(super) len: usize,
-    /// The concrete `dsi-bitstream` code used for compression.
+    /// The `dsi-bitstream` code used for compression.
     pub(super) encoding: Codes,
-    /// A zero-sized marker for the endianness type parameter.
-    pub(super) endian: PhantomData<E>,
+    /// A zero-sized marker for endianness and backend type.
+    pub(super) endian: PhantomData<(E, B)>,
 }
 
 /// Type alias for the writer used internally by `IntVec`.
 pub(crate) type IntVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
 /// Type alias for the reader used internally by `IntVec`.
 pub(crate) type IntVecBitReader<'a, E> =
-    BufBitReader<E, MemWordReader<u64, &'a Vec<u64>>, DefaultReadParams>;
+    BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
 
-impl<E: Endianness> IntVec<E> {
-    /// Returns a builder for creating an [`IntVec`] from a slice of data.
-    ///
-    /// This method is generic over `AsRef<[u64]>`, so it can accept `&[u64]`,
-    /// `Vec<u64>`, etc.
+impl<E: Endianness> IntVec<E, Vec<u64>> {
+    /// Returns a builder for creating an owned [`IntVec`] from a slice.
     pub fn builder<T: AsRef<[u64]> + ?Sized>(input: &T) -> IntVecBuilder<E> {
         IntVecBuilder::new(input.as_ref())
     }
 
-    /// Returns a builder for creating an [`IntVec`] from an iterator.
-    ///
-    /// # Limitations
-    /// This builder **requires** that codec parameters be specified manually.
+    /// Returns a builder for creating an owned [`IntVec`] from an iterator.
     pub fn from_iter_builder<I: IntoIterator<Item = u64>>(iter: I) -> IntVecFromIterBuilder<E, I> {
         IntVecFromIterBuilder::new(iter)
     }
+
+    /// Consumes the [`IntVec`] and returns its decoded values as a `Vec<u64>`.
+    pub fn into_vec(self) -> Vec<u64>
+    where
+        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        self.iter().collect()
+    }
 }
 
-impl<E: Endianness> IntVec<E>
+impl<E: Endianness, B: AsRef<[u64]>> IntVec<E, B> {
+    /// Creates a new `IntVec` from its raw parts, enabling zero-copy views.
+    pub fn from_parts(
+        data: B,
+        samples_data: B,
+        samples_len: usize,
+        samples_num_bits: usize,
+        k: usize,
+        len: usize,
+        encoding: Codes,
+    ) -> Result<Self, crate::fixed::intvec::FixedVecError> {
+        let samples = FixedVec::<LE, B>::from_parts(samples_data, samples_len, samples_num_bits)?;
+
+        // Perform IntVec-specific validation.
+        if k == 0 {
+            return Err(crate::fixed::intvec::FixedVecError::InvalidParameters(
+                "Sampling rate k cannot be zero".to_string(),
+            ));
+        }
+        let expected_samples = if len == 0 { 0 } else { (len + k - 1) / k };
+        if samples.len() != expected_samples {
+            return Err(crate::fixed::intvec::FixedVecError::InvalidParameters(
+                format!(
+                    "Inconsistent number of samples. Expected {}, found {}",
+                    expected_samples,
+                    samples.len()
+                ),
+            ));
+        }
+
+        // SAFETY: All components have been validated.
+        Ok(unsafe { Self::new_unchecked(data, samples, k, len, encoding) })
+    }
+
+    /// Creates a new `IntVec` from its raw parts without safety checks.
+    /// # Safety
+    /// The caller must ensure all parameters are consistent and valid.
+    pub(crate) unsafe fn new_unchecked(
+        data: B,
+        samples: FixedVec<LE, B>,
+        k: usize,
+        len: usize,
+        encoding: Codes,
+    ) -> Self {
+        Self {
+            data,
+            samples,
+            k,
+            len,
+            encoding,
+            endian: PhantomData,
+        }
+    }
+
+    /// Returns the number of integers in the vector.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns `true` if the vector contains no elements.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns the sampling rate `k` used during encoding.
+    pub fn get_sampling_rate(&self) -> usize {
+        self.k
+    }
+
+    /// Returns the number of sample points stored in the vector.
+    pub fn get_num_samples(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Returns a reference to the inner `FixedVec` of samples.
+    pub fn samples_ref(&self) -> &FixedVec<LE, B> {
+        &self.samples
+    }
+
+    /// Returns a zero-copy, read-only slice of the underlying compressed data (`&[u64]`).
+    pub fn as_limbs(&self) -> &[u64] {
+        self.data.as_ref()
+    }
+
+    /// Returns the concrete `Codes` variant that was used for compression.
+    pub fn encoding(&self) -> Codes {
+        self.encoding
+    }
+
+    /// Returns a clone of the underlying storage as a `Vec<u64>`.
+    pub fn limbs(&self) -> Vec<u64> {
+        self.data.as_ref().to_vec()
+    }
+
+    /// Returns an iterator over the decompressed `u64` values.
+    pub fn iter(&self) -> IntVecIter<E, B>
+    where
+        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        IntVecIter::new(self)
+    }
+}
+
+impl<E: Endianness, B: AsRef<[u64]>> IntVec<E, B>
 where
     for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// Creates a stateful, reusable [`IntVecReader`] for this vector.
-    pub fn reader(&self) -> IntVecReader<E> {
+    pub fn reader(&self) -> IntVecReader<E, B> {
         IntVecReader::new(self)
     }
 
     /// Creates a stateful, reusable [`IntVecSeqReader`] for this vector.
-    pub fn seq_reader(&self) -> IntVecSeqReader<E> {
+    pub fn seq_reader(&self) -> IntVecSeqReader<E, B> {
         IntVecSeqReader::new(self)
     }
 
@@ -272,7 +264,6 @@ where
     }
 
     /// Retrieves the element at the specified index without bounds checking.
-    ///
     /// # Safety
     /// Calling this method with an out-of-bounds index is undefined behavior.
     #[inline]
@@ -287,7 +278,7 @@ where
         reader.get_unchecked(index)
     }
 
-    /// Retrieves multiple elements at the specified indices in a highly efficient way.
+    /// Retrieves multiple elements at the specified indices efficiently.
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<u64>, IntVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
@@ -302,8 +293,7 @@ where
         Ok(unsafe { self.get_many_unchecked(indices) })
     }
 
-    /// Retrieves multiple elements at the specified indices without bounds checking.
-    ///
+    /// Retrieves multiple elements at specified indices without bounds checking.
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior.
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<u64> {
@@ -330,10 +320,8 @@ where
             .collect();
         indexed_indices.par_sort_unstable_by_key(|&(idx, _)| idx);
 
-        let k = self.k.unwrap();
-
-        if k.is_power_of_two() {
-            let k_exp = k.trailing_zeros();
+        if self.k.is_power_of_two() {
+            let k_exp = self.k.trailing_zeros();
             self.get_many_dsi_inner(
                 &indexed_indices,
                 &mut results,
@@ -345,8 +333,8 @@ where
             self.get_many_dsi_inner(
                 &indexed_indices,
                 &mut results,
-                |idx| idx / k,
-                |block| block * k,
+                |idx| idx / self.k,
+                |block| block * self.k,
             )
             .unwrap();
         }
@@ -354,7 +342,7 @@ where
         results
     }
 
-    /// Inner helper function for DSI-based `get_many` to avoid code duplication.
+    /// Inner helper function for DSI-based `get_many`.
     fn get_many_dsi_inner<F1, F2>(
         &self,
         indexed_indices: &[(usize, usize)],
@@ -366,7 +354,6 @@ where
         F1: Fn(usize) -> usize,
         F2: Fn(usize) -> usize,
     {
-        let samples = self.samples.as_ref().unwrap();
         let mut reader = self.reader();
         let mut current_decoded_index: usize = 0;
 
@@ -375,7 +362,7 @@ where
                 || block_of(target_index) != block_of(current_decoded_index.saturating_sub(1))
             {
                 let target_sample_block = block_of(target_index);
-                let start_bit = samples.get(target_sample_block).unwrap();
+                let start_bit = self.samples.get(target_sample_block).unwrap();
                 reader.reader.set_bit_pos(start_bit)?;
                 current_decoded_index = start_of_block(target_sample_block);
             }
@@ -412,32 +399,11 @@ where
     }
 
     /// Binary searches this vector for a given element.
-    ///
-    /// If the vector is not sorted, the returned result is unspecified and
-    /// meaningless. For `binary_search` to work correctly, the vector must be
-    /// sorted in ascending order.
-    ///
-    /// If the value is found then `Ok(idx)` is returned, containing the
-    /// index of the matching element. If there are multiple matches, then any
-    /// one of the matches could be returned.
-    /// If the value is not found then `Err(idx)` is returned, containing
-    /// the index where a matching element could be inserted while maintaining
-    /// sorted order.
     pub fn binary_search(&self, value: u64) -> Result<usize, usize> {
         self.binary_search_by(|probe| probe.cmp(&value))
     }
 
     /// Binary searches this vector with a comparator function.
-    ///
-    /// The comparator function should return an `Ordering` that indicates
-    /// whether its argument is `Less`, `Equal` or `Greater` than the desired
-    /// target.
-    /// If the vector is not sorted or if the comparator does not reflect the
-    /// vector's ordering, the returned result is unspecified.
-    ///
-    /// This implementation creates a single, reusable reader to perform the
-    /// search efficiently, avoiding the overhead of creating a new reader
-    /// at each step of the binary search.
     #[inline]
     pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
     where
@@ -445,14 +411,11 @@ where
     {
         let mut low = 0;
         let mut high = self.len();
-        // Create a single reader instance to be reused throughout the search,
-        // which is significantly more performant than creating one per lookup.
         let mut reader = self.reader();
 
         while low < high {
             let mid = low + (high - low) / 2;
-            // SAFETY: The binary search algorithm ensures that `mid` is always
-            // within the bounds `0 <= mid < self.len()`.
+            // SAFETY: `mid` is always in bounds.
             let cmp = f(unsafe { reader.get_unchecked(mid) });
 
             match cmp {
@@ -465,9 +428,6 @@ where
     }
 
     /// Binary searches this vector with a key extraction function.
-    ///
-    /// If the vector is not sorted by the key, the returned result is
-    /// unspecified.
     #[inline]
     pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
     where
@@ -475,46 +435,6 @@ where
         B1: Ord,
     {
         self.binary_search_by(|k| f(k).cmp(b))
-    }
-
-    /// Consumes the [`IntVec`] and returns a `Vec<u64>`.
-    pub fn into_vec(self) -> Vec<u64> {
-        self.iter().collect()
-    }
-
-    /// Returns a clone of the underlying storage (`Vec<u64>`).
-    pub fn limbs(&self) -> Vec<u64> {
-        self.data.clone()
-    }
-
-    /// Returns the number of integers in the vector.
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Returns `true` if the vector contains no elements.
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Returns the sampling rate `k` used during encoding.
-    pub fn get_sampling_rate(&self) -> Option<usize> {
-        self.k
-    }
-
-    /// Returns the number of sample points stored in the vector.
-    pub fn get_num_samples(&self) -> usize {
-        self.samples.as_ref().map_or(0, |s| s.len())
-    }
-
-    /// Returns an iterator over the decompressed `u64` values.
-    pub fn iter(&self) -> IntVecIter<E> {
-        IntVecIter::new(self)
-    }
-
-    /// Returns the concrete `Codes` variant that was used for compression.
-    pub fn encoding(&self) -> Codes {
-        self.encoding
     }
 }
 

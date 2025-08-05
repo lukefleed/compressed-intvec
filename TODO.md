@@ -27,8 +27,7 @@
 
 # Variable Length Vector
 
-
-- [ ] **Implement Generic Backend Support**
+- [x] **Implement Generic Backend Support**
     -   **Action**: Refactor `IntVec<E>` to `IntVec<E, B: AsRef<[u64]>>`.
     -   **API Changes**:
         -   Add a public, safe constructor `from_parts` that accepts a data buffer and a samples buffer.

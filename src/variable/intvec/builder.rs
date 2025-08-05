@@ -19,7 +19,8 @@
 //! Both builders use a fluent API to configure parameters like the sampling
 //! rate `k` and the desired [`VariableCodecSpec`].
 
-use super::{IntVec, IntVecBitWriter, IntVecError, Samples};
+use super::{IntVec, IntVecBitWriter, IntVecError};
+use crate::fixed::intvec::{BitWidth, LEFixedVec};
 use crate::variable::codec::{resolve_codec, VariableCodecSpec};
 use dsi_bitstream::{
     dispatch::{FuncCodeWriter, StaticCodeWrite},
@@ -37,6 +38,7 @@ use std::marker::PhantomData;
 /// Because it operates on a slice, it can automatically select the best codec
 /// parameters by analyzing the data first. This is the recommended way to construct
 /// an [`IntVec`] when all data is available in memory.
+/// This builder always produces a `IntVec<E, Vec<u64>>`.
 #[derive(Debug)]
 pub struct IntVecBuilder<'a, E: Endianness> {
     pub(super) input: &'a [u64],
@@ -83,19 +85,6 @@ impl<'a, E: Endianness> IntVecBuilder<'a, E> {
     ///
     /// # Arguments
     /// * `codec_spec`: The desired codec specification.
-    ///
-    /// # Example
-    /// ```rust
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let data: &[u64] = &;
-    /// let intvec = LEIntVec::builder(data)
-    ///     .codec(VariableCodecSpec::Gamma)
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// assert_eq!(intvec.encoding(), dsi_bitstream::prelude::Codes::Gamma);
-    /// ```
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
         self
@@ -110,37 +99,31 @@ impl<'a, E: Endianness> IntVecBuilder<'a, E> {
     ///
     /// # Returns
     ///
-    /// A `Result` containing the constructed `IntVec` on success, or an
+    /// A `Result` containing the constructed `IntVec<E, Vec<u64>>` on success, or an
     /// `IntVecError` if there's a problem, such as `k=0`.
-    ///
-    /// # Implementation Notes
-    ///
-    /// After writing the compressed bitstream, this method calls `shrink_to_fit`
-    /// on the underlying `Vec<u64>` used for storage. While this may incur a
-    /// one-time cost of reallocation and copying, it ensures that the final `IntVec`
-    /// occupies the minimum necessary memory, which is critical for a data structure
-    /// focused on compression.
-    pub fn build(self) -> Result<IntVec<E>, IntVecError>
+    pub fn build(self) -> Result<IntVec<E, Vec<u64>>, IntVecError>
     where
         IntVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
-        let resolved_code = resolve_codec(self.input, self.codec_spec)?;
-
-        if self.input.is_empty() {
-            return Ok(IntVec {
-                data: Vec::new(),
-                samples: Some(Samples::U32(Vec::new())),
-                k: Some(self.k),
-                len: 0,
-                encoding: resolved_code,
-                endian: PhantomData,
-            });
-        }
-
         if self.k == 0 {
             return Err(IntVecError::InvalidParameters(
                 "Sampling rate k cannot be zero".to_string(),
             ));
+        }
+
+        let resolved_code = resolve_codec(self.input, self.codec_spec)?;
+
+        if self.input.is_empty() {
+            // SAFETY: An empty IntVec with empty samples is valid.
+            return Ok(unsafe {
+                IntVec::new_unchecked(
+                    Vec::new(),
+                    LEFixedVec::builder(&[0u64; 0]).build().unwrap(),
+                    self.k,
+                    0,
+                    resolved_code,
+                )
+            });
         }
 
         let word_writer = MemWordWriterVec::new(Vec::new());
@@ -149,9 +132,9 @@ impl<'a, E: Endianness> IntVecBuilder<'a, E> {
         let code_writer = FuncCodeWriter::new(resolved_code)
             .map_err(|e| IntVecError::CodecDispatch(e.to_string()))?;
 
-        let sample_capacity = self.input.len().div_ceil(self.k);
+        let sample_capacity = (self.input.len() + self.k - 1) / self.k;
         let mut temp_samples = Vec::with_capacity(sample_capacity);
-        let mut current_bit_offset = 0usize;
+        let mut current_bit_offset = 0;
 
         for (i, &value) in self.input.iter().enumerate() {
             if i % self.k == 0 {
@@ -162,23 +145,19 @@ impl<'a, E: Endianness> IntVecBuilder<'a, E> {
         }
         writer.write_bits(u64::MAX, 64).unwrap(); // Stopper
 
-        let samples = if current_bit_offset as u64 <= u32::MAX as u64 {
-            Samples::U32(temp_samples.into_iter().map(|s| s as u32).collect())
-        } else {
-            Samples::U64(temp_samples)
-        };
+        // Build the compressed sample vector
+        let samples = LEFixedVec::builder(&temp_samples)
+            .bit_width(BitWidth::Minimal)
+            .build()
+            .unwrap();
 
         writer.flush().unwrap();
         let mut data = writer.into_inner().unwrap().into_inner();
         data.shrink_to_fit();
 
-        Ok(IntVec {
-            data,
-            samples: Some(samples),
-            k: Some(self.k),
-            len: self.input.len(),
-            encoding: resolved_code,
-            endian: PhantomData,
+        // SAFETY: The builder ensures all parameters are consistent.
+        Ok(unsafe {
+            IntVec::new_unchecked(data, samples, self.k, self.input.len(), resolved_code)
         })
     }
 }
@@ -240,7 +219,7 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> IntVecFromIterBuilder<E, I> {
     /// Builds the `IntVec` by consuming the iterator.
     ///
     /// This method iterates through the provided data, encodes it according to the
-    /// specified codec, and constructs the final `IntVec`.
+    /// specified codec, and constructs the final `IntVec<E, Vec<u64>>`.
     ///
     /// # Returns
     ///
@@ -248,7 +227,7 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> IntVecFromIterBuilder<E, I> {
     /// `IntVecError` on failure. Errors can occur if:
     /// - An automatic or parameter-less codec spec is provided (e.g., `VariableCodecSpec::Auto`).
     /// - `k=0` is used.
-    pub fn build(self) -> Result<IntVec<E>, IntVecError>
+    pub fn build(self) -> Result<IntVec<E, Vec<u64>>, IntVecError>
     where
         IntVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
@@ -279,7 +258,7 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> IntVecFromIterBuilder<E, I> {
         let code_writer = FuncCodeWriter::new(resolved_code)
             .map_err(|e| IntVecError::CodecDispatch(e.to_string()))?;
         let mut temp_samples = Vec::new();
-        let mut current_bit_offset = 0usize;
+        let mut current_bit_offset = 0;
 
         for (i, value) in self.iter.into_iter().enumerate() {
             if i % self.k == 0 {
@@ -291,23 +270,16 @@ impl<E: Endianness, I: IntoIterator<Item = u64>> IntVecFromIterBuilder<E, I> {
         }
         writer.write_bits(u64::MAX, 64).unwrap(); // Stopper
 
-        let samples = if current_bit_offset as u64 <= u32::MAX as u64 {
-            Samples::U32(temp_samples.into_iter().map(|s| s as u32).collect())
-        } else {
-            Samples::U64(temp_samples)
-        };
+        let samples = LEFixedVec::builder(&temp_samples)
+            .bit_width(BitWidth::Minimal)
+            .build()
+            .unwrap();
 
         writer.flush().unwrap();
         let mut data = writer.into_inner().unwrap().into_inner();
         data.shrink_to_fit();
 
-        Ok(IntVec {
-            data,
-            samples: Some(samples),
-            k: Some(self.k),
-            len,
-            encoding: resolved_code,
-            endian: PhantomData,
-        })
+        // SAFETY: The builder ensures all parameters are consistent.
+        Ok(unsafe { IntVec::new_unchecked(data, samples, self.k, len, resolved_code) })
     }
 }

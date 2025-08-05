@@ -34,39 +34,26 @@ use dsi_bitstream::{
 /// By reusing the same underlying components, it amortizes setup costs across
 /// many `get` operations, making it ideal for access patterns that are not known
 /// in advance (e.g., indices generated on-the-fly in a loop).
-///
-/// # Example
-///
-/// ```rust
-/// use compressed_intvec::prelude::*;
-///
-/// let data: &[u64] = &;
-/// let intvec = LEIntVec::builder(data).build().unwrap();
-///
-/// // Create a reusable reader from the IntVec.
-/// let mut reader = intvec.reader();
-///
-/// // Perform multiple lookups. The reader efficiently handles seeks.
-/// assert_eq!(reader.get(3).unwrap(), Some(40));
-/// assert_eq!(reader.get(1).unwrap(), Some(20));
-/// assert_eq!(reader.get(0).unwrap(), Some(10));
-/// ```
-pub struct IntVecReader<'a, E: Endianness>
+pub struct IntVecReader<'a, E, B>
 where
+    E: Endianness,
+    B: AsRef<[u64]>,
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// A reference to the parent `IntVec`.
-    pub(super) intvec: &'a IntVec<E>,
+    pub(super) intvec: &'a IntVec<E, B>,
     /// The stateful, reusable bitstream reader.
     pub(super) reader: IntVecBitReader<'a, E>,
     /// The pre-configured code reader, created once to avoid overhead.
     pub(super) code_reader: FuncCodeReader<E, IntVecBitReader<'a, E>>,
 }
 
-impl<'a, E: Endianness> IntVecReader<'a, E>
+impl<'a, E, B> IntVecReader<'a, E, B>
 where
+    E: Endianness,
+    B: AsRef<[u64]>,
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
@@ -74,9 +61,10 @@ where
     /// Creates a new `IntVecReader`.
     ///
     /// This is `pub(super)` and is called by [`IntVec::reader`].
-    pub(super) fn new(intvec: &'a IntVec<E>) -> Self {
-        let bit_reader =
-            IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(&intvec.data));
+    pub(super) fn new(intvec: &'a IntVec<E, B>) -> Self {
+        let bit_reader = IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+            intvec.data.as_ref(),
+        ));
         let code_reader = FuncCodeReader::new(intvec.encoding)
             .expect("Failed to create code reader for DSI encoding.");
         Self {
@@ -120,10 +108,11 @@ where
             index,
             self.intvec.len()
         );
-        let k = self.intvec.k.unwrap();
-        let samples = self.intvec.samples.as_ref().unwrap();
+        let k = self.intvec.k;
         let sample_index = index / k;
-        let start_bit = samples.get(sample_index).unwrap();
+        // SAFETY: The caller guarantees that `index` is in bounds, which implies
+        // that `sample_index` is also a valid index into the samples vector.
+        let start_bit = self.intvec.samples.get_unchecked(sample_index);
         let start_index = sample_index * k;
 
         // The underlying bitstream operations are infallible, so unwrap is safe.

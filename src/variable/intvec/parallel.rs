@@ -5,26 +5,9 @@
 //! [Rayon] library and are designed to leverage multi-core architectures to
 //! accelerate data decompression and access.
 //!
-//! ## Provided Functionality
-//!
-//! - [`par_iter`]: A parallel iterator for full-vector decompression. This can
-//!   provide significant speedups for computationally intensive codecs but may
-//!   be outperformed by the sequential [`iter`][`IntVec::iter`] for simpler codecs
-//!   where memory bandwidth is the limiting factor.
-//!
-//! - [`par_get_many`]: A method for parallel batch lookups. It parallelizes the
-//!   retrieval of elements at specified indices, trading some redundant work
-//!   for higher throughput on multi-core systems.
-//!
-//! The effectiveness of these parallel methods depends on the workload, the
-//! chosen compression scheme ([`VariableCodecSpec`]), and the underlying hardware.
-//!
-//! [Rayon]: https://docs.rs/rayon/latest/rayon/
 //! [`IntVec`]: crate::variable::intvec::IntVec
 //! [`par_iter`]: crate::variable::intvec::IntVec::par_iter
 //! [`par_get_many`]: crate::variable::intvec::IntVec::par_get_many
-//! [`IntVec::iter`]: crate::variable::intvec::IntVec::iter
-//! [`VariableCodecSpec`]: crate::variable::codec::VariableCodecSpec
 
 use super::{IntVec, IntVecBitReader, IntVecError};
 use dsi_bitstream::{
@@ -36,9 +19,10 @@ use rayon::prelude::{
 };
 
 #[cfg(feature = "parallel")]
-impl<E> IntVec<E>
+impl<E, B> IntVec<E, B>
 where
     E: Endianness + Send + Sync,
+    B: AsRef<[u64]> + Send + Sync,
     for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>
@@ -50,39 +34,15 @@ where
     /// which can yield significant speedups on multi-core systems, especially
     /// when using computationally intensive compression schemes.
     ///
-    /// # Implementation Notes
-    /// The implementation uses a coarse-grained parallelization approach. The set
-    /// of sample points is divided into chunks, and each thread is assigned a
-    /// chunk. A thread will then sequentially decompress all elements corresponding
-    /// to its assigned sample points.
-    ///
     /// # Performance
     /// For the specific task of full decompression, this parallel version is not
     /// always faster than the sequential [`iter`](super::IntVec::iter). If the
     /// decoding operation is very fast, the operation is often limited by memory
     /// bandwidth. In such cases, the sequential iterator's better use of CPU
     /// caches can outperform this parallel version.
-    ///
-    /// # Example
-    /// ```rust
-    /// use compressed_intvec::prelude::*;
-    /// use rayon::prelude::ParallelIterator;
-    ///
-    /// let intvec = LEIntVec::from_iter_builder(0..1000_u64)
-    ///     .codec(VariableCodecSpec::Delta)
-    ///     .k(8)
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// let original_data: Vec<u64> = (0..1000).collect();
-    /// let parallel_collected: Vec<u64> = intvec.par_iter().collect();
-    ///
-    /// assert_eq!(parallel_collected, original_data);
-    /// ```
     pub fn par_iter(&self) -> impl ParallelIterator<Item = u64> + '_ {
-        let k = self.k.unwrap();
-        let samples = self.samples.as_ref().unwrap();
-        let num_samples = samples.len();
+        let k = self.k;
+        let num_samples = self.samples.len();
         let num_threads = rayon::current_num_threads();
         let chunk_size = num_samples.div_ceil(num_threads).max(1);
         let num_chunks = num_samples.div_ceil(chunk_size);
@@ -90,8 +50,9 @@ where
         (0..num_chunks).into_par_iter().flat_map(move |chunk_idx| {
             let start_sample_idx = chunk_idx * chunk_size;
             let end_sample_idx = (start_sample_idx + chunk_size).min(num_samples);
-            let mut bit_reader =
-                IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(&self.data));
+            let mut bit_reader = IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
+                self.data.as_ref(),
+            ));
             let mut values = Vec::new();
             let code_reader = FuncCodeReader::<E, _>::new(self.encoding).unwrap();
 
@@ -100,12 +61,11 @@ where
                 let end_elem_index = ((sample_idx + 1) * k).min(self.len);
 
                 bit_reader
-                    .set_bit_pos(samples.get(sample_idx).unwrap())
+                    .set_bit_pos(self.samples.get(sample_idx).unwrap())
                     .unwrap();
 
                 for _ in start_elem_index..end_elem_index {
                     use dsi_bitstream::prelude::StaticCodeRead;
-
                     values.push(code_reader.read(&mut bit_reader).unwrap());
                 }
             }
@@ -117,35 +77,6 @@ where
     ///
     /// This method provides parallel random access to a slice of indices. It is
     /// optimized for scenarios with a large number of lookups on multi-core systems.
-    ///
-    /// # Implementation Notes
-    ///
-    /// This method parallelizes lookups over the provided `indices` slice. To
-    /// avoid the high cost of creating a new bitstream reader for every single
-    /// lookup, it uses [`rayon::iter::ParallelIterator::for_each_init`] to create
-    /// a single, reusable [`IntVecReader`] for each thread. This reader is then
-    /// used for all lookups assigned to that thread, amortizing the setup cost.
-    ///
-    /// This approach differs from the sequential [`get_many`](super::IntVec::get_many),
-    /// which sorts the indices to perform a single, monotonic forward scan. The parallel
-    /// version avoids this sorting but may perform *redundant decoding* if multiple
-    /// threads request indices within the same sample block.
-    ///
-    /// # Example
-    /// ```rust
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let intvec = LEIntVec::from_iter_builder(0..1000_u64)
-    ///     .codec(VariableCodecSpec::Delta)
-    ///     .k(8)
-    ///     .build()
-    ///     .unwrap();
-    ///
-    /// let indices = vec!;
-    /// let results = intvec.par_get_many(&indices).unwrap();
-    ///
-    /// assert_eq!(results, vec!);
-    /// ```
     ///
     /// [`IntVecReader`]: super::IntVecReader
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<u64>, IntVecError> {
@@ -159,20 +90,16 @@ where
             }
         }
 
-        let mut results = vec![0; indices.len()];
-
-        results.par_iter_mut().enumerate().for_each_init(
-            || self.reader(), // Create a reader for each thread.
-            |reader, (original_pos, res_val)| {
-                let target_index = indices[original_pos];
-                // SAFETY: bounds have been pre-checked.
-                *res_val = unsafe { reader.get_unchecked(target_index) };
-            },
-        );
-
-        Ok(results)
+        // SAFETY: We have pre-checked the bounds of all indices.
+        Ok(unsafe { self.par_get_many_unchecked(indices) })
     }
 
+    /// Retrieves multiple elements in parallel without bounds checking.
+    ///
+    /// In debug builds, this method will panic if any index is out of bounds.
+    ///
+    /// # Safety
+    /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
     pub unsafe fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<u64> {
         #[cfg(debug_assertions)]
         {
@@ -186,13 +113,18 @@ where
             }
         }
 
+        if indices.is_empty() {
+            return Vec::new();
+        }
+
         let mut results = vec![0; indices.len()];
 
         results.par_iter_mut().enumerate().for_each_init(
             || self.reader(), // Create a reader for each thread.
             |reader, (original_pos, res_val)| {
-                // SAFETY: bounds have been pre-checked.
-                *res_val = unsafe { reader.get_unchecked(indices[original_pos]) };
+                let target_index = indices[original_pos];
+                // SAFETY: bounds are guaranteed by the caller.
+                *res_val = unsafe { reader.get_unchecked(target_index) };
             },
         );
 

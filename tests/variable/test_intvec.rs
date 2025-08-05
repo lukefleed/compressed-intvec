@@ -30,7 +30,7 @@ macro_rules! test_configuration {
             // Basic property checks
             assert_eq!(intvec.len(), input.len());
             assert_eq!(intvec.is_empty(), input.is_empty());
-            assert_eq!(intvec.get_sampling_rate(), Some(k));
+            assert_eq!(intvec.get_sampling_rate(), k);
             if input.is_empty() {
                 assert_eq!(intvec.get_num_samples(), 0);
             } else {

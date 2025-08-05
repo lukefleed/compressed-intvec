@@ -84,11 +84,13 @@ macro_rules! test_sintvec_configuration {
                         expected,
                         "par_get_many failed"
                     );
-                    assert_eq!(
-                        sintvec.par_get_many_unchecked(&indices),
-                        expected,
-                        "par_get_many_unchecked failed"
-                    );
+                    unsafe {
+                        assert_eq!(
+                            sintvec.par_get_many_unchecked(&indices),
+                            expected,
+                            "par_get_many_unchecked failed"
+                        );
+                    }
                 }
             } else {
                 // Special checks for empty vec

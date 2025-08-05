@@ -2,33 +2,6 @@
 //!
 //! This module provides [`SIntVec`], a specialized vector for compressing signed
 //! integer data.
-//!
-//! # The Challenge of Compressing Signed Integers
-//!
-//! Standard bit-level compression codes (like Gamma or Delta) are designed for
-//! non-negative integers and perform best on small values. A direct `i64 as u64`
-//! cast is problematic because small negative numbers (e.g., -1, -2) become very
-//! large positive numbers (e.g., `u64::MAX`, `u64::MAX - 1`), which are highly
-//! inefficient to compress with these codes.
-//!
-//! # ZigZag Encoding
-//!
-//! To solve this, [`SIntVec`] uses a bijective mapping known as **ZigZag encoding**
-//! to transform the signed integers into unsigned integers before compression. This
-//! transformation maps integers close to zero (both positive and negative) to small
-//! positive integers, making them highly compressible. The mapping is as follows:
-//!
-//! | Original `i64` | Mapped `u64` |
-//! | :------------: | :----------: |
-//! |       0        |      0       |
-//! |      -1        |      1       |
-//! |       1        |      2       |
-//! |      -2        |      3       |
-//! |       2        |      4       |
-//! |      ...       |     ...      |
-//!
-//! This transformation is handled transparently by [`SIntVec`]. All compression,
-//! storage, and random access logic is then delegated to an inner [`IntVec`].
 
 use crate::variable::{
     intvec::{IntVec, IntVecBitReader, IntVecError},
@@ -36,6 +9,8 @@ use crate::variable::{
 };
 use dsi_bitstream::prelude::{BitRead, BitSeek, Codes, CodesRead, Endianness, ToInt, BE, LE};
 use mem_dbg::{MemDbg, MemSize};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 // Declare and export submodules.
 mod builder;
@@ -49,55 +24,38 @@ pub use builder::SIntVecBuilder;
 ///
 /// [`SIntVec`] acts as a wrapper around [`IntVec`] that transparently handles the
 /// encoding of signed integers (`i64`) into unsigned integers (`u64`) using
-/// the ZigZag transformation. This allows for efficient compression of typical
-/// signed integer distributions, where values are often clustered around zero.
-///
-/// All compression logic and storage are delegated to the inner [`IntVec`].
-/// This struct exposes an equivalent API but operates on `i64` values. The
-/// performance characteristics of its methods are nearly identical to their
-/// [`IntVec`] counterparts, with only the negligible overhead of the `to_int`
-/// transformation on the final results.
-///
-/// # Limitations
-///
-/// The [`SIntVecBuilder`] **requires that codec parameters be
-/// specified manually**. Automatic parameter selection is not supported because the
-/// on-the-fly ZigZag transformation prevents a pre-analysis pass.
-///
-/// # Example
-/// ```rust
-/// use compressed_intvec::prelude::*;
-///
-/// let data: &[i64] = &;
-///
-/// // SIntVec requires manual codec selection. Let's use Gamma.
-/// let sintvec = LESIntVec::builder(&data)
-///     .codec(VariableCodecSpec::Gamma)
-///     .k(4)
-///     .build()
-///     .unwrap();
-///
-/// assert_eq!(sintvec.len(), data.len());
-/// assert_eq!(sintvec.get(0), Some(-10));
-/// ```
+/// the ZigZag transformation.
 #[derive(Debug, Clone, MemDbg, MemSize)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(transparent, bound = ""))]
-pub struct SIntVec<E: Endianness> {
+pub struct SIntVec<E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// The inner `IntVec` that stores the ZigZag-encoded `u64` values.
-    inner: IntVec<E>,
+    inner: IntVec<E, B>,
 }
 
-impl<E: Endianness> SIntVec<E>
-where
-    for<'b> crate::variable::intvec::IntVecBitReader<'b, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
-        + dsi_bitstream::dispatch::CodesRead<E>
-        + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
-{
+// Manual serde implementation to handle generics correctly.
+#[cfg(feature = "serde")]
+impl<E: Endianness, B: AsRef<[u64]>> Serialize for SIntVec<E, B> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.inner.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de, E: Endianness> Deserialize<'de> for SIntVec<E, Vec<u64>> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(SIntVec {
+            inner: IntVec::<E, Vec<u64>>::deserialize(deserializer)?,
+        })
+    }
+}
+
+impl<E: Endianness> SIntVec<E, Vec<u64>> {
     /// Returns a builder for creating an [`SIntVec`] from a slice of data.
-    ///
-    /// This method is generic over `AsRef<[i64]>`, so it can accept `&[i64]`,
-    /// `Vec<i64>`, etc. See [`SIntVecBuilder`] for more details.
     pub fn builder<T: AsRef<[i64]> + ?Sized>(input: &T) -> SIntVecBuilder<E> {
         SIntVecBuilder::new(input.as_ref())
     }
@@ -105,6 +63,21 @@ where
     /// Returns a builder for creating a [`SIntVec`] from an iterator.
     pub fn from_iter_builder<I: IntoIterator<Item = i64>>(iter: I) -> SIntVecFromIterBuilder<E, I> {
         SIntVecFromIterBuilder::new(iter)
+    }
+}
+
+impl<E: Endianness, B: AsRef<[u64]>> SIntVec<E, B> {
+    /// Creates an `SIntVec` view from an existing `IntVec`.
+    ///
+    /// This is the primary constructor for creating a zero-copy view. The provided
+    /// `IntVec` is assumed to contain ZigZag-encoded data.
+    pub fn from_parts(inner: IntVec<E, B>) -> Self {
+        Self { inner }
+    }
+
+    /// Returns a reference to the inner `IntVec`.
+    pub fn inner_ref(&self) -> &IntVec<E, B> {
+        &self.inner
     }
 
     /// Returns the number of elements in the vector.
@@ -123,7 +96,7 @@ where
     }
 
     /// Returns the sampling rate `k` used during encoding.
-    pub fn get_sampling_rate(&self) -> Option<usize> {
+    pub fn get_sampling_rate(&self) -> usize {
         self.inner.get_sampling_rate()
     }
 
@@ -138,52 +111,43 @@ where
     }
 
     /// Binary searches this vector for a given element.
-    ///
-    /// If the vector is not sorted, the returned result is unspecified and
-    /// meaningless. For `binary_search` to work correctly, the vector must be
-    /// sorted in ascending order.
-    pub fn binary_search(&self, value: i64) -> Result<usize, usize> {
+    pub fn binary_search(&self, value: i64) -> Result<usize, usize>
+    where
+        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
         self.binary_search_by(|probe| probe.cmp(&value))
     }
 
     /// Binary searches this vector with a comparator function.
-    ///
-    /// The comparator function should return an `Ordering` that indicates
-    /// whether its argument is `Less`, `Equal` or `Greater` than the desired
-    /// target. If the vector is not sorted or if the comparator does not
-    /// reflect the vector's ordering, the returned result is unspecified.
-    ///
-    /// # Implementation Notes
-    /// This search operates on the underlying compressed `u64` data but performs
-    /// comparisons on the decoded `i64` values. It delegates to the efficient
-    /// `binary_search_by` of the inner `IntVec`.
     #[inline]
     pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
     where
         F: FnMut(i64) -> std::cmp::Ordering,
+        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
     {
-        // The search is performed on the inner `IntVec`. The comparator function
-        // must decode the `u64` value (from ZigZag) back to an `i64` before
-        // the user-provided comparison logic can be applied.
         self.inner
             .binary_search_by(|probe_unsigned| f(probe_unsigned.to_int()))
     }
 
     /// Binary searches this vector with a key extraction function.
-    ///
-    /// If the vector is not sorted by the key, the returned result is
-    /// unspecified.
     #[inline]
     pub fn binary_search_by_key<B1, F>(&self, b: &B1, mut f: F) -> Result<usize, usize>
     where
         F: FnMut(i64) -> B1,
         B1: Ord,
+        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
     {
         self.binary_search_by(|k| f(k).cmp(b))
     }
 }
 
-impl<E: Endianness> SIntVec<E>
+impl<E: Endianness, B: AsRef<[u64]>> SIntVec<E, B>
 where
     for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
@@ -196,7 +160,6 @@ where
     }
 
     /// Retrieves the signed integer at the specified index without bounds checking.
-    ///
     /// # Safety
     /// Calling this method with an out-of-bounds index is undefined behavior.
     #[inline(always)]
@@ -212,7 +175,6 @@ where
     }
 
     /// Retrieves multiple signed integers at the specified indices without bounds checking.
-    ///
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior.
     #[inline(always)]
@@ -234,21 +196,13 @@ where
     }
 
     /// Returns an iterator over the decompressed `i64` values.
-    pub fn iter(&self) -> SIntVecIter<E> {
+    pub fn iter(&self) -> SIntVecIter<E, B> {
         SIntVecIter::new(self)
     }
 }
 
 /// A type alias for an [`SIntVec`] with Big-Endian ([`BE`]) bitstream encoding.
-///
-/// See [`BEIntVec`] for more details on endianness.
-///
-/// [`BEIntVec`]: crate::variable::intvec::BEIntVec
 pub type BESIntVec = SIntVec<BE>;
 
 /// A type alias for an [`SIntVec`] with Little-Endian ([`LE`]) bitstream encoding.
-///
-/// See [`LEIntVec`] for more details on endianness.
-///
-/// [`LEIntVec`]: crate::variable::intvec::LEIntVec
 pub type LESIntVec = SIntVec<LE>;

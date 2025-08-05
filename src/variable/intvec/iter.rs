@@ -5,17 +5,7 @@
 //! forward-only scans, decompressing values from the underlying bitstream on
 //! the fly.
 //!
-//! ## Performance
-//!
-//! The iterator is optimized for sequential access by pre-configuring the
-//! decoding logic upon creation. This avoids redundant decision-making within
-//! the `next()` method's hot loop.
-//!
-//! For full-vector decompression, `intvec.iter().collect::<Vec<_>>()` is often
-//! more performant than its parallel counterpart ([`par_iter`]) because it avoids
-//! thread management overhead and benefits from better CPU cache locality.
-//!
-//! [`par_iter`]: crate::variable::intvec::IntVec::par_iter
+//! [`IntVec`]: super::IntVec
 
 use super::{IntVec, IntVecBitReader};
 use dsi_bitstream::{
@@ -29,29 +19,12 @@ use dsi_bitstream::{
 /// It provides a sequential, forward-only scan over the compressed data,
 /// decompressing values on the fly. It also implements [`ExactSizeIterator`],
 /// allowing the user to know exactly how many items are remaining.
-///
-/// # Example
-///
-/// ```rust
-/// use compressed_intvec::prelude::*;
-///
-/// let data: &[u64] = &;
-///
-/// // LEIntVec is a type alias for IntVec<LE>
-/// let intvec = LEIntVec::builder(data)
-///     .codec(VariableCodecSpec::Gamma)
-///     .build()
-///     .unwrap();
-///
-/// // The iterator decompresses values as it is consumed.
-/// for (index, value) in intvec.iter().enumerate() {
-///     assert_eq!(value, data[index]);
-/// }
-/// ```
-pub struct IntVecIter<'a, E>
+pub struct IntVecIter<'a, E, B>
 where
     E: Endianness,
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    B: AsRef<[u64]>,
+    // This where clause now guarantees that the reader implements all necessary traits.
+    IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -64,25 +37,26 @@ where
     /// The index of the next element to be returned.
     current_index: usize,
     /// A flag to track if the bitstream is still valid.
-    /// It is set to `false` if a read error occurs, stopping the iteration.
     valid: bool,
+    /// A phantom data field to associate the backend type B.
+    _phantom: std::marker::PhantomData<&'a B>,
 }
 
-impl<'a, E> IntVecIter<'a, E>
+impl<'a, E, B> IntVecIter<'a, E, B>
 where
     E: Endianness,
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    B: AsRef<[u64]>,
+    IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// Creates a new iterator for a given `IntVec`.
     ///
     /// This is `pub(super)` and is called by [`IntVec::iter`].
-    pub(super) fn new(intvec: &'a IntVec<E>) -> Self {
-        let reader = intvec.reader().reader;
-        // Pre-create the code reader to avoid recreating it in `next()`.
-        // The `expect` is safe because all codes supported by `IntVec`
-        // are also supported by `FuncCodeReader`.
+    pub(super) fn new(intvec: &'a IntVec<E, B>) -> Self {
+        let reader = IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
+            intvec.data.as_ref(),
+        ));
         let code_reader = FuncCodeReader::new(intvec.encoding)
             .expect("Failed to create code reader for DSI encoding.");
 
@@ -92,30 +66,28 @@ where
             code_reader,
             current_index: 0,
             valid: true,
+            _phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<E> Iterator for IntVecIter<'_, E>
+impl<'a, E, B> Iterator for IntVecIter<'a, E, B>
 where
     E: Endianness,
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    B: AsRef<[u64]>,
+    IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     type Item = u64;
 
     /// Advances the iterator and returns the next decompressed value.
-    ///
-    /// Returns `None` when iteration is finished or if a decoding error
-    /// occurs in the underlying bitstream.
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         if !self.valid || self.current_index >= self.len {
             return None;
         }
 
-        // Decode the next value using the pre-configured code reader.
         let result = self.code_reader.read(&mut self.reader);
 
         match result {
@@ -124,10 +96,6 @@ where
                 Some(value)
             }
             Err(_) => {
-                // The underlying bitstream reads are infallible due to the trait
-                // bounds, so this arm should theoretically not be hit.
-                // However, it provides robustness by invalidating the iterator
-                // to stop further attempts if an error were to occur.
                 self.valid = false;
                 None
             }
@@ -145,10 +113,11 @@ where
     }
 }
 
-impl<E> std::iter::ExactSizeIterator for IntVecIter<'_, E>
+impl<'a, E, B> std::iter::ExactSizeIterator for IntVecIter<'a, E, B>
 where
     E: Endianness,
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    B: AsRef<[u64]>,
+    IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {

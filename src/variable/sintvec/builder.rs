@@ -51,8 +51,8 @@ impl<'a, E: Endianness> SIntVecBuilder<'a, E> {
         self
     }
 
-    /// Builds the `SIntVec` by transforming and compressing the input data.
-    pub fn build(self) -> Result<SIntVec<E>, IntVecError>
+    /// Builds the `SIntVec<E, Vec<u64>>` by transforming and compressing the input data.
+    pub fn build(self) -> Result<SIntVec<E, Vec<u64>>, IntVecError>
     where
         for<'b> crate::variable::intvec::IntVecBitWriter<E>:
             BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
@@ -108,8 +108,8 @@ impl<E: Endianness, I: IntoIterator<Item = i64>> SIntVecFromIterBuilder<E, I> {
         self
     }
 
-    /// Builds the `SIntVec` by consuming the iterator.
-    pub fn build(self) -> Result<SIntVec<E>, IntVecError>
+    /// Builds the `SIntVec<E, Vec<u64>>` by consuming the iterator.
+    pub fn build(self) -> Result<SIntVec<E, Vec<u64>>, IntVecError>
     where
         for<'b> crate::variable::intvec::IntVecBitWriter<E>:
             BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,

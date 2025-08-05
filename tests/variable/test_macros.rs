@@ -84,7 +84,7 @@ fn test_sint_vec_macro_default_parameters() {
     let v = sint_vec![-1, 2, -3, 5, -8, 13, -21];
 
     // The macro should use the default k=32 and CodecSpec::Delta.
-    assert_eq!(v.get_sampling_rate(), Some(32));
+    assert_eq!(v.get_sampling_rate(), 32);
     assert_eq!(v.encoding(), dsi_bitstream::prelude::Codes::Delta);
 
     // Verify the content.
