@@ -3,13 +3,13 @@
 //! This module provides [`SIntVec`], a specialized vector for compressing signed
 //! integer data.
 
-use crate::variable::{
+use crate::{prelude::VariableCodecSpec, variable::{
     intvec::{IntVec, IntVecBitReader, IntVecError},
     sintvec::{
         builder::SIntVecFromIterBuilder, iter::SIntVecIter, slice::SIntVecSlice
     },
-};
-use dsi_bitstream::prelude::{BitRead, BitSeek, Codes, CodesRead, Endianness, ToInt, BE, LE};
+}};
+use dsi_bitstream::{prelude::{BitRead, BitSeek, Codes, CodesRead, CodesWrite, Endianness, ToInt, BE, LE}, traits::BitWrite};
 use mem_dbg::{MemDbg, MemSize};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -66,6 +66,23 @@ impl<E: Endianness> SIntVec<E, Vec<u64>> {
     /// Returns a builder for creating a [`SIntVec`] from an iterator.
     pub fn from_iter_builder<I: IntoIterator<Item = i64>>(iter: I) -> SIntVecFromIterBuilder<E, I> {
         SIntVecFromIterBuilder::new(iter)
+    }
+
+    /// Creates an owned `SIntVec` directly from a slice of data.
+    ///
+    /// This is a convenient alias for `SIntVec::builder(slice).build()`.
+    /// `VariableCodecSpec::Delta` and a default sampling rate of `k=16` will be used.
+    /// To specify different parameters, use the builder directly.
+    pub fn from_slice<T>(slice: &T) -> Result<Self, IntVecError>
+    where
+        T: AsRef<[i64]> + ?Sized,
+        for<'a> crate::variable::intvec::IntVecBitWriter<E>:
+            BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
+    {
+        Self::builder(slice)
+            .k(16)
+            .codec(VariableCodecSpec::Delta)
+            .build()
     }
 }
 

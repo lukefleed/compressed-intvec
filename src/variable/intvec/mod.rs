@@ -7,14 +7,13 @@
 //!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
-use crate::fixed::intvec::FixedVec;
+use crate::{fixed::intvec::FixedVec, prelude::VariableCodecSpec};
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
     prelude::{
-        BitRead, BitSeek, BufBitReader, BufBitWriter, Codes, CodesRead, Endianness, MemWordReader,
-        MemWordWriterVec, StaticCodeRead,
+        BitRead, BitSeek, BufBitReader, BufBitWriter, Codes, CodesRead, CodesWrite, Endianness, MemWordReader, MemWordWriterVec, StaticCodeRead
     },
-    traits::{BE, LE},
+    traits::{BitWrite, BE, LE},
 };
 use mem_dbg::{MemDbg, MemSize};
 use rayon::slice::ParallelSliceMut;
@@ -131,6 +130,24 @@ impl<E: Endianness> IntVec<E, Vec<u64>> {
             + BitSeek<Error = core::convert::Infallible>,
     {
         self.iter().collect()
+    }
+
+    /// Creates an owned `IntVec` directly from a slice of data.
+    ///
+    /// This is a convenient alias for `IntVec::builder(slice).build()`.
+    /// The codec will be automatically determined using `VariableCodecSpec::Auto`,
+    /// and a default sampling rate of `k=16` will be used.
+    /// To specify different parameters, use the builder directly.
+    pub fn from_slice<T>(slice: &T) -> Result<Self, IntVecError>
+    where
+        T: AsRef<[u64]> + ?Sized,
+        for<'a> crate::variable::intvec::IntVecBitWriter<E>:
+            BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
+    {
+        Self::builder(slice)
+            .k(16)
+            .codec(VariableCodecSpec::Auto)
+            .build()
     }
 }
 

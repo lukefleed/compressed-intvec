@@ -1,4 +1,4 @@
-//! Integration tests for the `int_vec!` and `sint_vec!` macros.
+//! Integration tests for the `int_vec!` and `sint_vec!` macros and other convenience APIs.
 
 use compressed_intvec::{int_vec, prelude::*, sint_vec};
 
@@ -22,7 +22,7 @@ fn test_int_vec_macro_from_list() {
     assert_eq!(v.get(5), None);
 
     // Check full content
-    assert_eq!(v.into_vec(), data);
+    assert_eq!(v, &data[..]);
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn test_sint_vec_macro_empty() {
     let v: LESIntVec = sint_vec![];
     assert!(v.is_empty());
     assert_eq!(v.len(), 0);
-    // The builder for an empty vec falls back to Gamma, even if Delta is requested.
+    // The builder for an empty vec falls back to Gamma.
     assert_eq!(v.encoding(), dsi_bitstream::prelude::Codes::Gamma);
 }
 
@@ -63,8 +63,7 @@ fn test_sint_vec_macro_from_list() {
     assert_eq!(v.get(5), None);
 
     // Check full content
-    let collected: Vec<i64> = v.iter().collect();
-    assert_eq!(collected, data);
+    assert_eq!(v, &data[..]);
 }
 
 #[test]
@@ -79,18 +78,17 @@ fn test_sint_vec_macro_from_repeated_element() {
 }
 
 #[test]
-fn test_sint_vec_macro_default_parameters() {
-    let data = vec![-1, 2, -3, 5, -8, 13, -21];
-    let v = sint_vec![-1, 2, -3, 5, -8, 13, -21];
+fn test_from_slice_method() {
+    // Test IntVec::from_slice
+    let data_u64: &[u64] = &[10, 20, 30, 1000];
+    let vec_u64 = LEIntVec::from_slice(data_u64).unwrap();
+    assert_eq!(vec_u64.get_sampling_rate(), 16);
+    assert_eq!(vec_u64, data_u64);
 
-    // The macro should use the default k=32 and CodecSpec::Delta.
-    assert_eq!(v.get_sampling_rate(), 32);
-    assert_eq!(v.encoding(), dsi_bitstream::prelude::Codes::Delta);
-
-    // Verify the content.
-    let collected: Vec<i64> = v.iter().collect();
-    assert_eq!(
-        collected, data,
-        "The content of the vector created by the macro is incorrect."
-    );
+    // Test SIntVec::from_slice
+    let data_i64: &[i64] = &[-10, 20, -300];
+    let vec_i64 = LESIntVec::from_slice(data_i64).unwrap();
+    assert_eq!(vec_i64.get_sampling_rate(), 16);
+    assert_eq!(vec_i64.encoding(), dsi_bitstream::prelude::Codes::Delta);
+    assert_eq!(vec_i64, data_i64);
 }
