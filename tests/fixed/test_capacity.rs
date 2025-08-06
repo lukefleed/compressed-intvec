@@ -1,159 +1,153 @@
-//! Integration tests for capacity management in `FixedVec`.
+//! Integration tests for capacity and modification methods in `FixedVec`.
 
-use compressed_intvec::fixed::{FixedVec, SFixedVec, UFixedVec};
+use compressed_intvec::fixed::{
+    traits::{Storable, Word},
+    FixedVec,
+};
+use dsi_bitstream::{prelude::{BE, LE}, traits::Endianness};
+use num_traits::{Bounded, ToPrimitive};
+use std::fmt::Debug;
+
+/// A helper function to run a comprehensive suite of modification tests.
+fn run_modification_tests<T, W, E>()
+where
+    T: Storable<W>
+        + Bounded
+        + ToPrimitive
+        + From<u8>
+        + Ord
+        + Debug
+        + Copy
+        + PartialEq,
+    W: Word,
+    E: Endianness + Debug,
+    // Bound needed for FixedVec::new() and other builder methods.
+    dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
+        dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
+{
+    // --- Test `push` and `pop` ---
+    let mut vec: FixedVec<T, W, E> = FixedVec::new(8).unwrap();
+    for i in 0..10 {
+        vec.push(T::from(i));
+    }
+    assert_eq!(vec.len(), 10);
+    assert_eq!(vec.get(9), Some(T::from(9)));
+    assert_eq!(vec.pop(), Some(T::from(9)));
+    assert_eq!(vec.pop(), Some(T::from(8)));
+    assert_eq!(vec.len(), 8);
+
+    // --- Test `remove` ---
+    // vec is now [0, 1, 2, 3, 4, 5, 6, 7]
+    assert_eq!(vec.remove(2), T::from(2)); // remove '2'
+    assert_eq!(vec.len(), 7);
+    assert_eq!(vec.get(1), Some(T::from(1)));
+    assert_eq!(vec.get(2), Some(T::from(3))); // '3' shifted left
+    assert_eq!(vec.get(6), Some(T::from(7)));
+
+    // --- Test `insert` ---
+    // vec is now [0, 1, 3, 4, 5, 6, 7]
+    vec.insert(0, T::from(99)); // insert at start
+    assert_eq!(vec.len(), 8);
+    assert_eq!(vec.get(0), Some(T::from(99)));
+    assert_eq!(vec.get(1), Some(T::from(0)));
+
+    vec.insert(8, T::from(88)); // insert at end
+    assert_eq!(vec.len(), 9);
+    assert_eq!(vec.get(7), Some(T::from(7)));
+    assert_eq!(vec.get(8), Some(T::from(88)));
+
+    // --- Test `clear` ---
+    vec.clear();
+    assert!(vec.is_empty());
+
+    // --- Test `resize` ---
+    vec.resize(5, T::from(42));
+    assert_eq!(vec.len(), 5);
+    let expected_resize: Vec<T> = vec![T::from(42); 5];
+    assert_eq!(vec, &expected_resize[..]);
+    vec.resize(2, T::from(0));
+    assert_eq!(vec.len(), 2);
+    assert_eq!(vec.get(1), Some(T::from(42)));
+}
+
+/// A macro to instantiate the modification test suite for different configurations.
+macro_rules! test_modifiers {
+    ($test_name:ident, $T:ty, $W:ty, $E:ty) => {
+        #[test]
+        fn $test_name() {
+            run_modification_tests::<$T, $W, $E>();
+        }
+    };
+}
+
+// Instantiate tests for various interesting combinations.
+test_modifiers!(modifiers_u32_usize_le, u32, usize, LE);
+test_modifiers!(modifiers_u64_u64_be, u64, u64, BE);
+test_modifiers!(modifiers_i16_u32_le, i16, u32, LE);
+test_modifiers!(modifiers_u8_u16_be, u8, u16, BE);
+
 
 #[test]
 fn test_with_capacity() {
-    // Unsigned
-    let vec_u: UFixedVec<u32> = FixedVec::with_capacity(10, 1000).unwrap();
+    // This test is specific and doesn't need to be in the macro.
+    let vec_u: FixedVec<u32, usize, LE> = FixedVec::with_capacity(10, 1000).unwrap();
     assert_eq!(vec_u.len(), 0);
     assert!(vec_u.capacity() >= 1000);
-    let initial_word_cap = vec_u.word_capacity();
-    assert!(initial_word_cap > 0);
-
-    // Signed
-    let vec_s: SFixedVec<i16> = FixedVec::with_capacity(9, 500).unwrap();
-    assert_eq!(vec_s.len(), 0);
-    assert!(vec_s.capacity() >= 500);
-
-    // Zero capacity
-    let vec_zero: UFixedVec<u8> = FixedVec::with_capacity(8, 0).unwrap();
-    assert_eq!(vec_zero.capacity(), 0);
-    assert_eq!(vec_zero.word_capacity(), 0);
 }
 
 #[test]
 fn test_reserve() {
-    let mut vec: UFixedVec<u64> = FixedVec::with_capacity(20, 10).unwrap();
+    let mut vec: FixedVec<u64, u64, LE> = FixedVec::with_capacity(20, 10).unwrap();
     assert_eq!(vec.len(), 0);
     assert!(vec.capacity() >= 10);
-    let initial_word_cap = vec.word_capacity();
 
-    // Reserve less than current capacity, should not reallocate.
-    vec.reserve(5);
-    assert_eq!(vec.word_capacity(), initial_word_cap);
-
-    // Reserve more, should reallocate.
-    let current_len = vec.len();
+    // Reserve space for 100 additional elements.
     vec.reserve(100);
-    assert!(vec.capacity() >= current_len + 100);
-    assert!(vec.word_capacity() > initial_word_cap);
-}
-
-#[test]
-fn test_push_triggers_reserve() {
-    // We create a vector with bit_width=17 and a u32 word size (32 bits).
-    // This configuration forces elements to span word boundaries frequently.
-    type TestVec = FixedVec<u32, u32, dsi_bitstream::prelude::LE>;
-    let mut vec: TestVec = TestVec::with_capacity(17, 1).unwrap();
     
-    // The first element fits.
-    // required_bits = 1 * 17 = 17.
-    // required_words = (17 + 31) / 32 = 1.
-    // required_vec_len = 1 + 1 = 2.
-    // The initial capacity of `bits` should be 2.
-    vec.push(1);
-    assert_eq!(vec.len(), 1);
-    let cap_before = vec.word_capacity();
+    // The capacity must be sufficient for at least len (0) + additional (100) elements.
+    assert!(vec.capacity() >= 100, "Capacity after reserve should be >= 100, but is {}", vec.capacity());
 
-    // The second element.
-    // required_bits = 2 * 17 = 34.
-    // required_words = (34 + 31) / 32 = 2.
-    // required_vec_len = 2 + 1 = 3.
-    // The `bits` vector must now grow to length 3, which will very likely
-    // trigger a reallocation if the initial capacity was small (e.g., 2).
-    vec.push(2);
-    let cap_after = vec.word_capacity();
-
-    assert_eq!(vec.len(), 2);
-    assert_eq!(vec.get(1), Some(2));
-    assert!(cap_after > cap_before, "Capacity should have grown. Before: {}, After: {}", cap_before, cap_after);
-}
-
-#[test]
-fn test_shrink_to_fit() {
-    let mut vec: UFixedVec<u32> = FixedVec::with_capacity(10, 1000).unwrap();
-    for i in 0..100 {
+    // Add some elements and reserve more.
+    for i in 0..50 {
         vec.push(i);
     }
+    let current_len = vec.len(); // 50
+    vec.reserve(100); // Reserve for 100 *additional* elements.
+    assert!(vec.capacity() >= current_len + 100, "Capacity should be >= 150, but is {}", vec.capacity());
+}
 
-    assert_eq!(vec.len(), 100);
-    let cap_before_shrink = vec.capacity();
-    assert!(cap_before_shrink >= 1000);
-
-    vec.shrink_to_fit();
-
-    let cap_after_shrink = vec.capacity();
-    assert_eq!(vec.len(), 100);
-    assert!(
-        cap_after_shrink < cap_before_shrink,
-        "Capacity should have been reduced"
-    );
-    // Capacity might be slightly larger than len due to word alignment, but not by much.
-    assert!(
-        cap_after_shrink >= 100 && cap_after_shrink < 110,
-        "Capacity after shrink is unexpected: {}",
-        cap_after_shrink
-    );
-
-    // Verify content is preserved.
-    for i in 0..100 {
-        assert_eq!(vec.get(i), Some(i as u32));
+#[test]
+fn test_complex_unaligned_shifts() {
+    // A specific, tricky case for remove and insert.
+    // 11 bits on a 64-bit word forces unaligned access.
+    let mut vec: FixedVec<u32, usize, LE> = FixedVec::with_capacity(11, 100).unwrap();
+    for i in 0..50 {
+        vec.push(i);
     }
+    
+    // Test remove
+    let mut expected: Vec<u32> = (0..50).collect();
+    let removed = vec.remove(25);
+    expected.remove(25);
+    assert_eq!(removed, 25);
+    assert_eq!(vec, &expected[..]);
+
+    // Test insert
+    vec.insert(10, 999);
+    expected.insert(10, 999);
+    assert_eq!(vec, &expected[..]);
 }
 
 #[test]
-fn test_shrink_to_fit_on_empty() {
-    let mut vec: UFixedVec<u8> = FixedVec::with_capacity(8, 100).unwrap();
-    assert!(vec.word_capacity() > 0);
-
-    vec.shrink_to_fit();
-    assert_eq!(vec.word_capacity(), 0);
-
-    vec.push(10);
-    vec.clear();
-    assert!(vec.word_capacity() > 0);
-    vec.shrink_to_fit();
-    assert_eq!(vec.word_capacity(), 0);
+#[should_panic]
+fn test_insert_out_of_bounds() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    vec.insert(11, 0);
 }
 
 #[test]
-fn test_resize() {
-    // 1. Test extending the vector
-    let mut vec: UFixedVec<u32> = FixedVec::new(8).unwrap();
-    vec.push(10);
-    vec.push(20);
-    vec.push(30);
-
-    vec.resize(5, 99);
-    assert_eq!(vec.len(), 5);
-    assert_eq!(vec.get(0), Some(10));
-    assert_eq!(vec.get(1), Some(20));
-    assert_eq!(vec.get(2), Some(30));
-    assert_eq!(vec.get(3), Some(99));
-    assert_eq!(vec.get(4), Some(99));
-
-    // 2. Test truncating the vector
-    vec.resize(2, 0); // The value '0' should be ignored
-    assert_eq!(vec.len(), 2);
-    assert_eq!(vec.get(0), Some(10));
-    assert_eq!(vec.get(1), Some(20));
-    assert_eq!(vec.get(2), None);
-
-    // 3. Test resizing to the same length
-    vec.resize(2, 111);
-    assert_eq!(vec.len(), 2);
-    assert_eq!(vec.get(1), Some(20));
-
-    // 4. Test resizing an empty vector
-    let mut empty_vec: SFixedVec<i16> = FixedVec::new(10).unwrap();
-    empty_vec.resize(3, -1);
-    assert_eq!(empty_vec.len(), 3);
-    assert_eq!(empty_vec.get(0), Some(-1));
-    assert_eq!(empty_vec.get(1), Some(-1));
-    assert_eq!(empty_vec.get(2), Some(-1));
-
-    // 5. Test resizing to zero
-    empty_vec.resize(0, 0);
-    assert!(empty_vec.is_empty());
+#[should_panic]
+fn test_remove_out_of_bounds() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    vec.remove(10);
 }

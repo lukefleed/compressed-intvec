@@ -173,3 +173,24 @@ fn test_from_iterator() {
     let vec_empty: UFixedVec<u64> = data_empty.iter().copied().collect();
     assert!(vec_empty.is_empty());
 }
+
+// In tests/fixed/test_fixed.rs
+
+#[test]
+fn test_default() {
+    let vec_u: UFixedVec<u32> = FixedVec::default();
+    assert!(vec_u.is_empty());
+    assert_eq!(vec_u.len(), 0);
+    assert_eq!(vec_u.bit_width(), 1);
+    assert_eq!(vec_u.capacity(), 0);
+
+    let mut vec_s: SFixedVec<i16> = FixedVec::default();
+    assert!(vec_s.is_empty());
+    vec_s.push(0);
+    assert_eq!(vec_s.get(0), Some(0));
+    // Pushing a value > 0 requires more than 1 bit for zigzag, so it should panic.
+    let result = std::panic::catch_unwind(move || {
+        vec_s.push(1);
+    });
+    assert!(result.is_err());
+}
