@@ -18,6 +18,9 @@ use std::cmp::min;
 /// This struct is created by the [`iter`](FixedVec::iter) method. It provides
 /// a sequential, forward-only scan over the compressed data, decompressing
 /// values on the fly without taking ownership.
+///
+/// It also implements `DoubleEndedIterator`, allowing for efficient reverse
+/// iteration using `.rev()`.
 pub struct FixedVecIter<'a, T, W, E, B>
 where
     T: Storable<W>,
@@ -26,7 +29,10 @@ where
     B: AsRef<[W]>,
 {
     vec: &'a FixedVec<T, W, E, B>,
-    current_index: usize,
+    /// The index of the next element to be returned from the front.
+    front_index: usize,
+    /// The index of the next element to be returned from the back.
+    back_index: usize,
 }
 
 /// An iterator over immutable, non-overlapping chunks of a `FixedVec`.
@@ -56,7 +62,8 @@ where
     pub(super) fn new(vec: &'a FixedVec<T, W, E, B>) -> Self {
         Self {
             vec,
-            current_index: 0,
+            front_index: 0,
+            back_index: vec.len(),
         }
     }
 }
@@ -72,18 +79,37 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.vec.len() {
+        if self.front_index >= self.back_index {
             return None;
         }
         // SAFETY: The iterator's logic guarantees the index is in bounds.
-        let value = unsafe { self.vec.get_unchecked(self.current_index) };
-        self.current_index += 1;
+        let value = unsafe { self.vec.get_unchecked(self.front_index) };
+        self.front_index += 1;
         Some(value)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.vec.len().saturating_sub(self.current_index);
+        let remaining = self.back_index.saturating_sub(self.front_index);
         (remaining, Some(remaining))
+    }
+}
+
+impl<T, W, E, B> DoubleEndedIterator for FixedVecIter<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.front_index >= self.back_index {
+            return None;
+        }
+        self.back_index -= 1;
+        // SAFETY: The iterator's logic guarantees the index is in bounds.
+        let value = unsafe { self.vec.get_unchecked(self.back_index) };
+        Some(value)
     }
 }
 
@@ -96,7 +122,7 @@ where
 {
     /// Returns the exact number of remaining items in the iterator.
     fn len(&self) -> usize {
-        self.vec.len().saturating_sub(self.current_index)
+        self.back_index.saturating_sub(self.front_index)
     }
 }
 
@@ -209,6 +235,54 @@ where
         debug_assert!(self.current_index < self.vec.len());
         let value = self.vec.get_unchecked(self.current_index);
         self.current_index += 1;
+        value
+    }
+}
+
+/// A reverse iterator over the decompressed values of a [`FixedVec`] that does not
+/// perform bounds checking.
+///
+/// This struct is created by the `iter_rev_unchecked` method on `FixedVec`.
+///
+/// # Safety
+/// The caller must ensure that `next_unchecked` is not called more than `len` times.
+/// Calling it after the iterator is exhausted is **Undefined Behavior**.
+pub struct FixedVecReverseUncheckedIter<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    vec: &'a FixedVec<T, W, E, B>,
+    /// The index of the next element to be yielded. It moves from `len` down to `0`.
+    current_back_index: usize,
+}
+
+impl<'a, T, W, E, B> FixedVecReverseUncheckedIter<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    /// Creates a new unchecked reverse iterator.
+    pub(super) unsafe fn new(vec: &'a FixedVec<T, W, E, B>) -> Self {
+        Self {
+            vec,
+            current_back_index: vec.len(),
+        }
+    }
+
+    /// Returns the next element from the back of the iterator without bounds checks.
+    ///
+    /// # Safety
+    /// This method must not be called if the iterator is exhausted.
+    #[inline]
+    pub unsafe fn next_unchecked(&mut self) -> T {
+        debug_assert!(self.current_back_index > 0);
+        self.current_back_index -= 1;
+        let value = self.vec.get_unchecked(self.current_back_index);
         value
     }
 }

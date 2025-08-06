@@ -362,7 +362,7 @@ where
             self.get_unchecked(index)
         }
     }
-    
+
     /// Returns a safe iterator over the decompressed values.
     pub fn iter(&self) -> iter::FixedVecIter<T, W, E, B> {
         iter::FixedVecIter::new(self)
@@ -378,7 +378,17 @@ where
         iter::FixedVecUncheckedIter::new(self)
     }
 
-        /// Creates a zero-copy immutable view (slice) of this vector.
+    /// Returns an iterator that does not perform bounds checking, in reverse.
+    ///
+    /// # Safety
+    /// The returned iterator is unsafe to use. The caller must ensure that the
+    /// iterator's `next_unchecked` method is not called more times than the
+    /// length of the vector.
+    pub unsafe fn iter_rev_unchecked(&self) -> iter::FixedVecReverseUncheckedIter<T, W, E, B> {
+        iter::FixedVecReverseUncheckedIter::new(self)
+    }
+
+    /// Creates a zero-copy immutable view (slice) of this vector.
     ///
     /// # Arguments
     /// * `start`: The starting index of the slice.
@@ -667,7 +677,11 @@ where
     }
 
     /// Appends an element to the back of the vector.
+    ///
+    /// This implementation is optimized for performance by inlining the write
+    /// logic, avoiding the overhead of a general-purpose `set` call.
     pub fn push(&mut self, value: T) {
+        // --- 1. Input Validation ---
         let value_w = <T as Storable<W>>::into_word(value);
         let bits_per_word = <W as traits::Word>::BITS;
 
@@ -678,35 +692,86 @@ where
         };
 
         if self.bit_width < bits_per_word && value_w >= limit {
-            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+            panic!(
+                "Value {:?} does not fit in the configured bit_width of {}",
+                value_w, self.bit_width
+            );
         }
 
+        // --- 2. Capacity Management ---
         let bit_pos = self.len * self.bit_width;
         let required_total_bits = bit_pos + self.bit_width;
-        let required_words = required_total_bits.div_ceil(bits_per_word);
-        
-        // +1 for the padding word.
-        let required_vec_len_for_write = required_words + 1;
+        // The number of words required to store the data itself.
+        let required_data_words = required_total_bits.div_ceil(bits_per_word);
 
-        if self.bits.capacity() < required_vec_len_for_write {
-            // Reallocation is needed. Let Vec decide how much to grow.
-            self.bits.reserve(required_vec_len_for_write - self.bits.len());
+        // The total vec length needed for the write operation (data words + padding).
+        // We need at least 2 padding words for safe unaligned reads.
+        let required_vec_len = required_data_words.saturating_add(2);
+
+        // Reserve if current capacity is insufficient.
+        if self.bits.capacity() < required_vec_len {
+            // Let Vec decide how much to grow by reserving the minimum additional space needed.
+            self.bits.reserve(required_vec_len - self.bits.len());
         }
 
-        if self.bits.len() < required_vec_len_for_write {
-            // Ensure the vec's length is sufficient for the write operation
-            // without over-allocating if capacity is already sufficient.
-            self.bits.resize(required_vec_len_for_write, W::ZERO);
+        // Ensure the vec's length is sufficient for the write operation.
+        if self.bits.len() < required_vec_len {
+            self.bits.resize(required_vec_len, W::ZERO);
         }
 
-        unsafe {
-            // Write to the original length index.
-            self.set_unchecked(self.len, value_w);
+        // --- 3. Optimized Write Logic (inlined from set_unchecked) ---
+        let word_index = bit_pos / bits_per_word;
+        let bit_offset = bit_pos % bits_per_word;
+
+        let limbs: &mut [W] = self.bits.as_mut();
+
+        if E::IS_LITTLE {
+            // The write logic is specialized for appending to a zero-filled buffer,
+            // so we can use bitwise OR instead of a full read-modify-write.
+            if bit_offset + self.bit_width <= bits_per_word {
+                // The value fits entirely within a single word.
+                limbs[word_index] |= value_w << bit_offset;
+            } else {
+                // The value spans two words.
+                limbs[word_index] |= value_w << bit_offset;
+                limbs[word_index + 1] = value_w >> (bits_per_word - bit_offset);
+            }
+        } else {
+            // Big-Endian logic is more complex due to byte-swapping requirements.
+            // We replicate the tested `set_unchecked` logic here for correctness.
+            if bit_offset + self.bit_width <= bits_per_word {
+                let shift = bits_per_word - self.bit_width - bit_offset;
+                let mask = self.mask << shift;
+                let word = &mut limbs[word_index];
+                *word &= !mask.to_be();
+                *word |= (value_w << shift).to_be();
+            } else {
+                let (left, right) = limbs.split_at_mut(word_index + 1);
+                let high_word = &mut left[word_index];
+                let low_word = &mut right[0];
+
+                let bits_in_first = bits_per_word - bit_offset;
+                let bits_in_second = self.bit_width - bits_in_first;
+
+                // Handle the high word
+                let high_mask = (self.mask >> bits_in_second)
+                    << (bits_per_word - bits_in_first - bit_offset);
+                let high_value = value_w >> bits_in_second;
+                *high_word &= !high_mask.to_be();
+                *high_word |=
+                    (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
+
+                // Handle the low word
+                let low_mask = self.mask << (bits_per_word - bits_in_second);
+                let low_value = value_w << (bits_per_word - bits_in_second);
+                *low_word &= !low_mask.to_be();
+                *low_word |= low_value.to_be();
+            }
         }
-        
+
+        // --- 4. Update State ---
         self.len += 1;
     }
-
     /// Removes the last element from the vector and returns it, or `None` if it is empty.
     pub fn pop(&mut self) -> Option<T> {
         if self.is_empty() {
@@ -897,7 +962,9 @@ where
     }
 
     /// A high-performance helper to shift a range of bits to the left in-place.
-    fn shift_bits_left(&mut self, start_write_bit: usize, shift_amount: usize, num_bits_to_move: usize) {
+    ///
+    /// This operation is optimized with a fast path for word-aligned shifts.
+    fn shift_bits_left(&mut self, start_bit: usize, shift_amount: usize, num_bits_to_move: usize) {
         if num_bits_to_move == 0 {
             return;
         }
@@ -906,67 +973,77 @@ where
 
         // --- Fast Path: Word-aligned shift ---
         if shift_amount % bits_per_word == 0 {
-            let start_write_word = start_write_bit / bits_per_word;
-            let start_read_word = (start_write_bit + shift_amount) / bits_per_word;
+            let start_write_word = start_bit / bits_per_word;
+            let start_read_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
             
-            if start_read_word >= self.bits.len() { return; }
-            let read_end = (start_read_word + num_words_to_move).min(self.bits.len());
+            // Check if there is anything to copy from within the buffer.
+            if start_read_word < self.bits.len() {
+                let read_end = (start_read_word + num_words_to_move).min(self.bits.len());
+                self.bits.copy_within(start_read_word..read_end, start_write_word);
+            }
             
-            self.bits.copy_within(start_read_word..read_end, start_write_word);
+            // If the shift moves data from "beyond" the buffer, zero out the rest.
+            let words_copied = self.bits.len().saturating_sub(start_read_word).min(num_words_to_move);
+            if words_copied < num_words_to_move {
+                let zero_start = start_write_word + words_copied;
+                let zero_end = (start_write_word + num_words_to_move).min(self.bits.len());
+                if zero_start < zero_end {
+                    self.bits[zero_start..zero_end].fill(W::ZERO);
+                }
+            }
             return;
         }
         
-        // --- Slow Path: Unaligned shift ---
-        let mut num_bits_remaining = num_bits_to_move;
-        let mut current_write_bit = start_write_bit;
-        
-        while num_bits_remaining > 0 {
-            let write_word_idx = current_write_bit / bits_per_word;
-            
-            let current_read_bit = current_write_bit + shift_amount;
-            let read_word_idx = current_read_bit / bits_per_word;
-            let read_offset = current_read_bit % bits_per_word;
+        // --- Slow Path: Unaligned shift (word-at-a-time) ---
+        let shift_rem = shift_amount % bits_per_word;
+        let inv_shift_rem = bits_per_word - shift_rem;
 
-            let low_part = if read_word_idx < self.bits.len() {
-                self.bits[read_word_idx] >> read_offset
-            } else {
-                W::ZERO
-            };
-            
-            let high_part = if read_offset != 0 && read_word_idx + 1 < self.bits.len() {
-                self.bits[read_word_idx + 1] << (bits_per_word - read_offset)
-            } else {
-                W::ZERO
-            };
-            let source_word = low_part | high_part;
-            
-            let bits_to_write_in_this_word = (bits_per_word - (current_write_bit % bits_per_word)).min(num_bits_remaining);
-            let mask = if bits_to_write_in_this_word == bits_per_word {
-                W::max_value()
-            } else {
-                (W::ONE << bits_to_write_in_this_word).wrapping_sub(W::ONE)
-            };
-            
-            let write_offset = current_write_bit % bits_per_word;
-            let shifted_mask = mask << write_offset;
-            
-            self.bits[write_word_idx] = (self.bits[write_word_idx] & !shifted_mask) | ((source_word << write_offset) & shifted_mask);
+        let start_write_bit = start_bit;
+        let end_write_bit = start_bit + num_bits_to_move;
 
-            current_write_bit += bits_to_write_in_this_word;
-            num_bits_remaining -= bits_to_write_in_this_word;
+        let start_write_word = start_write_bit / bits_per_word;
+        let end_write_word = (end_write_bit - 1) / bits_per_word;
+
+        for write_word_idx in start_write_word..=end_write_word {
+            // Fetch the source data, which may span two source words.
+            let read_bit = write_word_idx * bits_per_word + shift_rem;
+            let read_word_idx = read_bit / bits_per_word;
+            
+            let low_part = self.bits.get(read_word_idx).copied().unwrap_or(W::ZERO) >> shift_rem;
+            let high_part = self.bits.get(read_word_idx + 1).copied().unwrap_or(W::ZERO) << inv_shift_rem;
+
+            let value_to_write = low_part | high_part;
+            
+            // Create a mask for the bits we are about to modify in the destination word.
+            let mut mask = W::max_value();
+            if write_word_idx == start_write_word {
+                mask &= W::max_value() << (start_write_bit % bits_per_word);
+            }
+            if write_word_idx == end_write_word {
+                let end_offset = end_write_bit % bits_per_word;
+                if end_offset != 0 {
+                     mask &= (W::ONE << end_offset).wrapping_sub(W::ONE);
+                }
+            }
+
+            self.bits[write_word_idx] = (self.bits[write_word_idx] & !mask) | (value_to_write & mask);
         }
     }
     
     /// A high-performance helper to shift a range of bits to the right in-place.
+    ///
+    /// This operation is optimized with a fast path for word-aligned shifts.
+    /// The unaligned path iterates from right to left to avoid data corruption.
     fn shift_bits_right(&mut self, start_bit: usize, shift_amount: usize, num_bits_to_move: usize) {
         if num_bits_to_move == 0 { return; }
 
         let bits_per_word = <W as Word>::BITS;
         
-        let end_write_bit = start_bit + shift_amount + num_bits_to_move;
-        let required_words = end_write_bit.div_ceil(bits_per_word);
-        let required_vec_len = required_words + 1;
+        // Ensure the vector has enough capacity and is resized to accommodate the shift.
+        let required_end_bit = start_bit + shift_amount + num_bits_to_move;
+        let required_words = required_end_bit.div_ceil(bits_per_word);
+        let required_vec_len = required_words.saturating_add(1); // +1 for padding
         if self.bits.len() < required_vec_len {
             self.bits.resize(required_vec_len, W::ZERO);
         }
@@ -977,79 +1054,68 @@ where
             let start_write_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
             
-            self.bits.copy_within(start_read_word..start_read_word + num_words_to_move, start_write_word);
-            return;
-        }
-        
-        // --- Slow Path: Unaligned shift (from right to left) ---
-        let word_shift = shift_amount / bits_per_word;
-        let shift_rem = shift_amount % bits_per_word;
-        let inv_shift_rem = bits_per_word - shift_rem;
-
-        let end_read_bit = start_bit + num_bits_to_move;
-        let start_write_word = (start_bit + shift_amount) / bits_per_word;
-        let mut end_write_word_idx = (end_read_bit + shift_amount - 1) / bits_per_word;
-        
-        loop {
-            let current_read_word_idx = end_write_word_idx - word_shift;
-
-            let high_part = if current_read_word_idx < self.bits.len() {
-                self.bits[current_read_word_idx] << shift_rem
-            } else {
-                W::ZERO
-            };
-            
-            let low_part = if shift_rem != 0 && current_read_word_idx > 0 {
-                self.bits[current_read_word_idx - 1] >> inv_shift_rem
-            } else {
-                W::ZERO
-            };
-            
-            let val_to_write = low_part | high_part;
-            
-            let mut mask = W::max_value();
-            let effective_start_write_bit = start_bit + shift_amount;
-            if end_write_word_idx == (effective_start_write_bit - 1) / bits_per_word {
-                mask &= W::max_value() << (effective_start_write_bit % bits_per_word);
-            }
-            let effective_end_write_bit = end_read_bit + shift_amount;
-            if end_write_word_idx == (effective_end_write_bit - 1) / bits_per_word {
-                 let end_offset = effective_end_write_bit % bits_per_word;
-                 if end_offset != 0 {
-                    mask &= (W::ONE << end_offset).wrapping_sub(W::ONE);
-                 }
-            }
-
-            self.bits[end_write_word_idx] = (self.bits[end_write_word_idx] & !mask) | (val_to_write & mask);
-
-            if end_write_word_idx == start_write_word || end_write_word_idx == 0 {
-                break;
-            }
-            end_write_word_idx -= 1;
-        }
-        
-        // --- Cleanup: Zero out the bits that were shifted away ---
-        let clear_start_word = start_bit / bits_per_word;
-        let clear_start_offset = start_bit % bits_per_word;
-        let clear_end_bit = start_bit + shift_amount;
-        let clear_end_word = (clear_end_bit -1) / bits_per_word;
-        let clear_end_offset = clear_end_bit % bits_per_word;
-        
-        if clear_start_word == clear_end_word {
-            if clear_start_offset < clear_end_offset {
-                let mask = (W::max_value() << clear_end_offset) | ((W::ONE << clear_start_offset) - W::ONE);
-                self.bits[clear_start_word] &= mask;
+            if start_read_word + num_words_to_move <= self.bits.len() {
+                self.bits.copy_within(start_read_word..start_read_word + num_words_to_move, start_write_word);
             }
         } else {
-            self.bits[clear_start_word] &= (W::ONE << clear_start_offset) - W::ONE;
-            for i in clear_start_word + 1..clear_end_word {
-                self.bits[i] = W::ZERO;
+            // --- Slow Path: Unaligned shift (from right to left) ---
+            let word_shift = shift_amount / bits_per_word;
+            let shift_rem = shift_amount % bits_per_word;
+            let inv_shift_rem = bits_per_word - shift_rem;
+
+            let start_write_bit = start_bit + shift_amount;
+            let end_write_bit = start_write_bit + num_bits_to_move;
+            
+            let start_write_word = start_write_bit / bits_per_word;
+            let end_write_word = (end_write_bit - 1) / bits_per_word;
+
+            for write_word_idx in (start_write_word..=end_write_word).rev() {
+                let read_word_idx = write_word_idx - word_shift;
+                
+                // Fetch source data from two potential source words.
+                let high_part = self.bits.get(read_word_idx).copied().unwrap_or(W::ZERO) << shift_rem;
+                let low_part = if read_word_idx > 0 {
+                    self.bits.get(read_word_idx - 1).copied().unwrap_or(W::ZERO) >> inv_shift_rem
+                } else {
+                    W::ZERO
+                };
+                let value_to_write = low_part | high_part;
+                
+                // Create a mask for the bits we are about to modify in the destination word.
+                let mut mask = W::max_value();
+                if write_word_idx == start_write_word {
+                    mask &= W::max_value() << (start_write_bit % bits_per_word);
+                }
+                if write_word_idx == end_write_word {
+                    let end_offset = end_write_bit % bits_per_word;
+                    if end_offset != 0 {
+                        mask &= (W::ONE << end_offset).wrapping_sub(W::ONE);
+                    }
+                }
+                
+                self.bits[write_word_idx] = (self.bits[write_word_idx] & !mask) | (value_to_write & mask);
             }
-            if clear_end_offset > 0 {
-                self.bits[clear_end_word] &= W::max_value() << clear_end_offset;
-            } else if clear_end_word < self.bits.len() {
-                 self.bits[clear_end_word] = W::ZERO;
-            }
+        }
+        
+        // --- Cleanup: Zero out the vacated bits at the beginning of the shifted region ---
+        let mut clear_bit = start_bit;
+        let end_clear_bit = start_bit + shift_amount;
+
+        while clear_bit < end_clear_bit {
+             let word_idx = clear_bit / bits_per_word;
+             let offset = clear_bit % bits_per_word;
+             let bits_to_clear = (bits_per_word - offset).min(end_clear_bit - clear_bit);
+
+             let mask = if bits_to_clear == bits_per_word {
+                 W::max_value()
+             } else {
+                ((W::ONE << bits_to_clear).wrapping_sub(W::ONE)) << offset
+             };
+             
+             if word_idx < self.bits.len() {
+                 self.bits[word_idx] &= !mask;
+             }
+             clear_bit += bits_to_clear;
         }
     }
 
