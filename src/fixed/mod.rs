@@ -1119,6 +1119,60 @@ where
         }
     }
 
+    /// Removes an element from the vector and returns it.
+    ///
+    /// The removed element is replaced by the last element of the vector.
+    /// This does not preserve ordering, but is O(1).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
+    pub fn swap_remove(&mut self, index: usize) -> T {
+        assert!(index < self.len, "swap_remove: index out of bounds");
+
+        if index == self.len - 1 {
+            // If it's the last element, just pop it.
+            self.pop().unwrap()
+        } else {
+            // SAFETY: bounds have been checked.
+            let old_val = unsafe { self.get_unchecked(index) };
+            let last_val = self.pop().unwrap(); // pop already decrements len
+            self.set(index, last_val);
+            old_val
+        }
+    }
+
+    /// Appends an element to the back of the vector, returning an error if the value doesn't fit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::ValueTooLarge` if the provided `value` cannot be
+    /// represented by the configured `bit_width`.
+    pub fn try_push(&mut self, value: T) -> Result<(), Error> {
+        let value_w = <T as Storable<W>>::into_word(value);
+        let bits_per_word = <W as traits::Word>::BITS;
+
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
+
+        if self.bit_width < bits_per_word && value_w >= limit {
+            return Err(Error::ValueTooLarge {
+                value: value_w.to_u128().unwrap(),
+                index: self.len, // The index it *would* have
+                bit_width: self.bit_width,
+            });
+        }
+        
+        // `push` panics on its own check, but we've already done it.
+        // To avoid re-checking, we can call a non-panicking inner logic.
+        // For simplicity here, we just call the original push.
+        self.push(value);
+        Ok(())
+    }
+
 }
 
 // This block implements mutable, in-place operations for `FixedVec` instances
@@ -1241,6 +1295,37 @@ where
                 *low_word |= low_value.to_be();
             }
         }
+    }
+
+    /// Sets the value of an element, returning an error if the value doesn't fit.
+    ///
+    /// # Errors
+    ///
+    /// Returns an `Error::ValueTooLarge` if the provided `value` cannot be
+    /// represented by the configured `bit_width`. Panics if `index` is out of bounds.
+    pub fn try_set(&mut self, index: usize, value: T) -> Result<(), Error> {
+        assert!(index < self.len, "try_set: index out of bounds");
+
+        let value_w = <T as Storable<W>>::into_word(value);
+        let bits_per_word = <W as traits::Word>::BITS;
+
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
+
+        if self.bit_width < bits_per_word && value_w >= limit {
+            return Err(Error::ValueTooLarge {
+                value: value_w.to_u128().unwrap(),
+                index,
+                bit_width: self.bit_width,
+            });
+        }
+        
+        // `set` would panic, but we've pre-flighted the check.
+        unsafe { self.set_unchecked(index, value_w) };
+        Ok(())
     }
 
     /// Returns an iterator over non-overlapping mutable chunks of the vector.
@@ -1385,6 +1470,69 @@ where
             self.map_in_place_unchecked(safe_f);
         }
     }
+
+    /// Replaces the element at a given index with a new value, returning the old value.
+    ///
+    /// This method first reads the existing value at the specified index, then
+    /// overwrites it with the new value, and finally returns the original value.
+    ///
+    /// # Arguments
+    ///
+    /// * `index`: The index of the element to replace.
+    /// * `value`: The new value to write at the specified index.
+    ///
+    /// # Returns
+    ///
+    /// The value that was previously at the specified index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds or if `value` does not fit within
+    /// the configured `bit_width` of the vector.
+    pub fn replace(&mut self, index: usize, value: T) -> T {
+        // The assert inside `set` will also panic, but checking early provides a clearer message.
+        assert!(index < self.len, "replace: index out of bounds");
+
+        // Since we have already performed the bounds check, it is safe to use
+        // the unchecked version for performance.
+        let old_value = unsafe { self.get_unchecked(index) };
+
+        // The `set` method handles the value-too-large check and the bit manipulation.
+        self.set(index, value);
+
+        old_value
+    }
+
+    /// Swaps two elements in the vector.
+    ///
+    /// # Arguments
+    ///
+    /// * `a`: The index of the first element.
+    /// * `b`: The index of the second element.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` or `b` are out of bounds.
+    pub fn swap(&mut self, a: usize, b: usize) {
+        assert!(a < self.len, "swap: index a out of bounds");
+        assert!(b < self.len, "swap: index b out of bounds");
+
+        if a == b {
+            return;
+        }
+
+        // A straightforward and correct implementation reads both values first,
+        // then writes them back. This avoids issues where the bit ranges of the
+        // two elements might overlap after being written once.
+        // SAFETY: Bounds have been checked.
+        unsafe {
+            let val_a = self.get_unchecked(a);
+            let val_b = self.get_unchecked(b);
+            self.set_unchecked(a, <T as Storable<W>>::into_word(val_b));
+            self.set_unchecked(b, <T as Storable<W>>::into_word(val_a));
+        }
+    }
+
 
 }
 

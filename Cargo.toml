@@ -36,38 +36,6 @@ rand = "0.9.0"
 serde_json = "1.0.141"
 sux = "0.8.0"
 
-[[bench]]
-name = "bench_random_access"
-harness = false
-
-[[bench]]
-name = "bench_parallel"
-harness = false
-required-features = ["parallel"]
-
-[[bench]]
-name = "bench_size"
-harness = false
-
-[[bench]]
-name = "bench_k_power_of_two"
-harness = false
-
-[[bench]]
-name = "bench_access_patterns"
-harness = false
-
-[[bench]]
-name = "bench_iter_access"
-harness = false
-
-[[bench]]
-name = "bench_fixed"
-harness = false
-
-[profile.bench]
-lto = true
-
 [features]
 default = ["parallel"]
 parallel = ["rayon"]

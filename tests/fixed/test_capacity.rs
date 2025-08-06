@@ -1,8 +1,7 @@
 //! Integration tests for capacity and modification methods in `FixedVec`.
 
 use compressed_intvec::fixed::{
-    traits::{Storable, Word},
-    FixedVec,
+    traits::{Storable, Word}, Error, FixedVec
 };
 use dsi_bitstream::{prelude::{BE, LE}, traits::Endianness};
 use num_traits::{Bounded, ToPrimitive};
@@ -150,4 +149,114 @@ fn test_insert_out_of_bounds() {
 fn test_remove_out_of_bounds() {
     let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
     vec.remove(10);
+}
+
+#[test]
+fn test_replace() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    assert_eq!(vec.bit_width(), 4); // 0-9 fits in 4 bits
+
+    // Replace in the middle
+    let old_val = vec.replace(5, 15);
+    assert_eq!(old_val, 5);
+    assert_eq!(vec.get(5), Some(15));
+    assert_eq!(vec.get(4), Some(4)); // Verify adjacent element
+    assert_eq!(vec.get(6), Some(6)); // Verify adjacent element
+
+    // Replace at the start
+    let old_val_start = vec.replace(0, 11);
+    assert_eq!(old_val_start, 0);
+    assert_eq!(vec.get(0), Some(11));
+
+    // Replace at the end
+    let old_val_end = vec.replace(9, 12);
+    assert_eq!(old_val_end, 9);
+    assert_eq!(vec.get(9), Some(12));
+
+    // Verify the final state of the vector
+    let expected: Vec<u32> = vec![11, 1, 2, 3, 4, 15, 6, 7, 8, 12];
+    assert_eq!(vec, &expected[..]);
+}
+
+#[test]
+#[should_panic(expected = "replace: index out of bounds")]
+fn test_replace_out_of_bounds() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    vec.replace(10, 0); // This must panic.
+}
+
+#[test]
+#[should_panic(expected = "Value 16 does not fit in the configured bit_width of 4")]
+fn test_replace_value_too_large_panics() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    vec.replace(5, 16); // 16 requires 5 bits, vec is configured for 4. Must panic.
+}
+
+#[test]
+fn test_swap() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    
+    vec.swap(2, 8);
+    assert_eq!(vec.get(2), Some(8));
+    assert_eq!(vec.get(8), Some(2));
+    
+    // Test swapping adjacent elements
+    vec.swap(0, 1);
+    assert_eq!(vec.get(0), Some(1));
+    assert_eq!(vec.get(1), Some(0));
+
+    // Test swapping with self
+    vec.swap(5, 5);
+    assert_eq!(vec.get(5), Some(5));
+}
+
+#[test]
+#[should_panic(expected = "swap: index a out of bounds")]
+fn test_swap_out_of_bounds_a() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    vec.swap(10, 0);
+}
+
+#[test]
+fn test_swap_remove() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    
+    // Remove from the middle
+    let removed = vec.swap_remove(3);
+    assert_eq!(removed, 3);
+    assert_eq!(vec.len(), 9);
+    assert_eq!(vec.get(3), Some(9)); // Last element (9) moved here
+    assert_eq!(vec, &[0, 1, 2, 9, 4, 5, 6, 7, 8][..]);
+
+    // Remove the newly moved element
+    let removed_again = vec.swap_remove(3);
+    assert_eq!(removed_again, 9);
+    assert_eq!(vec.len(), 8);
+    assert_eq!(vec.get(3), Some(8)); // New last element (8) moved here
+}
+
+#[test]
+#[should_panic(expected = "swap_remove: index out of bounds")]
+fn test_swap_remove_out_of_bounds() {
+    let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
+    vec.swap_remove(10);
+}
+
+#[test]
+fn test_try_api() {
+    let mut vec: FixedVec<u32, usize, LE> = FixedVec::new(4).unwrap(); // bit_width=4, max_val=15
+    
+    // Test try_push
+    assert!(vec.try_push(10).is_ok());
+    assert!(vec.try_push(15).is_ok());
+    let res_push = vec.try_push(16);
+    assert!(matches!(res_push, Err(Error::ValueTooLarge {..})));
+    assert_eq!(vec.len(), 2); // Push should not have happened
+
+    // Test try_set
+    assert!(vec.try_set(0, 5).is_ok());
+    assert_eq!(vec.get(0), Some(5));
+    let res_set = vec.try_set(1, 20);
+    assert!(matches!(res_set, Err(Error::ValueTooLarge {..})));
+    assert_eq!(vec.get(1), Some(15)); // Value should be unchanged
 }
