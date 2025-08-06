@@ -1,73 +1,79 @@
 //! Integration tests for the generic backend functionality of `FixedVec`.
 
-use compressed_intvec::prelude::*;
-use dsi_bitstream::prelude::{BE, LE};
+use compressed_intvec::fixed::{BitWidth, FixedVec, SFixedVec, UFixedVec, Error as FixedVecError};
+use dsi_bitstream::prelude::BE;
 
 #[test]
 fn test_owned_to_borrowed_conversion() {
+    // Use a non-default configuration to test genericity
+    type TestVecOwned = FixedVec<u32, u64, BE, Vec<u64>>;
+    type TestVecBorrowed<'a> = FixedVec<u32, u64, BE, &'a [u64]>;
+    
     let data = vec![10u32, 20, 30, 40, 50];
-    // 1. Create an owned vector (backend is Vec<u64>)
-    let owned_vec = LEFixedVec::builder(&data)
+    
+    // 1. Create an owned vector.
+    let owned_vec: TestVecOwned = FixedVec::builder()
         .bit_width(BitWidth::Minimal)
-        .build()
+        .build(&data)
         .unwrap();
 
-    // 2. Create a borrowed vector (view) from the owned vector's data
-    let borrowed_vec: FixedVec<LE, &[u64]> =
-        FixedVec::from_parts(owned_vec.as_limbs(), owned_vec.len(), owned_vec.num_bits()).unwrap();
+    // 2. Create a borrowed vector (view) from the owned vector's data.
+    let borrowed_vec: TestVecBorrowed =
+        FixedVec::from_parts(owned_vec.as_limbs(), owned_vec.len(), owned_vec.bit_width()).unwrap();
 
-    // Verify they are identical
+    // 3. Verify they are functionally identical.
     assert_eq!(owned_vec.len(), borrowed_vec.len());
-    assert_eq!(owned_vec.num_bits(), borrowed_vec.num_bits());
-    assert_eq!(
-        owned_vec.iter().collect::<Vec<_>>(),
-        borrowed_vec.iter().collect::<Vec<_>>()
-    );
+    assert_eq!(owned_vec.bit_width(), borrowed_vec.bit_width());
+    assert_eq!(owned_vec.iter().collect::<Vec<_>>(), borrowed_vec.iter().collect::<Vec<_>>());
+    
+    // Test PartialEq between different backend types.
+    assert_eq!(owned_vec, borrowed_vec);
 
-    // Verify content
+    // Verify content of the borrowed vec.
     assert_eq!(borrowed_vec.get(2), Some(30));
     assert_eq!(borrowed_vec, &data[..]);
 }
 
 #[test]
 fn test_from_parts_validation() {
+    type TestVec = UFixedVec<u64>; // LE, usize word
     let data = vec![100u64, 200, 300];
-    let owned_vec = BEFixedVec::builder(&data).build().unwrap();
+    let owned_vec: TestVec = FixedVec::builder().build(&data).unwrap();
+
     let limbs = owned_vec.as_limbs();
     let len = owned_vec.len();
-    let num_bits = owned_vec.num_bits();
+    let bit_width = owned_vec.bit_width();
+    let bits_per_word = <usize as compressed_intvec::fixed::traits::Word>::BITS;
 
-    // Success case is tested above.
+    // Success case is implicitly tested in test_owned_to_borrowed_conversion.
 
-    // Fail: num_bits > 64
-    let result = FixedVec::<BE, _>::from_parts(limbs, len, 65);
+    // Fail: bit_width > word bits
+    let result = FixedVec::<u64, usize, dsi_bitstream::prelude::LE, _>::from_parts(limbs, len, bits_per_word + 1);
     assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
 
     // Fail: buffer too small (no space for padding word)
-    let total_bits = len * num_bits;
-    let data_words = (total_bits + 63) / 64;
-    let insufficient_limbs = &limbs[..data_words]; // Exactly enough for data, but not padding
-    let result = FixedVec::<BE, _>::from_parts(insufficient_limbs, len, num_bits);
+    let total_bits = len * bit_width;
+    let data_words = (total_bits + bits_per_word - 1) / bits_per_word;
+    let insufficient_limbs = &limbs[..data_words]; // Exactly enough for data, but not padding.
+    let result = FixedVec::<u64, usize, dsi_bitstream::prelude::LE, _>::from_parts(insufficient_limbs, len, bit_width);
     assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));
 }
 
 #[test]
-fn test_s_fixed_vec_from_parts() {
+fn test_signed_vec_from_borrowed_backend() {
+    type TestVecOwned = SFixedVec<i16>; // LE, usize word
+    type TestVecBorrowed<'a> = FixedVec<i16, usize, dsi_bitstream::prelude::LE, &'a [usize]>;
+
     let data = vec![-10i16, 20, -30, 40, 50];
-    // 1. Create an owned signed vector
-    let owned_s_vec = LESFixedVec::builder(&data).build().unwrap();
+    
+    // 1. Create an owned signed vector.
+    let owned_s_vec: TestVecOwned = FixedVec::builder().build(&data).unwrap();
 
-    // 2. Create an inner `FixedVec` view
-    let inner_view: FixedVec<LE, &[u64]> = FixedVec::from_parts(
-        owned_s_vec.as_limbs(),
-        owned_s_vec.len(),
-        owned_s_vec.num_bits(),
-    )
-    .unwrap();
+    // 2. Create a borrowed version from its parts.
+    let borrowed_s_vec: TestVecBorrowed =
+        FixedVec::from_parts(owned_s_vec.as_limbs(), owned_s_vec.len(), owned_s_vec.bit_width()).unwrap();
 
-    // 3. Create the borrowed `SFixedVec` from the inner view
-    let borrowed_s_vec = SFixedVec::from_parts(inner_view);
-
+    // 3. Verify equality and content.
     assert_eq!(owned_s_vec, borrowed_s_vec);
     assert_eq!(borrowed_s_vec.get(2), Some(-30));
     assert_eq!(borrowed_s_vec, &data[..]);
@@ -75,12 +81,19 @@ fn test_s_fixed_vec_from_parts() {
 
 #[test]
 fn test_slice_on_borrowed_backend() {
-    let data = (0..100).collect::<Vec<u64>>();
-    let owned_vec = LEFixedVec::builder(&data).build().unwrap();
-    let borrowed_vec: FixedVec<LE, &[u64]> =
-        FixedVec::from_parts(owned_vec.as_limbs(), owned_vec.len(), owned_vec.num_bits()).unwrap();
+    type TestVecOwned = UFixedVec<u64>;
+    type TestVecBorrowed<'a> = FixedVec<u64, usize, dsi_bitstream::prelude::LE, &'a [usize]>;
 
+    let data: Vec<u64> = (0..100).collect();
+    let owned_vec: TestVecOwned = FixedVec::builder().build(&data).unwrap();
+    
+    // Create a borrowed vec from the owned vec's limbs.
+    let borrowed_vec: TestVecBorrowed =
+        FixedVec::from_parts(owned_vec.as_limbs(), owned_vec.len(), owned_vec.bit_width()).unwrap();
+
+    // Now, create a slice (view) of the *borrowed* vec.
     let slice = borrowed_vec.slice(20, 30).unwrap();
+    
     assert_eq!(slice.len(), 30);
     assert_eq!(slice.get(0), Some(20));
     assert_eq!(slice.get(29), Some(49));

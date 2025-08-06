@@ -1,4 +1,4 @@
-// mod test_backend;
+mod test_backend;
 // mod test_intvec;
 mod test_macros;
 mod test_search;
@@ -6,3 +6,4 @@ mod test_search;
 // mod test_sintvec;
 // mod test_slice;
 mod test_fixed;
+mod test_parallel;

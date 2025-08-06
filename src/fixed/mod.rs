@@ -10,7 +10,8 @@ pub mod macros;
 pub mod builder;
 pub mod iter;
 pub mod traits;
-pub mod view;
+pub mod slice;
+pub mod parallel;
 
 // Conditionally compile the atomic module.
 #[cfg(feature = "atomic")]
@@ -187,6 +188,30 @@ where
     E: Endianness,
     B: AsRef<[W]>,
 {
+
+    /// Creates a `FixedVec` from its constituent parts, enabling zero-copy views.
+    pub fn from_parts(bits: B, len: usize, bit_width: usize) -> Result<Self, Error> {
+        if bit_width > <W as traits::Word>::BITS {
+            return Err(Error::InvalidParameters(format!(
+                "bit_width ({}) cannot be greater than the word size ({})",
+                bit_width, <W as traits::Word>::BITS
+            )));
+        }
+
+        let total_bits = len * bit_width;
+        let data_words = (total_bits + <W as traits::Word>::BITS - 1) / <W as traits::Word>::BITS;
+
+        if bits.as_ref().len() < data_words + 1 {
+            return Err(Error::InvalidParameters(format!(
+                "The provided buffer is too small. It has {} words, but {} data words + 1 padding word are required.",
+                bits.as_ref().len(),
+                data_words
+            )));
+        }
+
+        Ok(unsafe { Self::new_unchecked(bits, len, bit_width) })
+    }
+
     /// Returns the number of elements in the vector.
     #[inline]
     pub fn len(&self) -> usize {
@@ -308,13 +333,13 @@ where
     /// * `len`: The number of elements in the slice.
     ///
     /// # Returns
-    /// An `Option` containing the [`FixedVecView`] if the specified range is
+    /// An `Option` containing the [`FixedVecSlice`] if the specified range is
     /// within the bounds of the vector, or `None` otherwise.
-    pub fn slice(&self, start: usize, len: usize) -> Option<view::FixedVecView<T, W, E, B>> {
+    pub fn slice(&self, start: usize, len: usize) -> Option<slice::FixedVecSlice<T, W, E, B>> {
         if start.saturating_add(len) > self.len {
             return None;
         }
-        Some(view::FixedVecView::new(self, start..start + len))
+        Some(slice::FixedVecSlice::new(self, start..start + len))
     }
 
     /// Splits the vector into two views at a given index.
@@ -323,14 +348,14 @@ where
     /// * `mid`: The index at which to split the vector.
     ///
     /// # Returns
-    /// An `Option` containing a tuple of two [`FixedVecView`]s if `mid` is
+    /// An `Option` containing a tuple of two [`FixedVecSlice`]s if `mid` is
     /// within the bounds of the vector, or `None` otherwise.
-    pub fn split_at(&self, mid: usize) -> Option<(view::FixedVecView<T, W, E, B>, view::FixedVecView<T, W, E, B>)> {
+    pub fn split_at(&self, mid: usize) -> Option<(slice::FixedVecSlice<T, W, E, B>, slice::FixedVecSlice<T, W, E, B>)> {
         if mid > self.len {
             return None;
         }
-        let left = view::FixedVecView::new(self, 0..mid);
-        let right = view::FixedVecView::new(self, mid..self.len);
+        let left = slice::FixedVecSlice::new(self, 0..mid);
+        let right = slice::FixedVecSlice::new(self, mid..self.len);
         Some((left, right))
     }
 
