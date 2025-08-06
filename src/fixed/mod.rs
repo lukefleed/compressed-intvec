@@ -1193,10 +1193,12 @@ where
 
         if E::IS_LITTLE {
             if bit_offset + self.bit_width <= bits_per_word {
+                // The value fits within a single word.
                 let word = &mut limbs[word_index];
                 *word &= !(self.mask << bit_offset);
                 *word |= value_w << bit_offset;
             } else {
+                // The value spans two words.
                 let (left, right) = limbs.split_at_mut(word_index + 1);
                 let low_word = &mut left[word_index];
                 let high_word = &mut right[0];
@@ -1247,6 +1249,141 @@ where
     /// Panics if `chunk_size` is 0.
     pub fn chunks_mut(&mut self, chunk_size: usize) -> iter_mut::ChunksMut<T, W, E, B> {
         iter_mut::ChunksMut::new(self, chunk_size)
+    }
+
+    /// Applies a function to all elements in place without checking if the
+    /// returned values fit within the `bit_width`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the function `f` always returns a value
+    /// that can be represented by `self.bit_width()` bits. Returning a value
+    /// that is too large will result in data corruption.
+    pub unsafe fn map_in_place_unchecked<F>(&mut self, mut f: F)
+    where
+        F: FnMut(T) -> T,
+    {
+        let bits_per_word = <W as Word>::BITS;
+
+        // --- Fast Path ---
+        // Condition: bit_width is a power of two and fits evenly into a word.
+        // This guarantees that elements never span word boundaries.
+        if self.bit_width.is_power_of_two() && bits_per_word % self.bit_width == 0 {
+            let elems_per_word = bits_per_word / self.bit_width;
+            let mask = self.mask;
+
+            let num_full_words = self.len / elems_per_word;
+
+            // Process full words
+            for word_idx in 0..num_full_words {
+                let mut new_word = W::ZERO;
+                
+                if E::IS_LITTLE {
+                    let old_word = self.bits.as_ref()[word_idx];
+                    for i in 0..elems_per_word {
+                        let shift = i * self.bit_width;
+                        let old_val_w = (old_word >> shift) & mask;
+                        let old_val_t = <T as Storable<W>>::from_word(old_val_w);
+                        let new_val_t = f(old_val_t);
+                        let new_val_w = <T as Storable<W>>::into_word(new_val_t);
+                        new_word |= new_val_w << shift;
+                    }
+                    self.bits.as_mut()[word_idx] = new_word;
+                } else { // Big-Endian
+                    let old_word = W::from_be(self.bits.as_ref()[word_idx]);
+                    for i in 0..elems_per_word {
+                        let shift = bits_per_word - (i + 1) * self.bit_width;
+                        let old_val_w = (old_word >> shift) & mask;
+                        let old_val_t = <T as Storable<W>>::from_word(old_val_w);
+                        let new_val_t = f(old_val_t);
+                        let new_val_w = <T as Storable<W>>::into_word(new_val_t);
+                        new_word |= new_val_w << shift;
+                    }
+                    self.bits.as_mut()[word_idx] = new_word.to_be();
+                }
+            }
+
+            // Process remaining elements in the last, potentially partial, word
+            let start_idx = num_full_words * elems_per_word;
+            for i in start_idx..self.len {
+                let old_val_t = self.get_unchecked(i);
+                let new_val_t = f(old_val_t);
+                self.set_unchecked(i, <T as Storable<W>>::into_word(new_val_t));
+            }
+        }
+        // --- Generic Path ---
+        // This path is for any bit_width where elements might span words.
+        else {
+            for i in 0..self.len {
+                let old_val_t = self.get_unchecked(i);
+                let new_val_t = f(old_val_t);
+                self.set_unchecked(i, <T as Storable<W>>::into_word(new_val_t));
+            }
+        }
+    }
+
+    /// Applies a function to all elements in the vector, modifying them in-place.
+    ///
+    /// This method is highly optimized and will use a fast path for bit widths
+    /// that are a power of two, performing word-at-a-time modifications. For
+    /// other bit widths, it uses a generic but still efficient element-at-a-time
+    /// approach.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the function `f` returns a value that does not fit within the
+    /// configured `bit_width` of the vector.
+    ///
+    /// # Example
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    ///
+    /// // The initial values (0..10) would fit in 4 bits.
+    /// // However, the mapped values (up to 9 * 2 = 18) will require 5 bits.
+    /// // We must build the vector with enough space for the final results.
+    /// let initial_data: Vec<u32> = (0..10).collect();
+    /// let mut vec: UFixedVec<u32> = FixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(5))
+    ///     .build(&initial_data)
+    ///     .unwrap();
+    ///
+    /// vec.map_in_place(|x| x * 2);
+    ///
+    /// let expected: Vec<u32> = (0..10).map(|x| x * 2).collect();
+    /// assert_eq!(vec, &expected[..]);
+    /// ```
+    pub fn map_in_place<F>(&mut self, mut f: F)
+    where
+        F: FnMut(T) -> T,
+    {
+        // Capture necessary fields from `self` by value before creating the closure.
+        // This prevents the closure from borrowing `self`.
+        let bit_width = self.bit_width;
+        let limit = if bit_width < <W as Word>::BITS {
+            W::ONE << bit_width
+        } else {
+            W::max_value()
+        };
+
+        // This closure now captures `bit_width` and `limit` by value, not `&self`.
+        let safe_f = |value: T| {
+            let new_value = f(value);
+            let new_value_w = <T as Storable<W>>::into_word(new_value);
+            if bit_width < <W as Word>::BITS && new_value_w >= limit {
+                panic!(
+                    "map_in_place: returned value {:?} does not fit in the configured bit_width of {}",
+                    new_value_w, bit_width
+                );
+            }
+            new_value
+        };
+
+        // Now, `self` is not borrowed by the closure, so we can mutably borrow it here.
+        // SAFETY: The `safe_f` wrapper ensures that any value passed to the
+        // underlying unsafe function is valid for the vector's bit_width.
+        unsafe {
+            self.map_in_place_unchecked(safe_f);
+        }
     }
 
 }
