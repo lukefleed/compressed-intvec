@@ -242,6 +242,16 @@ where
         self.bits.as_ref()
     }
 
+    /// Returns the raw parts of the vector: a pointer to the start of the
+    /// underlying buffer and its length in words.
+    ///
+    /// The caller must ensure that the buffer is not mutated in a way that
+    /// violates the `FixedVec`'s invariants while the pointer is active.
+    pub fn as_raw_parts(&self) -> (*const W, usize) {
+        let slice = self.bits.as_ref();
+        (slice.as_ptr(), slice.len())
+    }
+
     /// Creates a `FixedVec` from its constituent parts, enabling zero-copy views.
     ///
     /// # Safety
@@ -1171,6 +1181,59 @@ where
         // For simplicity here, we just call the original push.
         self.push(value);
         Ok(())
+    }
+
+    /// Extends the vector with the contents of a slice.
+    ///
+    /// This method is generally more efficient than calling `push` in a loop,
+    /// as it can perform a single capacity check and allocation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any value in `other` does not fit within the configured `bit_width`.
+    pub fn extend_from_slice(&mut self, other: &[T]) {
+        if other.is_empty() {
+            return;
+        }
+
+        self.reserve(other.len());
+
+        // Pre-validate all values in the slice to ensure atomicity.
+        // If any value is invalid, the vector remains unchanged.
+        let bits_per_word = <W as traits::Word>::BITS;
+        let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+        if self.bit_width < bits_per_word {
+            for (i, &value) in other.iter().enumerate() {
+                let value_w = <T as Storable<W>>::into_word(value);
+                if value_w >= limit {
+                    panic!(
+                        "Value at index {} of slice ({:?}) does not fit in the configured bit_width of {}",
+                        i, value_w, self.bit_width
+                    );
+                }
+            }
+        }
+        
+        let old_len = self.len;
+        let new_len = old_len + other.len();
+        
+        // Ensure the underlying Vec has enough *initialized* words to write into.
+        let required_total_bits = new_len * self.bit_width;
+        let required_data_words = required_total_bits.div_ceil(bits_per_word);
+        let required_vec_len = required_data_words.saturating_add(2); // Padding
+        if self.bits.len() < required_vec_len {
+            self.bits.resize(required_vec_len, W::ZERO);
+        }
+        
+        // Write the new values in an optimized loop.
+        for (i, &value) in other.iter().enumerate() {
+            // SAFETY: We have already reserved, resized, and validated the data.
+            unsafe {
+                self.set_unchecked(old_len + i, <T as Storable<W>>::into_word(value));
+            }
+        }
+
+        self.len = new_len;
     }
 
 }

@@ -260,3 +260,29 @@ fn test_try_api() {
     assert!(matches!(res_set, Err(Error::ValueTooLarge {..})));
     assert_eq!(vec.get(1), Some(15)); // Value should be unchanged
 }
+
+#[test]
+fn test_extend_from_slice() {
+    let mut vec: FixedVec<u32, usize, LE> = FixedVec::new(8).unwrap();
+    vec.push(1);
+    vec.push(2);
+
+    let extension = [3, 4, 5, 6, 7, 8, 9, 10];
+    vec.extend_from_slice(&extension);
+    
+    assert_eq!(vec.len(), 10);
+    let expected: Vec<u32> = (1..=10).collect();
+    assert_eq!(vec, &expected[..]);
+
+    // Extend an empty vec
+    let mut empty_vec: FixedVec<u32, usize, LE> = FixedVec::new(8).unwrap();
+    empty_vec.extend_from_slice(&[10, 20, 30]);
+    assert_eq!(empty_vec, &[10, 20, 30][..]);
+}
+
+#[test]
+#[should_panic]
+fn test_extend_from_slice_panic_on_overflow() {
+    let mut vec: FixedVec<u32, usize, LE> = FixedVec::new(4).unwrap(); // max val 15
+    vec.extend_from_slice(&[10, 11, 20, 12]); // 20 will cause a panic
+}
