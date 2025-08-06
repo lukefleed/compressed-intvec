@@ -375,6 +375,88 @@ where
         iter::Chunks::new(self, chunk_size)
     }
 
+    /// Returns a raw pointer to the storage word containing the start of an element.
+    ///
+    /// This method provides a way to get a pointer to the underlying memory
+    /// where an element's data begins. The pointer points to the start of the
+    /// `Word` (e.g., `u64`) in the backing buffer.
+    ///
+    /// The bit offset of the element's first bit *within* that word can be
+    /// calculated as `(index * self.bit_width()) % W::BITS`.
+    ///
+    /// Returns `None` if `index` is out of bounds.
+    ///
+    /// # Safety
+    ///
+    /// This method is safe as it only returns a raw pointer. However,
+    /// dereferencing this pointer is `unsafe` and requires extreme care. The
+    /// caller must ensure that the pointer is not used after the `FixedVec`
+    /// is dropped or modified.
+    ///
+    /// The pointer is not guaranteed to be aligned to the `Word` size if the
+    /// backing buffer `B` is not aligned.
+    pub fn addr_of(&self, index: usize) -> Option<*const W> {
+        if index >= self.len {
+            return None;
+        }
+
+        let bit_pos = index * self.bit_width;
+        let word_idx = bit_pos / <W as Word>::BITS;
+        
+        let limbs = self.as_limbs();
+        // Check if the calculated word index is valid for the slice.
+        if word_idx < limbs.len() {
+            // Get a pointer to the start of the slice and offset it.
+            // This is safer than `&limbs[word_idx] as *const _`.
+            Some(limbs.as_ptr().wrapping_add(word_idx))
+        } else {
+            // This case should ideally not be reached if len and bit_width are consistent
+            // with the buffer size, but it's a safe fallback.
+            None
+        }
+    }
+
+    /// Hints to the CPU to prefetch the data for the element at `index` into the cache.
+    ///
+    /// Prefetching can significantly improve performance for access patterns with
+    /// some degree of predictability (e.g., strided or sequential access), as it
+    /// helps to hide memory latency.
+    ///
+    /// This method is a wrapper around the `_mm_prefetch` intrinsic and will
+    /// only have an effect on architectures that support it (like x86 and x86-64).
+    /// On other architectures, it compiles to a no-op.
+    ///
+    /// If `index` is out of bounds, this method does nothing.
+    ///
+    /// # Arguments
+    ///
+    /// * `index`: The index of the element to prefetch.
+    pub fn prefetch(&self, index: usize) {
+        if index >= self.len {
+            return;
+        }
+
+        // Target only x86 and x86-64 architectures where this intrinsic is available.
+        #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+        {
+            use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+
+            let bit_pos = index * self.bit_width;
+            let byte_pos = bit_pos / 8;
+            
+            let limbs_ptr = self.as_limbs().as_ptr() as *const i8;
+
+            // SAFETY: We have already performed the bounds check on `index`, which
+            // ensures that the calculated `byte_pos` will be within the allocated
+            // buffer (including padding). The pointer is valid.
+            unsafe {
+                // We use _MM_HINT_T0 to indicate a prefetch into all levels of
+                // the cache, which is a good general-purpose default.
+                _mm_prefetch(limbs_ptr.add(byte_pos), _MM_HINT_T0);
+            }
+        }
+    }
+
     /// Binary searches this vector for a given element.
     pub fn binary_search(&self, value: &T) -> Result<usize, usize>
     where

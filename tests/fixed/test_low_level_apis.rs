@@ -9,7 +9,6 @@ use num_traits::{AsPrimitive, Bounded, ToPrimitive};
 use std::fmt::Debug;
 
 // --- Helper trait for test data generation ---
-// This allows us to create different test data for signed and unsigned types.
 trait TestData {
     fn get_test_data() -> Vec<Self> where Self: Sized;
     fn get_test_index_and_val() -> (usize, Self) where Self: Sized;
@@ -20,10 +19,9 @@ impl TestData for u16 { fn get_test_data() -> Vec<Self> { (0..100).collect() } f
 impl TestData for u32 { fn get_test_data() -> Vec<Self> { (0..100).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, 10) }}
 impl TestData for u64 { fn get_test_data() -> Vec<Self> { (0..100).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, 10) }}
 
-// For signed types, we use a range that is guaranteed to fit in a bit_width of 7.
 impl TestData for i8 { fn get_test_data() -> Vec<Self> { (-50..50).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
 impl TestData for i16 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x as i16).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
-impl TestData for i32 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
+impl TestData for i32 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x as i32).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
 impl TestData for i64 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x as i64).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
 
 
@@ -32,7 +30,7 @@ fn run_as_mut_limbs_test<T, W, E>()
 where
     T: Storable<W> + Bounded + ToPrimitive + Ord + Debug + Copy + PartialEq + TestData,
     W: Word,
-    E: Endianness + Debug,
+    E: Endianness,
     u64: AsPrimitive<W>,
     dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
         dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
@@ -58,51 +56,107 @@ where
     let corruption_pattern_u64 = 0b1010101010101010101010101010101010101010101010101010101010101010u64;
     let corruption_pattern: W = corruption_pattern_u64.as_();
 
-    // --- 1. Corrupt the data ---
     {
         let limbs = vec.as_mut_limbs();
         let corruption_mask = corruption_pattern << offset_in_word;
         limbs[word_idx] ^= corruption_mask;
-
-        if offset_in_word + bit_width > word_bits && word_idx + 1 < limbs.len() {
-            let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
-            limbs[word_idx + 1] ^= spill_mask;
+        if offset_in_word + bit_width > word_bits {
+            if word_idx + 1 < limbs.len() {
+                let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
+                limbs[word_idx + 1] ^= spill_mask;
+            }
         }
     }
 
-    // --- 2. Verify corruption ---
     let corrupted_val = vec.get(index_to_test).unwrap();
     assert_ne!(original_val, corrupted_val, "Value should have been corrupted");
 
-    // --- 3. Restore the data ---
     {
         let limbs = vec.as_mut_limbs();
         let corruption_mask = corruption_pattern << offset_in_word;
         limbs[word_idx] ^= corruption_mask;
 
-        if offset_in_word + bit_width > word_bits && word_idx + 1 < limbs.len() {
-            let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
-            limbs[word_idx + 1] ^= spill_mask;
+        if offset_in_word + bit_width > word_bits {
+             if word_idx + 1 < limbs.len() {
+                let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
+                limbs[word_idx + 1] ^= spill_mask;
+            }
         }
     }
-
-    // --- 4. Verify restoration ---
+    
     let restored_val = vec.get(index_to_test).unwrap();
     assert_eq!(original_val, restored_val, "Value should be restored");
 }
 
-/// Macro to instantiate the `as_mut_limbs` test for different generic configurations.
-macro_rules! test_as_mut_limbs {
+/// Helper function to run the addr_of test for a specific generic configuration.
+fn run_addr_of_test<T, W, E>()
+where
+    T: Storable<W> + Bounded + ToPrimitive + Ord + Debug + Copy + PartialEq + TestData,
+    W: Word,
+    E: Endianness,
+    dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
+        dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
+{
+    let test_data = T::get_test_data();
+    let vec: FixedVec<T, W, E> = test_data.into_iter().collect();
+
+    let (index, _) = T::get_test_index_and_val();
+    let bit_pos = index * vec.bit_width();
+    let word_idx = bit_pos / <W as Word>::BITS;
+
+    let ptr = vec.addr_of(index).unwrap();
+    let expected_ptr = vec.as_limbs().as_ptr().wrapping_add(word_idx);
+    assert_eq!(ptr, expected_ptr, "Pointer for index {} should point to word {}", index, word_idx);
+    
+    unsafe {
+        assert_eq!(*ptr, vec.as_limbs()[word_idx]);
+    }
+
+    assert!(vec.addr_of(vec.len()).is_none());
+}
+
+/// Helper function to run the prefetch test for a specific generic configuration.
+fn run_prefetch_test<T, W, E>()
+where
+    T: Storable<W> + Bounded + ToPrimitive + Ord + Debug + Copy + PartialEq + TestData,
+    W: Word,
+    E: Endianness,
+    dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
+        dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
+{
+    let test_data = T::get_test_data();
+    let vec: FixedVec<T, W, E> = test_data.into_iter().collect();
+
+    if !vec.is_empty() {
+        // Prefetching should be a no-op and not panic for valid indices.
+        vec.prefetch(0);
+        vec.prefetch(vec.len() / 2);
+        vec.prefetch(vec.len() - 1);
+    }
+    
+    // Prefetching should be a no-op and not panic for out-of-bounds indices.
+    vec.prefetch(vec.len());
+    vec.prefetch(usize::MAX);
+
+    // Create an empty vector and prefetch, should not panic.
+    let empty_vec: FixedVec<T,W,E> = FixedVec::new(8).unwrap();
+    empty_vec.prefetch(0);
+}
+
+
+macro_rules! test_low_level_apis {
     ($test_name:ident, $T:ty, $W:ty, $E:ty) => {
         #[test]
         fn $test_name() {
             run_as_mut_limbs_test::<$T, $W, $E>();
+            run_addr_of_test::<$T, $W, $E>();
+            run_prefetch_test::<$T, $W, $E>();
         }
     };
 }
 
 // Instantiate tests for various interesting combinations.
-test_as_mut_limbs!(as_mut_limbs_u32_usize_le, u32, usize, LE);
-test_as_mut_limbs!(as_mut_limbs_u64_u64_be, u64, u64, BE);
-test_as_mut_limbs!(as_mut_limbs_i16_u32_le, i16, u32, LE);
-test_as_mut_limbs!(as_mut_limbs_u8_u16_be, u8, u16, BE);
+test_low_level_apis!(low_level_apis_u32_usize_le, u32, usize, LE);
+test_low_level_apis!(low_level_apis_u64_u64_be, u64, u64, BE);
+test_low_level_apis!(low_level_apis_i16_u32_le, i16, u32, LE);
+test_low_level_apis!(low_level_apis_u8_u16_be, u8, u16, BE);
