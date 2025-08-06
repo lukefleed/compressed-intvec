@@ -8,3 +8,4 @@ mod test_parallel;
 mod test_capacity;
 mod test_proxy;
 mod test_chunks;
+mod test_low_level_apis;

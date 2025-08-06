@@ -949,6 +949,23 @@ where
         Some(MutProxy::new(self, index))
     }
 
+
+    /// Returns a mutable slice of the underlying storage words.
+    ///
+    /// # Safety
+    ///
+    /// This method is safe, but modifying the returned slice is inherently
+    /// unsafe from a logical perspective. Any modification to the bits can
+    /// violate the invariants of the `FixedVec`, leading to panic or incorrect
+    /// results on subsequent method calls (like `get` or `iter`).
+    ///
+    /// The caller must ensure that any changes to the slice maintain the
+    /// bit-packed structure as expected by the `FixedVec`'s parameters
+    /// (`len` and `bit_width`).
+    pub fn as_mut_limbs(&mut self) -> &mut [W] {
+        self.bits.as_mut()
+    }
+
     /// Sets the value of an element at a given index.
     pub fn set(&mut self, index: usize, value: T) {
         assert!(index < self.len, "Index out of bounds: expected index < {}, got {}", self.len, index);
