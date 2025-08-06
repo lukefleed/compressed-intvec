@@ -12,6 +12,8 @@ pub mod iter;
 pub mod traits;
 pub mod slice;
 pub mod parallel;
+pub mod proxy;
+pub mod iter_mut;
 
 // Conditionally compile the atomic module.
 #[cfg(feature = "atomic")]
@@ -26,6 +28,9 @@ use mem_dbg::{MemDbg, MemSize};
 use std::{error::Error as StdError, fmt, marker::PhantomData, iter::FromIterator};
 use traits::{Storable, Word};
 use num_traits::ToPrimitive;
+use crate::fixed::iter_mut::ChunksMut;
+
+use crate::fixed::proxy::MutProxy;
 
 // Type aliases for common `FixedVec` configurations.
 
@@ -335,7 +340,7 @@ where
     /// # Returns
     /// An `Option` containing the [`FixedVecSlice`] if the specified range is
     /// within the bounds of the vector, or `None` otherwise.
-    pub fn slice(&self, start: usize, len: usize) -> Option<slice::FixedVecSlice<T, W, E, B>> {
+    pub fn slice(&self, start: usize, len: usize) -> Option<slice::FixedVecSlice<&Self>> {
         if start.saturating_add(len) > self.len {
             return None;
         }
@@ -350,13 +355,25 @@ where
     /// # Returns
     /// An `Option` containing a tuple of two [`FixedVecSlice`]s if `mid` is
     /// within the bounds of the vector, or `None` otherwise.
-    pub fn split_at(&self, mid: usize) -> Option<(slice::FixedVecSlice<T, W, E, B>, slice::FixedVecSlice<T, W, E, B>)> {
+    pub fn split_at(&self, mid: usize) -> Option<(slice::FixedVecSlice<&Self>, slice::FixedVecSlice<&Self>)> {
         if mid > self.len {
             return None;
         }
         let left = slice::FixedVecSlice::new(self, 0..mid);
         let right = slice::FixedVecSlice::new(self, mid..self.len);
         Some((left, right))
+    }
+
+    /// Returns an iterator over non-overlapping chunks of the vector.
+    ///
+    /// Each chunk is a `FixedVecSlice` of length `chunk_size`, except for the
+    /// last chunk which may be shorter.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `chunk_size` is 0.
+    pub fn chunks(&self, chunk_size: usize) -> iter::Chunks<T, W, E, B> {
+        iter::Chunks::new(self, chunk_size)
     }
 
     /// Binary searches this vector for a given element.
@@ -699,6 +716,21 @@ where
     E: Endianness,
     B: AsRef<[W]> + AsMut<[W]>,
 {
+
+    /// Returns a mutable proxy for an element at a given index.
+    ///
+    /// This allows for syntax like `*vec.at_mut(i).unwrap() = new_value;`.
+    /// The proxy holds a temporary copy of the value, and writes it back into
+    /// the vector when it is dropped.
+    ///
+    /// Returns `None` if the index is out of bounds.
+    pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<T, W, E, B>> {
+        if index >= self.len {
+            return None;
+        }
+        Some(MutProxy::new(self, index))
+    }
+
     /// Sets the value of an element at a given index.
     pub fn set(&mut self, index: usize, value: T) {
         assert!(index < self.len, "Index out of bounds: expected index < {}, got {}", self.len, index);
@@ -776,6 +808,14 @@ where
                 *low_word |= low_value.to_be();
             }
         }
+    }
+
+    /// Returns an iterator over non-overlapping mutable chunks of the vector.
+    ///
+    /// # Panics
+    /// Panics if `chunk_size` is 0.
+    pub fn chunks_mut(&mut self, chunk_size: usize) -> iter_mut::ChunksMut<T, W, E, B> {
+        iter_mut::ChunksMut::new(self, chunk_size)
     }
 }
 

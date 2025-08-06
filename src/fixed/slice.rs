@@ -1,38 +1,46 @@
 //! # Zero-Copy Slices for `FixedVec`
 //!
-//! This module provides `FixedVecSlice`, a zero-copy view into a portion of a
-//! `FixedVec`.
+//! This module provides `FixedVecSlice`, a zero-copy, generic view into a
+//! portion of a `FixedVec`.
 
-use crate::fixed::{iter::FixedVecSliceIter, traits::{Storable, Word}, FixedVec};
+use crate::fixed::{
+    iter::FixedVecSliceIter,
+    proxy::MutProxy,
+    traits::{Storable, Word},
+    FixedVec,
+};
 use dsi_bitstream::prelude::Endianness;
-use std::ops::Range;
+use std::ops::{Deref, DerefMut, Range};
 
-/// A zero-copy, immutable view into a contiguous portion of a [`FixedVec`].
+/// A zero-copy view into a contiguous portion of a [`FixedVec`].
 ///
-/// This struct is created by the `slice` or `split_at` methods on a `FixedVec`.
-/// It provides a read-only API similar to `FixedVec` itself but without owning
-/// the underlying data.
-#[derive(Debug, Clone)]
-pub struct FixedVecSlice<'a, T, W, E, B>
-where
-    T: Storable<W>,
-    W: Word,
-    E: Endianness,
-    B: AsRef<[W]>,
-{
-    parent: &'a FixedVec<T, W, E, B>,
+/// This struct is generic over the type of reference to the parent vector (`V`),
+/// allowing it to represent both immutable slices (when `V` is `&FixedVec`)
+/// and mutable slices (when `V` is `&mut FixedVec`).
+///
+/// It is created by the `slice`, `slice_mut`, `split_at`, etc., methods on a `FixedVec`.
+#[derive(Debug)]
+pub struct FixedVecSlice<V> {
+    /// The parent vector reference (`&FixedVec` or `&mut FixedVec`).
+    parent: V,
+    /// The start index and length of the slice within the parent.
     range: Range<usize>,
 }
 
-impl<'a, T, W, E, B> FixedVecSlice<'a, T, W, E, B>
+// --- Common Implementation for both Immutable and Mutable Slices ---
+impl<T, W, E, B, V> FixedVecSlice<V>
 where
     T: Storable<W>,
     W: Word,
     E: Endianness,
     B: AsRef<[W]>,
+    V: Deref<Target = FixedVec<T, W, E, B>>,
 {
-    /// Creates a new `FixedVecSlice`. Assumes the range is within bounds.
-    pub(super) fn new(parent: &'a FixedVec<T, W, E, B>, range: Range<usize>) -> Self {
+    /// Creates a new `FixedVecSlice`.
+    ///
+    /// This is `pub(super)` and is called by methods on `FixedVec`.
+    /// It assumes the provided range is within the parent's bounds.
+    pub(super) fn new(parent: V, range: Range<usize>) -> Self {
         debug_assert!(range.end <= parent.len());
         Self { parent, range }
     }
@@ -55,10 +63,14 @@ where
         if index >= self.len() {
             return None;
         }
+        // SAFETY: The bounds check has been performed.
         Some(unsafe { self.get_unchecked(index) })
     }
 
     /// Retrieves the element at `index` within the slice without bounds checking.
+    ///
+    /// # Safety
+    /// Calling this method with an out-of-bounds index is Undefined Behavior.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len());
@@ -66,8 +78,7 @@ where
     }
 
     /// Returns an iterator over the values in the slice.
-    // The lifetime of the returned iterator is tied to the lifetime of `&self`, not `'a`.
-    pub fn iter<'s>(&'s self) -> FixedVecSliceIter<'s, 'a, T, W, E, B> {
+    pub fn iter<'s>(&'s self) -> FixedVecSliceIter<'s, T, W, E, B, V> {
         FixedVecSliceIter::new(self)
     }
 
@@ -81,8 +92,9 @@ where
 
         while low < high {
             let mid = low + (high - low) / 2;
+            // SAFETY: The loop invariants ensure `mid` is always in bounds.
             let mid_val = unsafe { self.get_unchecked(mid) };
-            
+
             match mid_val.cmp(value) {
                 std::cmp::Ordering::Less => low = mid + 1,
                 std::cmp::Ordering::Equal => return Ok(mid),
@@ -93,17 +105,43 @@ where
     }
 }
 
+// --- Mutable-Only Implementation ---
+impl<T, W, E, B, V> FixedVecSlice<V>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+    V: Deref<Target = FixedVec<T, W, E, B>> + DerefMut,
+{
+    /// Returns a mutable proxy for an element at a given index within the slice.
+    ///
+    /// This allows for syntax like `*slice.at_mut(i).unwrap() = new_value;`.
+    ///
+    /// Returns `None` if the index is out of bounds.
+    pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<T, W, E, B>> {
+        if index >= self.len() {
+            return None;
+        }
+        // The proxy gets a mutable reference to the *parent* vector, but uses
+        // the global index from the slice's perspective.
+        Some(MutProxy::new(&mut self.parent, self.range.start + index))
+    }
+}
 
 // --- PartialEq Implementations ---
 
-impl<'a, T, W, E, B> PartialEq for FixedVecSlice<'a, T, W, E, B>
+// FixedVecSlice == FixedVecSlice
+impl<T, W, E, B, V1, V2> PartialEq<FixedVecSlice<V2>> for FixedVecSlice<V1>
 where
     T: Storable<W> + PartialEq,
     W: Word,
     E: Endianness,
     B: AsRef<[W]>,
+    V1: Deref<Target = FixedVec<T, W, E, B>>,
+    V2: Deref<Target = FixedVec<T, W, E, B>>,
 {
-    fn eq(&self, other: &Self) -> bool {
+    fn eq(&self, other: &FixedVecSlice<V2>) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -111,25 +149,25 @@ where
     }
 }
 
-impl<'a, T, W, E, B> Eq for FixedVecSlice<'a, T, W, E, B>
+impl<T, W, E, B, V> Eq for FixedVecSlice<V>
 where
     T: Storable<W> + Eq,
     W: Word,
     E: Endianness,
     B: AsRef<[W]>,
-{}
-
-
-// --- Cross-Type PartialEq Implementations ---
+    V: Deref<Target = FixedVec<T, W, E, B>>,
+{
+}
 
 // FixedVecSlice == FixedVec
-impl<'a, T, W, E, B, B2> PartialEq<FixedVec<T, W, E, B2>> for FixedVecSlice<'a, T, W, E, B>
+impl<T, W, E, B, B2, V> PartialEq<FixedVec<T, W, E, B2>> for FixedVecSlice<V>
 where
     T: Storable<W> + PartialEq,
     W: Word,
     E: Endianness,
     B: AsRef<[W]>,
     B2: AsRef<[W]>,
+    V: Deref<Target = FixedVec<T, W, E, B>>,
 {
     fn eq(&self, other: &FixedVec<T, W, E, B2>) -> bool {
         if self.len() != other.len() {
@@ -140,15 +178,16 @@ where
 }
 
 // FixedVec == FixedVecSlice
-impl<'a, T, W, E, B, B2> PartialEq<FixedVecSlice<'a, T, W, E, B2>> for FixedVec<T, W, E, B>
+impl<T, W, E, B, B2, V> PartialEq<FixedVecSlice<V>> for FixedVec<T, W, E, B>
 where
     T: Storable<W> + PartialEq,
     W: Word,
     E: Endianness,
     B: AsRef<[W]>,
     B2: AsRef<[W]>,
+    V: Deref<Target = FixedVec<T, W, E, B2>>,
 {
-    fn eq(&self, other: &FixedVecSlice<'a, T, W, E, B2>) -> bool {
+    fn eq(&self, other: &FixedVecSlice<V>) -> bool {
         if self.len() != other.len() {
             return false;
         }
@@ -156,20 +195,36 @@ where
     }
 }
 
-
 /// Implements `PartialEq` for comparing a `FixedVecSlice` with a standard slice.
-impl<'a, T, W, E, B, T2> PartialEq<&[T2]> for FixedVecSlice<'a, T, W, E, B>
+impl<T, W, E, B, T2, V> PartialEq<&[T2]> for FixedVecSlice<V>
 where
     T: Storable<W> + PartialEq<T2>,
     W: Word,
     E: Endianness,
     B: AsRef<[W]>,
     T2: Clone,
+    V: Deref<Target = FixedVec<T, W, E, B>>,
 {
     fn eq(&self, other: &&[T2]) -> bool {
         if self.len() != other.len() {
             return false;
         }
         self.iter().zip(other.iter()).all(|(a, b)| a == *b)
+    }
+}
+
+
+// FixedVecSlice == &FixedVec
+impl<T, W, E, B, B2, V> PartialEq<&FixedVec<T, W, E, B2>> for FixedVecSlice<V>
+where
+    T: Storable<W> + PartialEq,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+    B2: AsRef<[W]>,
+    V: Deref<Target = FixedVec<T, W, E, B>>,
+{
+    fn eq(&self, other: &&FixedVec<T, W, E, B2>) -> bool {
+        self.eq(*other)
     }
 }

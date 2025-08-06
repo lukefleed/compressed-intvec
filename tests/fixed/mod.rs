@@ -6,3 +6,5 @@ mod test_slice;
 mod test_fixed;
 mod test_parallel;
 mod test_capacity;
+mod test_proxy;
+mod test_chunks;
