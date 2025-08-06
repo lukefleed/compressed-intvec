@@ -70,4 +70,55 @@ where
         debug_assert!(index < self.len());
         self.parent.get_unchecked(self.range.start + index)
     }
+
+    /// Returns an iterator over the values in the view.
+    pub fn iter(&self) -> crate::fixed::iter::FixedVecIter<T, W, E, B> {
+        // This is a bit of a workaround to create an iterator for a slice.
+        // We create a temporary FixedVec that acts as the slice view.
+        // A more advanced implementation would have a dedicated slice iterator.
+        unimplemented!("Iterator for slices is not yet implemented cleanly.");
+    }
+
+/// Binary searches this view for a given element.
+    pub fn binary_search(&self, value: &T) -> Result<usize, usize>
+    where
+        T: Ord,
+    {
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let mid_val = unsafe { self.get_unchecked(mid) };
+            
+            match mid_val.cmp(value) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary searches this view with a comparator function.
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(T) -> std::cmp::Ordering, // Accetta T, non &T
+    {
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let mid_val = unsafe { self.get_unchecked(mid) };
+            // Passa la proprietà di mid_val alla closure
+            let cmp = f(mid_val); 
+            match cmp {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
 }

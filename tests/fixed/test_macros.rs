@@ -1,64 +1,73 @@
-//! Integration tests for API ergonomics, such as macros and convenience methods.
+//! Integration tests for the `fixed_vec!` macro.
 
-use compressed_intvec::{fixed_vec, prelude::*, s_fixed_vec};
+use compressed_intvec::fixed::{SFixedVec, UFixedVec};
+use compressed_intvec::fixed_vec;
 
 #[test]
-fn test_fixed_vec_macro() {
-    // Empty
-    let v_empty: LEFixedVec = fixed_vec![8];
-    assert!(v_empty.is_empty());
-    assert_eq!(v_empty.num_bits(), 8);
-
-    // From list
-    let v_list = fixed_vec![10; 100, 200, 300];
-    assert_eq!(v_list.len(), 3);
-    assert_eq!(v_list.num_bits(), 10);
-    assert_eq!(v_list.get(1), Some(200));
-    assert_eq!(v_list, &[100u64, 200, 300][..]);
-
-    // From element and length
-    let v_repeat = fixed_vec![5 => 13; 100];
-    assert_eq!(v_repeat.len(), 100);
-    assert_eq!(v_repeat.num_bits(), 5);
-    for i in 0..100 {
-        assert_eq!(v_repeat.get(i), Some(13));
-    }
+fn test_fixed_vec_macro_empty() {
+    // For the empty case, type annotation is still required as there are no
+    // values from which to infer the type. This is expected and correct.
+    let v: UFixedVec<u32> = fixed_vec![];
+    assert!(v.is_empty());
+    assert_eq!(v.len(), 0);
+    assert_eq!(v.bit_width(), 1);
 }
 
 #[test]
-fn test_s_fixed_vec_macro() {
-    // Empty
-    let v_empty: LESFixedVec = s_fixed_vec![8];
-    assert!(v_empty.is_empty());
-    assert_eq!(v_empty.num_bits(), 8);
+fn test_fixed_vec_macro_from_list_unsigned() {
+    // The type is now fully inferred by the macro!
+    // We create an explicitly typed slice to compare against.
+    let v = fixed_vec![100u32, 200, 300, 400, 500];
+    let expected: &[u32] = &[100, 200, 300, 400, 500];
 
-    // From list
-    let v_list = s_fixed_vec![12; -100, 200, -300];
-    assert_eq!(v_list.len(), 3);
-    assert_eq!(v_list.num_bits(), 12);
-    assert_eq!(v_list.get(2), Some(-300));
-    assert_eq!(v_list, &[-100i64, 200, -300][..]);
+    assert_eq!(v.len(), 5);
+    assert_eq!(v.get(0), Some(100));
+    assert_eq!(v.get(4), Some(500));
+    assert_eq!(v, expected);
 
-    // From element and length
-    let v_repeat = s_fixed_vec![16 => -42; 100];
-    assert_eq!(v_repeat.len(), 100);
-    assert_eq!(v_repeat.num_bits(), 16);
-    for i in 0..100 {
-        assert_eq!(v_repeat.get(i), Some(-42));
-    }
+    // Verify that the inferred type is indeed UFixedVec<u32>
+    let _: UFixedVec<u32> = v;
 }
 
 #[test]
-fn test_from_slice_method() {
-    // from_slice uses the default BitWidth strategy, which is Minimal.
-    let data_u32: &[u32] = &[10, 20, 30, 1000];
-    let vec_u32 = LEFixedVec::from_slice(data_u32).unwrap();
-    assert_eq!(vec_u32.num_bits(), 10); // Minimal for 1000 is 10 bits.
-    assert_eq!(vec_u32, data_u32);
+fn test_fixed_vec_macro_from_list_signed() {
+    // The type is inferred to SFixedVec<i16>.
+    let v = fixed_vec![-100i16, 0, 200, -300, 500];
+    let expected: &[i16] = &[-100, 0, 200, -300, 500];
 
-    let data_i16: &[i16] = &[-10, 20, -300];
-    let vec_i16 = LESFixedVec::from_slice(data_i16).unwrap();
-    // ZigZag(-300) = 599, requires 10 bits.
-    assert_eq!(vec_i16.num_bits(), 10);
-    assert_eq!(vec_i16, data_i16);
+    assert_eq!(v.len(), 5);
+    assert_eq!(v.get(0), Some(-100));
+    assert_eq!(v, expected);
+
+    // Verify that the inferred type is SFixedVec<i16>
+    let _: SFixedVec<i16> = v;
+}
+
+#[test]
+fn test_fixed_vec_macro_from_list_with_trailing_comma() {
+    let v = fixed_vec![1u8, 2, 3,];
+    assert_eq!(v.len(), 3);
+    assert_eq!(v.get(2), Some(3));
+    let _: UFixedVec<u8> = v;
+}
+
+#[test]
+fn test_fixed_vec_macro_from_repeated_element() {
+    // Unsigned
+    let v_unsigned = fixed_vec![42u64; 100];
+    assert_eq!(v_unsigned.len(), 100);
+    for i in 0..100 {
+        assert_eq!(v_unsigned.get(i), Some(42));
+    }
+    assert_eq!(v_unsigned.bit_width(), 6);
+    let _: UFixedVec<u64> = v_unsigned;
+
+    // Signed
+    let v_signed = fixed_vec![-5isize; 50];
+    assert_eq!(v_signed.len(), 50);
+    for i in 0..50 {
+        assert_eq!(v_signed.get(i), Some(-5));
+    }
+    assert_eq!(v_signed.bit_width(), 4);
+    let _: SFixedVec<isize> = v_signed;
 }

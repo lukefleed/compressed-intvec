@@ -1,127 +1,92 @@
-//! Macros for creating `FixedVec` and `SFixedVec` instances with a `vec!`-like syntax.
+//! Macros for creating `FixedVec` instances with a `vec!`-like syntax.
 
-/// Creates a [`FixedVec`] containing the given elements with a specified bit width.
+/// Creates a `FixedVec` with default parameters.
 ///
-/// `fixed_vec!` allows for concise initialization of a `FixedVec`. It defaults
-/// to a Little-Endian (`LE`) memory layout, which is optimal for most modern CPUs.
-///
-/// # Syntax
-///
-/// - Create an empty `FixedVec` with a given bit width:
-///   ```
-///   # use compressed_intvec::prelude::*;
-///   # use compressed_intvec::fixed_vec;
-///   let v: LEFixedVec = fixed_vec!; // or fixed_vec![8;]
-///   assert!(v.is_empty());
-///   assert_eq!(v.num_bits(), 8);
-///   ```
-///
-/// - Create a `FixedVec` with a given bit width and a list of elements:
-///   ```
-///   # use compressed_intvec::prelude::*;
-///   # use compressed_intvec::fixed_vec;
-///   let v = fixed_vec![10; 100u64, 200, 300];
-///   assert_eq!(v.len(), 3);
-///   assert_eq!(v.get(1), Some(200));
-///   ```
-///
-/// - Create a `FixedVec` with a given bit width, an element, and a length:
-///   ```
-///   # use compressed_intvec::prelude::*;
-///   # use compressed_intvec::fixed_vec;
-///   let v = fixed_vec![16 => 42u64; 10];
-///   assert_eq!(v.len(), 10);
-///   assert_eq!(v.get(5), Some(42));
-///   ```
-///
-/// The macro uses `BitWidth::Explicit` internally. If you need automatic bit-width
-/// detection, please use the [`FixedVec::builder`].
+/// This macro simplifies the creation of `FixedVec` by using default parameters
+/// (`usize` for the storage word, `LittleEndian` for byte order) inferred
+
+/// from the element type. It uses `BitWidth::Minimal` for space efficiency.
 #[macro_export]
 macro_rules! fixed_vec {
-    ($bit_width:expr) => {
-        $crate::prelude::LEFixedVec::builder(&[0u64; 0])
-            .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
-            .build()
-            .unwrap()
+    // Empty vector: `fixed_vec![]`
+    // Requires type annotation from the user, e.g., `let v: UFixedVec<u32> = fixed_vec![];`
+    () => {
+        $crate::fixed::FixedVec::builder().build(&[]).unwrap()
     };
-    ($bit_width:expr; $($elem:expr),* $(,)?) => {
-        // Ensure literals are treated as u64 to satisfy trait bounds
-        $crate::prelude::LEFixedVec::builder(&[$($elem as u64),*])
-            .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
-            .build()
-            .unwrap()
+
+    // From list: `fixed_vec![a, b, c]`
+    ($($elem:expr),+ $(,)?) => {
+        // Delegate to the hidden helper function.
+        // The compiler infers `T` from the slice `&[$($elem),+]`.
+        $crate::fixed::macros::from_slice(&[$($elem),+])
     };
-    ($bit_width:expr => $elem:expr; $len:expr) => {
-        {
-            let mut v = ::std::vec::Vec::with_capacity($len);
-            // Ensure the element is u64
-            v.resize($len, $elem as u64);
-            $crate::prelude::LEFixedVec::builder(&v)
-                .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
-                .build()
-                .unwrap()
-        }
+
+    // From element and length: `fixed_vec![elem; len]`
+    ($elem:expr; $len:expr) => {
+        // Delegate to the hidden helper function.
+        $crate::fixed::macros::from_repetition($elem, $len)
     };
 }
 
-/// Creates an [`SFixedVec`] containing the given elements with a specified bit width.
-///
-/// `s_fixed_vec!` provides a concise syntax for `SFixedVec` initialization.
-/// It defaults to a Little-Endian (`LE`) memory layout.
-///
-/// # Syntax
-///
-/// - Create an empty `SFixedVec` with a given bit width:
-///
-///   ```rust
-///   # use compressed_intvec::prelude::*;
-///   # use compressed_intvec::s_fixed_vec;
-///   let v: LESFixedVec = s_fixed_vec!;
-///   assert!(v.is_empty());
-///   assert_eq!(v.num_bits(), 8);
-///   ```
-///
-/// - Create an `SFixedVec` with a given bit width and a list of elements:
-///   ```rust
-///   # use compressed_intvec::prelude::*;
-///   # use compressed_intvec::s_fixed_vec;
-///   let v = s_fixed_vec![12; -100, 200, -300];
-///   assert_eq!(v.len(), 3);
-///   assert_eq!(v.get(2), Some(-300));
-///   ```
-///
-/// - Create an `SFixedVec` with a given bit width, an element, and a length:
-///   ```rust
-///   # use compressed_intvec::prelude::*;
-///   # use compressed_intvec::s_fixed_vec;
-///   let v = s_fixed_vec![16 => -42; 10];
-///   assert_eq!(v.len(), 10);
-///   assert_eq!(v.get(5), Some(-42));
-///   ```
-#[macro_export]
-macro_rules! s_fixed_vec {
-    ($bit_width:expr) => {
-        $crate::prelude::LESFixedVec::builder(&[0i64; 0])
-            .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
-            .build()
-            .unwrap()
-    };
-    ($bit_width:expr; $($elem:expr),* $(,)?) => {
-        // Ensure literals are treated as i64
-        $crate::prelude::LESFixedVec::builder(&[$($elem as i64),*])
-            .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
-            .build()
-            .unwrap()
-    };
-    ($bit_width:expr => $elem:expr; $len:expr) => {
-        {
-            let mut v = ::std::vec::Vec::with_capacity($len);
-            // Ensure the element is i64
-            v.resize($len, $elem as i64);
-            $crate::prelude::LESFixedVec::builder(&v)
-                .bit_width($crate::prelude::BitWidth::Explicit($bit_width))
-                .build()
-                .unwrap()
-        }
-    };
+// --- Macro Helper Functions (Not part of the public API) ---
+
+use crate::fixed::{
+    builder::FixedVecBuilder,
+    traits::{DefaultParams, Storable, Word},
+    BitWidth, FixedVec,
+};
+use dsi_bitstream::prelude::Endianness;
+use num_traits::ToPrimitive;
+
+/// A hidden helper function for the `fixed_vec![...]` macro variant.
+#[doc(hidden)]
+pub fn from_slice<T>(
+    slice: &[T],
+) -> FixedVec<T, <T as DefaultParams>::W, <T as DefaultParams>::E>
+where
+    T: DefaultParams + Storable<<T as DefaultParams>::W> + ToPrimitive,
+    <T as DefaultParams>::W: Word,
+    <T as DefaultParams>::E: Endianness,
+    FixedVecBuilder<T, <T as DefaultParams>::W, <T as DefaultParams>::E>: Default,
+    // The complex bound for the builder's `build` method.
+    for<'a> dsi_bitstream::impls::BufBitWriter<
+        <T as DefaultParams>::E,
+        dsi_bitstream::impls::MemWordWriterVec<<T as DefaultParams>::W, Vec<<T as DefaultParams>::W>>,
+    >: dsi_bitstream::prelude::BitWrite<
+        <T as DefaultParams>::E,
+        Error = std::convert::Infallible,
+    >,
+{
+    FixedVec::<T, <T as DefaultParams>::W, <T as DefaultParams>::E>::builder()
+        .bit_width(BitWidth::Minimal)
+        .build(slice)
+        .unwrap()
+}
+
+/// A hidden helper function for the `fixed_vec![elem; len]` macro variant.
+#[doc(hidden)]
+pub fn from_repetition<T>(
+    elem: T,
+    len: usize,
+) -> FixedVec<T, <T as DefaultParams>::W, <T as DefaultParams>::E>
+where
+    T: DefaultParams + Storable<<T as DefaultParams>::W> + ToPrimitive + Clone,
+    <T as DefaultParams>::W: Word,
+    <T as DefaultParams>::E: Endianness,
+    FixedVecBuilder<T, <T as DefaultParams>::W, <T as DefaultParams>::E>: Default,
+    // The complex bound for the builder's `build` method.
+    for<'a> dsi_bitstream::impls::BufBitWriter<
+        <T as DefaultParams>::E,
+        dsi_bitstream::impls::MemWordWriterVec<<T as DefaultParams>::W, Vec<<T as DefaultParams>::W>>,
+    >: dsi_bitstream::prelude::BitWrite<
+        <T as DefaultParams>::E,
+        Error = std::convert::Infallible,
+    >,
+{
+    let mut v = Vec::new();
+    v.resize(len, elem);
+    FixedVec::<T, <T as DefaultParams>::W, <T as DefaultParams>::E>::builder()
+        .bit_width(BitWidth::Minimal)
+        .build(&v)
+        .unwrap()
 }

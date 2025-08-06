@@ -24,6 +24,7 @@ use dsi_bitstream::{prelude::Endianness, traits::{BE, LE}};
 use mem_dbg::{MemDbg, MemSize};
 use std::{error::Error as StdError, fmt, marker::PhantomData};
 use traits::{Storable, Word};
+use num_traits::ToPrimitive;
 
 // Type aliases for common `FixedVec` configurations.
 
@@ -332,6 +333,60 @@ where
         let right = view::FixedVecView::new(self, mid..self.len);
         Some((left, right))
     }
+
+    /// Binary searches this vector for a given element.
+    pub fn binary_search(&self, value: &T) -> Result<usize, usize>
+    where
+        T: Ord,
+    {
+        // We can't use self.binary_search_by directly because of Ord vs FnMut,
+        // so we reimplement the logic here for clarity.
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let mid_val = unsafe { self.get_unchecked(mid) };
+            
+            match mid_val.cmp(value) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary searches this vector with a comparator function.
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(T) -> std::cmp::Ordering, // Accetta T, non &T
+    {
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let mid_val = unsafe { self.get_unchecked(mid) };
+            // Passa la proprietà di mid_val alla closure
+            let cmp = f(mid_val); 
+
+            match cmp {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary searches this vector with a key extraction function.
+    pub fn binary_search_by_key<K: Ord, F>(&self, key: &K, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(T) -> K,
+    {
+        self.binary_search_by(|probe| f(probe).cmp(key))
+    }
 }
 
 /// Implements `IntoIterator` for a borrowed `FixedVec`.
@@ -372,130 +427,12 @@ where
     }
 }
 
-// This block implements mutable, in-place operations for `FixedVec` instances
-// that have a mutable backend (e.g., `Vec<W>` or `&mut [W]`).
-impl<T, W, E, B> FixedVec<T, W, E, B>
-where
-    T: Storable<W>,
-    W: Word,
-    E: Endianness,
-    B: AsRef<[W]> + AsMut<[W]>,
-{
-    /// Sets the value of an element at a given index.
-    ///
-    /// # Panics
-    /// Panics if `index` is out of bounds. Also panics if the provided `value`
-    /// does not fit within the configured `bit_width`.
-    pub fn set(&mut self, index: usize, value: T) {
-        assert!(index < self.len, "Index out of bounds: expected index < {}, got {}", self.len, index);
-        
-        let value_w = <T as Storable<W>>::into_word(value);
-        let bits_per_word = <W as traits::Word>::BITS;
-
-        let limit = if self.bit_width < bits_per_word {
-            W::ONE << self.bit_width
-        } else {
-            W::max_value()
-        };
-
-        if self.bit_width < bits_per_word && value_w >= limit {
-            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
-        }
-
-        let bit_pos = index * self.bit_width;
-        let word_index = bit_pos / bits_per_word;
-        let bit_offset = bit_pos % bits_per_word;
-        
-        let limbs = self.bits.as_mut();
-
-        // This is a read-modify-write operation on the underlying words.
-        if E::IS_LITTLE {
-            if bit_offset + self.bit_width <= bits_per_word {
-                // Fast path: element is within a single word.
-                let original_word = &mut limbs[word_index];
-                *original_word &= !(self.mask << bit_offset); // Clear the bits
-                *original_word |= value_w << bit_offset;     // Set the new bits
-            } else {
-                // Slow path: element spans two words.
-                let (left, right) = limbs.split_at_mut(word_index + 1);
-                let low_word = &mut left[word_index];
-                let high_word = &mut right[0];
-
-                // Clear and set bits in the low word
-                *low_word &= !(self.mask << bit_offset);
-                *low_word |= value_w << bit_offset;
-
-                // Clear and set bits in the high word
-                let bits_in_high = (bit_offset + self.bit_width) - bits_per_word;
-                let high_mask = self.mask >> (self.bit_width - bits_in_high);
-                *high_word &= !high_mask;
-                *high_word |= value_w >> (self.bit_width - bits_in_high);
-            }
-        } else {
-            // Big-Endian logic is significantly more complex to write manually
-            // and is often less performant. For now, we delegate to a simpler get/set pattern.
-            // TODO: Implement optimized Big-Endian set logic.
-            unimplemented!("Mutable Big-Endian operations are not yet implemented.");
-        }
-    }
-}
-
-use std::ops::{Index, IndexMut};
-
-/// Implements `Index` for read-only bracket access (`vec[i]`).
-///
-/// Due to Rust's borrowing rules, this trait cannot be implemented in a way
-/// that returns a true reference (`&T`) without significant overhead or unsafe
-/// practices for a bit-packed structure. The `get()` method is the idiomatic
-/// and efficient way to access elements.
-impl<T, W, E, B> Index<usize> for FixedVec<T, W, E, B>
-where
-    T: Storable<W>,
-    W: Word,
-    E: Endianness,
-    B: AsRef<[W]>,
-{
-    type Output = T;
-
-    #[inline]
-    fn index(&self, _index: usize) -> &Self::Output {
-        // This pattern is an anti-pattern in Rust for types that don't have
-        // stable references to return. It involves leaking memory or thread_local
-        // storage, both of which are undesirable.
-        panic!("Direct indexing that returns a temporary owned value is not supported. Use .get(index) instead.");
-    }
-}
-
-
-/// Implements `IndexMut` for mutable bracket access (`vec[i] = new_val`).
-///
-/// This implementation is intentionally omitted. Returning a mutable proxy object
-/// (`&mut T`) that correctly interacts with Rust's borrow checker and lifetimes
-/// is highly complex and often requires language features like Generic Associated
-/// Types (GATs) to be implemented cleanly and safely.
-/// The `set(index, value)` method is the recommended way to mutate elements.
-impl<T, W, E, B> IndexMut<usize> for FixedVec<T, W, E, B>
-where
-    T: Storable<W>,
-    W: Word,
-    E: Endianness,
-    B: AsRef<[W]> + AsMut<[W]>,
-{
-    #[inline]
-    fn index_mut(&mut self, _index: usize) -> &mut Self::Output {
-        unimplemented!("IndexMut is not implemented. Please use the .set(index, value) method for mutable access.");
-    }
-}
-
-use num_traits::ToPrimitive; // Aggiungi questo in cima al file `mod.rs`
-
-// ... (resto del file)
 
 // This block implements resizing and capacity management methods for `FixedVec`
 // instances that have an owned `Vec<W>` backend.
 impl<T, W, E> FixedVec<T, W, E, Vec<W>>
 where
-    T: Storable<W> + ToPrimitive, // Aggiunto ToPrimitive per la conversione a u64
+    T: Storable<W> + ToPrimitive,
     W: Word,
     E: Endianness,
 {
@@ -507,16 +444,10 @@ where
                 bit_width, <W as traits::Word>::BITS
             )));
         }
-        // SAFETY: A new vector is always valid.
         Ok(unsafe { Self::new_unchecked(Vec::new(), 0, bit_width) })
     }
 
     /// Appends an element to the back of the vector.
-    ///
-    /// This operation may reallocate the underlying buffer if it is full.
-    ///
-    /// # Panics
-    /// Panics if the `value` does not fit within the configured `bit_width`.
     pub fn push(&mut self, value: T) {
         let value_w = <T as Storable<W>>::into_word(value);
         let bits_per_word = <W as traits::Word>::BITS;
@@ -535,29 +466,13 @@ where
         let required_total_bits = bit_pos + self.bit_width;
         let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
 
-        // Ensure there is space for data + 1 padding word.
         if required_words + 1 > self.bits.len() {
-            // Reallocate with a growth factor.
             let new_capacity_words = (self.bits.len() * 2).max(required_words + 1);
             self.bits.resize(new_capacity_words, W::ZERO);
         }
         
-        // Manual bit-writing logic, similar to `set`.
-        let word_index = bit_pos / bits_per_word;
-        let bit_offset = bit_pos % bits_per_word;
-
-        if E::IS_LITTLE {
-            if bit_offset + self.bit_width <= bits_per_word {
-                // Fast path: element fits within a single word.
-                self.bits[word_index] |= value_w << bit_offset;
-            } else {
-                // Slow path: element spans two words.
-                self.bits[word_index] |= value_w << bit_offset;
-                self.bits[word_index + 1] |= value_w >> (bits_per_word - bit_offset);
-            }
-        } else {
-            // Big-Endian logic
-            unimplemented!("push for Big-Endian is not yet implemented.");
+        unsafe {
+            self.set_unchecked(self.len, value_w);
         }
         
         self.len += 1;
@@ -568,7 +483,6 @@ where
         if self.is_empty() {
             return None;
         }
-        // get() is safe to unwrap because we checked is_empty()
         let value = self.get(self.len - 1).unwrap(); 
         self.len -= 1;
         Some(value)
@@ -577,6 +491,136 @@ where
     /// Removes all elements from the vector.
     pub fn clear(&mut self) {
         self.len = 0;
-        self.bits.fill(W::ZERO);
+    }
+}
+
+// This block implements mutable, in-place operations for `FixedVec` instances
+// that have a mutable backend (e.g., `Vec<W>` or `&mut [W]`).
+impl<T, W, E, B> FixedVec<T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    /// Sets the value of an element at a given index.
+    pub fn set(&mut self, index: usize, value: T) {
+        assert!(index < self.len, "Index out of bounds: expected index < {}, got {}", self.len, index);
+        
+        let value_w = <T as Storable<W>>::into_word(value);
+        let bits_per_word = <W as traits::Word>::BITS;
+
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
+
+        if self.bit_width < bits_per_word && value_w >= limit {
+            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+        }
+        
+        unsafe { self.set_unchecked(index, value_w) };
+    }
+
+    /// Sets the value of an element at a given index without bounds checking.
+    unsafe fn set_unchecked(&mut self, index: usize, value_w: W) {
+        let bits_per_word = <W as traits::Word>::BITS;
+        let bit_pos = index * self.bit_width;
+        let word_index = bit_pos / bits_per_word;
+        let bit_offset = bit_pos % bits_per_word;
+        
+        let limbs = self.bits.as_mut();
+
+        if E::IS_LITTLE {
+            if bit_offset + self.bit_width <= bits_per_word {
+                let word = &mut limbs[word_index];
+                *word &= !(self.mask << bit_offset);
+                *word |= value_w << bit_offset;
+            } else {
+                let (left, right) = limbs.split_at_mut(word_index + 1);
+                let low_word = &mut left[word_index];
+                let high_word = &mut right[0];
+                
+                *low_word &= !(self.mask << bit_offset);
+                *low_word |= value_w << bit_offset;
+                
+                let bits_in_high = (bit_offset + self.bit_width) - bits_per_word;
+                let high_mask = self.mask >> (self.bit_width - bits_in_high);
+                *high_word &= !high_mask;
+                *high_word |= value_w >> (self.bit_width - bits_in_high);
+            }
+        } else { // Big-Endian
+            if bit_offset + self.bit_width <= bits_per_word {
+                // The value fits within a single word.
+                let shift = bits_per_word - self.bit_width - bit_offset;
+                let mask = self.mask << shift;
+                let word = &mut limbs[word_index];
+                *word &= !mask.to_be();
+                *word |= (value_w << shift).to_be();
+            } else {
+                // The value spans two words.
+                let (left, right) = limbs.split_at_mut(word_index + 1);
+                let high_word = &mut left[word_index];
+                let low_word = &mut right[0];
+                
+                let bits_in_first = bits_per_word - bit_offset;
+                let bits_in_second = self.bit_width - bits_in_first;
+
+                // 1. Handle the high word (first word)
+                let high_mask = (self.mask >> bits_in_second) << (bits_per_word - bits_in_first - bit_offset);
+                let high_value = value_w >> bits_in_second;
+                *high_word &= !high_mask.to_be();
+                *high_word |= (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
+
+                // 2. Handle the low word (second word)
+                let low_mask = self.mask << (bits_per_word - bits_in_second);
+                let low_value = value_w << (bits_per_word - bits_in_second);
+                *low_word &= !low_mask.to_be();
+                *low_word |= low_value.to_be();
+            }
+        }
+    }
+}
+
+impl<T, W, E, B, B2> PartialEq<FixedVec<T, W, E, B2>> for FixedVec<T, W, E, B>
+where
+    T: Storable<W> + PartialEq,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+    B2: AsRef<[W]>,
+{
+    /// Checks for equality between two `FixedVec` instances.
+    ///
+    /// This comparison is highly efficient as it first checks metadata (`len` and
+    /// `bit_width`) and then performs a direct bit-level comparison of the
+    /// underlying compressed data buffers.
+    fn eq(&self, other: &FixedVec<T, W, E, B2>) -> bool {
+        if self.len() != other.len() || self.bit_width() != other.bit_width() {
+            return false;
+        }
+        // If metadata matches, the raw bits must match.
+        self.as_limbs() == other.as_limbs()
+    }
+}
+
+/// Implements `PartialEq` for comparing a `FixedVec` with a standard slice.
+///
+/// This performs an element-by-element comparison, which is less efficient
+/// than comparing two `FixedVec`s directly.
+impl<T, W, E, B, T2> PartialEq<&[T2]> for FixedVec<T, W, E, B>
+where
+    T: Storable<W> + PartialEq<T2>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+    T2: Clone,
+{
+    fn eq(&self, other: &&[T2]) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+        self.iter().zip(other.iter()).all(|(a, b)| a == *b)
     }
 }

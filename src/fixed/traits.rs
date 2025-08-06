@@ -5,7 +5,7 @@
 //! underlying storage words and the conversion logic for different element types.
 
 use common_traits::{SignedInt, UnsignedInt};
-use dsi_bitstream::prelude::{ToInt, ToNat};
+use dsi_bitstream::{prelude::{ToInt, ToNat}, traits::Endianness};
 use num_traits::{Bounded, ToPrimitive};
 use std::fmt::Debug;
 
@@ -45,35 +45,22 @@ mod private {
     use super::{Storable, Word};
 
     /// The sealed trait that contains the actual conversion logic.
-    /// This trait is not intended to be implemented by users of the library.
     pub trait SealedStorable<W: Word>: Copy + Sized {
-        /// Converts the user-facing value into its storage word representation.
         fn into_word(self) -> W;
-        /// Converts a storage word representation back into the user-facing value.
         fn from_word(word: W) -> Self;
     }
 
-    /// Blanket implementation that connects the public `Storable` trait to any
-    /// type that implements this sealed trait.
     impl<T: SealedStorable<W>, W: Word> Storable<W> for T {}
 }
 
 /// A trait that defines a bidirectional, lossless conversion between a user-facing
 /// element type `T` and its storage representation of type `W`.
-///
-/// This is the key abstraction that allows `FixedVec` to transparently handle
-/// different data types (e.g., `u16`, `i32`) while using a consistent internal
-/// storage mechanism (e.g., `Vec<u64>`).
-///
-/// This trait is "sealed" and cannot be implemented for types outside of this crate.
 pub trait Storable<W: Word>: private::SealedStorable<W> {
-    /// Converts the user-facing value into its storage word representation.
     #[inline(always)]
     fn into_word(self) -> W {
         <Self as private::SealedStorable<W>>::into_word(self)
     }
 
-    /// Converts a storage word representation back into the user-facing value.
     #[inline(always)]
     fn from_word(word: W) -> Self {
         <Self as private::SealedStorable<W>>::from_word(word)
@@ -85,18 +72,22 @@ macro_rules! impl_storable_for_unsigned {
     ($($T:ty),*) => {$(
         impl<W> private::SealedStorable<W> for $T
         where
-            W: Word + From<$T>,
+            // Use TryFrom/TryInto for both directions for maximum flexibility.
+            W: Word + TryFrom<$T>,
             W: TryInto<$T>,
         {
             #[inline(always)]
             fn into_word(self) -> W {
-                self.into()
+                // The conversion from a smaller/equal unsigned to a larger/equal Word
+                // should not fail.
+                self.try_into().unwrap_or_else(|_| panic!("BUG: T -> W conversion failed."))
             }
 
             #[inline(always)]
             fn from_word(word: W) -> Self {
+                // The `get` logic masks the word, so this conversion should not fail.
                 word.try_into().unwrap_or_else(|_| {
-                    panic!("BUG: A word-to-unsigned conversion failed. This indicates a logic error in FixedVec's bit manipulation.")
+                    panic!("BUG: W -> T conversion failed. Logic error in FixedVec's bit manipulation.")
                 })
             }
         }
@@ -109,18 +100,18 @@ macro_rules! impl_storable_for_signed {
         impl<W> private::SealedStorable<W> for $T
         where
             W: Word,
-            <$T as SignedInt>::UnsignedInt: Into<W>,
+            <$T as SignedInt>::UnsignedInt: TryInto<W>,
             W: TryInto<<$T as SignedInt>::UnsignedInt>,
         {
             #[inline(always)]
             fn into_word(self) -> W {
-                self.to_nat().into()
+                self.to_nat().try_into().unwrap_or_else(|_| panic!("BUG: Signed -> Unsigned -> W conversion failed."))
             }
 
             #[inline(always)]
             fn from_word(word: W) -> Self {
                 let unsigned_val = word.try_into().unwrap_or_else(|_| {
-                    panic!("BUG: A word-to-signed's-unsigned-representation conversion failed. This indicates a logic error in FixedVec.")
+                    panic!("BUG: W -> Unsigned conversion failed. Logic error in FixedVec.")
                 });
                 ToInt::to_int(unsigned_val)
             }
@@ -131,3 +122,35 @@ macro_rules! impl_storable_for_signed {
 // Implement `Storable` for all primitive integer types.
 impl_storable_for_unsigned!(u8, u16, u32, u64, u128, usize);
 impl_storable_for_signed!(i8, i16, i32, i64, i128, isize);
+
+/// A sealed trait to associate an element type `T` with its default optimal
+/// storage word `W` and `Endianness` `E`.
+pub trait DefaultParams: Sized {
+    /// The default word type for storage (usually `usize`).
+    type W: Word;
+    /// The default endianness (usually `LittleEndian`).
+    type E: Endianness;
+}
+
+// Implement for all unsigned types
+macro_rules! impl_default_params_unsigned {
+    ($($T:ty),*) => {$(
+        impl DefaultParams for $T {
+            type W = usize;
+            type E = dsi_bitstream::prelude::LE;
+        }
+    )*};
+}
+
+// Implement for all signed types
+macro_rules! impl_default_params_signed {
+    ($($T:ty),*) => {$(
+        impl DefaultParams for $T {
+            type W = usize;
+            type E = dsi_bitstream::prelude::LE;
+        }
+    )*};
+}
+
+impl_default_params_unsigned!(u8, u16, u32, u64, u128, usize);
+impl_default_params_signed!(i8, i16, i32, i64, i128, isize);
