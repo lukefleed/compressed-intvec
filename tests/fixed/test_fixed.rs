@@ -2,7 +2,7 @@
 
 use compressed_intvec::fixed::{
     traits::{Storable, Word},
-    BitWidth, FixedVec,
+    BitWidth, FixedVec, SFixedVec, UFixedVec,
 };
 use dsi_bitstream::{prelude::{BE, LE}, traits::Endianness};
 use num_traits::{ToPrimitive};
@@ -149,4 +149,27 @@ fn test_edge_cases_and_failures() {
         vec.set(0, 300);
     });
     assert!(result.is_err(), "set() should panic on value too large");
+}
+
+#[test]
+fn test_from_iterator() {
+    // Unsigned
+    let data_u32: Vec<u32> = (0..1000).collect();
+    let vec_u32: UFixedVec<u32> = data_u32.iter().copied().collect();
+    assert_eq!(vec_u32.len(), 1000);
+    assert_eq!(vec_u32.get(123), Some(123));
+    assert_eq!(vec_u32, &data_u32[..]);
+
+    // Signed
+    let data_i16: Vec<i16> = (-500..500).collect();
+    let vec_i16: SFixedVec<i16> = data_i16.iter().copied().collect();
+    assert_eq!(vec_i16.len(), 1000);
+    assert_eq!(vec_i16.get(0), Some(-500));
+    assert_eq!(vec_i16.get(500), Some(0));
+    assert_eq!(vec_i16, &data_i16[..]);
+
+    // Empty
+    let data_empty: Vec<u64> = vec![];
+    let vec_empty: UFixedVec<u64> = data_empty.iter().copied().collect();
+    assert!(vec_empty.is_empty());
 }

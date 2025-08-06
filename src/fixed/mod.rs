@@ -23,7 +23,7 @@ mod serde;
 
 use dsi_bitstream::{prelude::Endianness, traits::{BE, LE}};
 use mem_dbg::{MemDbg, MemSize};
-use std::{error::Error as StdError, fmt, marker::PhantomData};
+use std::{error::Error as StdError, fmt, marker::PhantomData, iter::FromIterator};
 use traits::{Storable, Word};
 use num_traits::ToPrimitive;
 
@@ -452,6 +452,39 @@ where
     }
 }
 
+impl<T, W, E> FromIterator<T> for FixedVec<T, W, E, Vec<W>>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
+        dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
+{
+    /// Creates a `FixedVec` from an iterator.
+    ///
+    /// The bit width is determined automatically using the `BitWidth::Minimal`
+    /// strategy for optimal space usage. This involves collecting the iterator
+    /// into a temporary `Vec<T>` to analyze its contents.
+    ///
+    /// # Example
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    ///
+    /// let data = 0u32..100;
+    /// let vec: UFixedVec<u32> = data.collect();
+    ///
+    /// assert_eq!(vec.len(), 100);
+    /// assert_eq!(vec.get(50), Some(50));
+    /// ```
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let data: Vec<T> = iter.into_iter().collect();
+        // The builder defaults to BitWidth::Minimal, which is appropriate for
+        // FromIterator as it adapts to the collected data. This build call
+        // should not fail unless there's an internal logic error.
+        Self::builder().build(&data).unwrap()
+    }
+}
+
 
 // This block implements resizing and capacity management methods for `FixedVec`
 // instances that have an owned `Vec<W>` backend.
@@ -490,13 +523,23 @@ where
         let bit_pos = self.len * self.bit_width;
         let required_total_bits = bit_pos + self.bit_width;
         let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
-
-        if required_words + 1 > self.bits.len() {
-            let new_capacity_words = (self.bits.len() * 2).max(required_words + 1);
-            self.bits.resize(new_capacity_words, W::ZERO);
-        }
         
+        // +1 for the padding word.
+        let required_vec_len_for_write = required_words + 1;
+
+        if self.bits.capacity() < required_vec_len_for_write {
+            // Reallocation is needed. Let Vec decide how much to grow.
+            self.bits.reserve(required_vec_len_for_write - self.bits.len());
+        }
+
+        if self.bits.len() < required_vec_len_for_write {
+            // Ensure the vec's length is sufficient for the write operation
+            // without over-allocating if capacity is already sufficient.
+            self.bits.resize(required_vec_len_for_write, W::ZERO);
+        }
+
         unsafe {
+            // Write to the original length index.
             self.set_unchecked(self.len, value_w);
         }
         
@@ -516,6 +559,134 @@ where
     /// Removes all elements from the vector.
     pub fn clear(&mut self) {
         self.len = 0;
+    }
+
+    /// Creates a new, empty `FixedVec` with a specified bit width and capacity.
+    ///
+    /// The vector will be able to hold at least `capacity` elements without
+    /// reallocating.
+    pub fn with_capacity(bit_width: usize, capacity: usize) -> Result<Self, Error> {
+        if bit_width > <W as traits::Word>::BITS {
+            return Err(Error::InvalidParameters(format!(
+                "bit_width ({}) cannot be greater than the word size ({})",
+                bit_width, <W as traits::Word>::BITS
+            )));
+        }
+        let bits_per_word = <W as traits::Word>::BITS;
+        let total_bits = capacity.saturating_mul(bit_width);
+        let num_words = (total_bits + bits_per_word - 1) / bits_per_word;
+        
+        // +1 for the padding word, unless capacity is 0.
+        let buffer = if capacity == 0 {
+            Vec::new()
+        } else {
+            Vec::with_capacity(num_words + 1)
+        };
+        
+        Ok(unsafe { Self::new_unchecked(buffer, 0, bit_width) })
+    }
+
+    /// Returns the number of elements the vector can hold without reallocating.
+    pub fn capacity(&self) -> usize {
+        if self.bit_width == 0 {
+            // For zero-sized elements, capacity is conceptually infinite.
+            return usize::MAX;
+        }
+        let word_capacity = self.bits.capacity();
+        if word_capacity == 0 {
+            return 0;
+        }
+        // Subtract 1 for the padding word before calculating element capacity.
+        ((word_capacity - 1) * <W as traits::Word>::BITS) / self.bit_width
+    }
+
+    /// Returns the capacity of the underlying storage in words.
+    pub fn word_capacity(&self) -> usize {
+        self.bits.capacity()
+    }
+
+    /// Reserves capacity for at least `additional` more elements to be inserted.
+    ///
+    /// May reallocate if the current capacity is not sufficient.
+    pub fn reserve(&mut self, additional: usize) {
+        let required_len = self.len.saturating_add(additional);
+        if self.capacity() >= required_len {
+            return;
+        }
+
+        let bits_per_word = <W as traits::Word>::BITS;
+        let required_total_bits = required_len.saturating_mul(self.bit_width);
+        let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+        
+        // +1 for the padding word.
+        let required_word_capacity = required_words + 1;
+        if required_word_capacity > self.word_capacity() {
+            let additional_words = required_word_capacity.saturating_sub(self.bits.len());
+            self.bits.reserve(additional_words);
+        }
+    }
+
+    /// Resizes the vector in-place so that `len` is equal to `new_len`.
+    ///
+    /// If `new_len` is greater than `len`, the vector is extended by the
+    /// difference, with each additional slot filled with `value`.
+    /// If `new_len` is less than `len`, the vector is simply truncated.
+    ///
+    /// This implementation is optimized for performance on large extensions by
+    /// writing bits in batches rather than calling `push` repeatedly.
+    pub fn resize(&mut self, new_len: usize, value: T) {
+        if new_len > self.len {
+            // --- Extend the vector (Optimized Path) ---
+            let additional = new_len - self.len;
+            self.reserve(additional);
+
+            let value_w = <T as Storable<W>>::into_word(value);
+            let bits_per_word = <W as traits::Word>::BITS;
+            let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+
+            if self.bit_width < bits_per_word && value_w >= limit {
+                panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+            }
+
+            // Ensure the underlying Vec has enough *initialized* words to write into.
+            let required_total_bits = new_len * self.bit_width;
+            let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+            let required_vec_len = required_words + 1; // +1 for padding
+            if self.bits.len() < required_vec_len {
+                self.bits.resize(required_vec_len, W::ZERO);
+            }
+
+            // Write the new values in a loop. This is much faster than calling
+            // `push` repeatedly as it avoids redundant capacity checks.
+            for i in self.len..new_len {
+                // SAFETY: We have already reserved and resized, so the indices are valid.
+                unsafe {
+                    self.set_unchecked(i, value_w);
+                }
+            }
+            self.len = new_len;
+        } else {
+            // --- Truncate the vector (Simple Path) ---
+            self.len = new_len;
+        }
+    }
+
+    /// Shrinks the capacity of the vector as much as possible.
+    pub fn shrink_to_fit(&mut self) {
+        let min_word_len = if self.len == 0 {
+            0
+        } else {
+            let bits_per_word = <W as traits::Word>::BITS;
+            let required_total_bits = self.len.saturating_mul(self.bit_width);
+            let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+            // +1 for the padding word.
+            required_words + 1
+        };
+
+        if self.bits.len() > min_word_len {
+             self.bits.truncate(min_word_len);
+        }
+        self.bits.shrink_to_fit();
     }
 }
 

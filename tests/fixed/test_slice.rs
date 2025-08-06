@@ -5,10 +5,11 @@ use compressed_intvec::prelude::*;
 
 #[test]
 fn test_fixedvec_slice_creation_and_access() {
-    let data = generate_random_vec(100, 1000);
-    let fixed_vec = LEFixedVec::builder(&data)
+    let data: Vec<u64> = generate_random_vec(100, 1000);
+    // Use the new primary alias UFixedVec for testing.
+    let fixed_vec: UFixedVec<u64> = FixedVec::builder()
         .bit_width(BitWidth::Explicit(10))
-        .build()
+        .build(&data)
         .unwrap();
 
     // Valid slice
@@ -37,10 +38,11 @@ fn test_fixedvec_slice_creation_and_access() {
 
 #[test]
 fn test_sfixedvec_slice_creation_and_access() {
-    let data = generate_random_signed_vec(100, 1000);
-    let s_fixed_vec = LESFixedVec::builder(&data)
+    let data: Vec<i64> = generate_random_signed_vec(100, 1000);
+    // Use the new primary alias SFixedVec for testing.
+    let s_fixed_vec: SFixedVec<i64> = FixedVec::builder()
         .bit_width(BitWidth::Explicit(11))
-        .build()
+        .build(&data)
         .unwrap();
 
     // Valid slice
@@ -58,8 +60,9 @@ fn test_sfixedvec_slice_creation_and_access() {
 
 #[test]
 fn test_fixedvec_split_at() {
-    let data = generate_random_vec(100, 1000);
-    let fixed_vec = BEFixedVec::builder(&data).build().unwrap();
+    let data: Vec<u64> = generate_random_vec(100, 1000);
+    // Use the BE alias to test non-default endianness.
+    let fixed_vec: BEFixedVec = FixedVec::builder().build(&data).unwrap();
 
     // Valid split
     let (left, right) = fixed_vec.split_at(30).unwrap();
@@ -88,8 +91,9 @@ fn test_fixedvec_split_at() {
 
 #[test]
 fn test_sfixedvec_split_at() {
-    let data = generate_random_signed_vec(100, 1000);
-    let s_fixed_vec = BESFixedVec::builder(&data).build().unwrap();
+    let data: Vec<i64> = generate_random_signed_vec(100, 1000);
+    // Use the BE alias to test non-default endianness.
+    let s_fixed_vec: BESFixedVec = FixedVec::builder().build(&data).unwrap();
 
     // Valid split
     let (left, right) = s_fixed_vec.split_at(30).unwrap();
@@ -101,21 +105,27 @@ fn test_sfixedvec_split_at() {
 
 #[test]
 fn test_slice_iterators() {
-    let data = generate_random_vec(100, 1000);
-    let fixed_vec = LEFixedVec::builder(&data).build().unwrap();
-    let s_fixed_vec = LESFixedVec::builder(&generate_random_signed_vec(100, 1000))
-        .build()
-        .unwrap();
+    let data_u: Vec<u32> = generate_random_vec(100, 1000)
+        .into_iter()
+        .map(|x| x as u32)
+        .collect();
+    let data_s: Vec<i32> = generate_random_signed_vec(100, 1000)
+        .into_iter()
+        .map(|x| x as i32)
+        .collect();
+
+    let fixed_vec: UFixedVec<u32> = FixedVec::builder().build(&data_u).unwrap();
+    let s_fixed_vec: SFixedVec<i32> = FixedVec::builder().build(&data_s).unwrap();
 
     // Unsigned
     let slice = fixed_vec.slice(20, 50).unwrap();
-    let collected: Vec<u64> = slice.iter().collect();
+    let collected: Vec<u32> = slice.iter().collect();
     assert_eq!(collected.len(), 50);
-    assert_eq!(collected, &data[20..70]);
+    assert_eq!(collected, &data_u[20..70]);
 
     // Signed
     let s_slice = s_fixed_vec.slice(20, 50).unwrap();
-    let s_collected: Vec<i64> = s_slice.iter().collect();
+    let s_collected: Vec<i32> = s_slice.iter().collect();
     assert_eq!(s_collected.len(), 50);
     assert_eq!(s_slice.get(0), s_fixed_vec.get(20));
 }
@@ -123,8 +133,8 @@ fn test_slice_iterators() {
 #[test]
 fn test_into_iterator_implementations() {
     // Test for FixedVec by reference
-    let data_u64 = generate_random_vec(50, 100);
-    let fixed_vec_u64 = LEFixedVec::builder(&data_u64).build().unwrap();
+    let data_u64: Vec<u64> = generate_random_vec(50, 100);
+    let fixed_vec_u64: UFixedVec<u64> = FixedVec::builder().build(&data_u64).unwrap();
     let mut collected_u64 = Vec::new();
     for value in &fixed_vec_u64 {
         collected_u64.push(value);
@@ -136,8 +146,8 @@ fn test_into_iterator_implementations() {
     assert_eq!(collected_u64_owned, data_u64);
 
     // Test for SFixedVec by reference
-    let data_i64 = generate_random_signed_vec(50, 100);
-    let s_fixed_vec_i64 = LESFixedVec::builder(&data_i64).build().unwrap();
+    let data_i64: Vec<i64> = generate_random_signed_vec(50, 100);
+    let s_fixed_vec_i64: SFixedVec<i64> = FixedVec::builder().build(&data_i64).unwrap();
     let mut collected_i64 = Vec::new();
     for value in &s_fixed_vec_i64 {
         collected_i64.push(value);
@@ -147,7 +157,8 @@ fn test_into_iterator_implementations() {
     // Test for FixedVecSlice
     let slice = s_fixed_vec_i64.slice(10, 20).unwrap();
     let mut collected_slice = Vec::new();
-    for value in &slice {
+    // The new API requires calling .iter() explicitly on a slice.
+    for value in slice.iter() {
         collected_slice.push(value);
     }
     assert_eq!(collected_slice, &data_i64[10..30]);
@@ -156,7 +167,7 @@ fn test_into_iterator_implementations() {
 #[test]
 fn test_partial_eq_vec_and_slice() {
     let data: Vec<u64> = (0..100).collect();
-    let vec = LEFixedVec::builder(&data).build().unwrap();
+    let vec: UFixedVec<u64> = FixedVec::builder().build(&data).unwrap();
     let slice_all = vec.slice(0, 100).unwrap();
     let slice_part = vec.slice(10, 20).unwrap();
 
@@ -165,7 +176,7 @@ fn test_partial_eq_vec_and_slice() {
     assert_ne!(vec, slice_part);
 
     // Test FixedVecSlice == FixedVec (already covered, but good for completeness)
-    let part_vec = LEFixedVec::from_slice(&data[10..30]).unwrap();
+    let part_vec: UFixedVec<u64> = FixedVec::builder().build(&data[10..30]).unwrap();
     assert_eq!(slice_part, part_vec);
     assert_ne!(slice_all, part_vec);
 }
