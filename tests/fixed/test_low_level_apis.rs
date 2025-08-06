@@ -128,21 +128,57 @@ where
     let vec: FixedVec<T, W, E> = test_data.into_iter().collect();
 
     if !vec.is_empty() {
-        // Prefetching should be a no-op and not panic for valid indices.
         vec.prefetch(0);
         vec.prefetch(vec.len() / 2);
         vec.prefetch(vec.len() - 1);
     }
     
-    // Prefetching should be a no-op and not panic for out-of-bounds indices.
     vec.prefetch(vec.len());
     vec.prefetch(usize::MAX);
 
-    // Create an empty vector and prefetch, should not panic.
     let empty_vec: FixedVec<T,W,E> = FixedVec::new(8).unwrap();
     empty_vec.prefetch(0);
 }
 
+/// Helper function to test get_unaligned_unchecked against get_unchecked.
+fn run_unaligned_access_test<T, W, E>()
+where
+    T: Storable<W> + Bounded + ToPrimitive + Ord + Debug + Copy + PartialEq + TestData,
+    W: Word,
+    E: Endianness,
+    u64: AsPrimitive<W>,
+    dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
+        dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
+{
+    for bit_width in [1, 3, 7, 8, 15, 16, 17, 31, 32, 33, 63, 64] {
+        if bit_width > <W as Word>::BITS { continue; }
+
+        let mut vec: FixedVec<T, W, E> = FixedVec::new(bit_width).unwrap();
+        
+        let test_data = T::get_test_data();
+        for &val in &test_data {
+            // Use fully qualified syntax to disambiguate.
+            let word_val = <T as Storable<W>>::into_word(val);
+            if bit_width < <W as Word>::BITS && word_val >= (W::ONE << bit_width) {
+                continue;
+            }
+            vec.push(val);
+        }
+
+        if vec.is_empty() { continue; }
+
+        for i in 0..vec.len() {
+            let val_normal = unsafe { vec.get_unchecked(i) };
+            let val_unaligned = unsafe { vec.get_unaligned_unchecked(i) };
+            assert_eq!(
+                val_normal, val_unaligned,
+                "Mismatch at index {} for bit_width {}. <T={}, W={}, E={}>",
+                i, bit_width,
+                std::any::type_name::<T>(), std::any::type_name::<W>(), std::any::type_name::<E>()
+            );
+        }
+    }
+}
 
 macro_rules! test_low_level_apis {
     ($test_name:ident, $T:ty, $W:ty, $E:ty) => {
@@ -151,6 +187,7 @@ macro_rules! test_low_level_apis {
             run_as_mut_limbs_test::<$T, $W, $E>();
             run_addr_of_test::<$T, $W, $E>();
             run_prefetch_test::<$T, $W, $E>();
+            run_unaligned_access_test::<$T, $W, $E>();
         }
     };
 }

@@ -100,7 +100,7 @@ where
 
         let total_bits = input.len() * final_bit_width;
         let num_words = total_bits.div_ceil(bits_per_word);
-        let buffer = vec![W::ZERO; num_words + 1];
+        let buffer = vec![W::ZERO; num_words + 2]; // Use 2 words of padding for safe unaligned reads
 
         let mut writer = BufBitWriter::new(MemWordWriterVec::new(buffer));
 
@@ -192,6 +192,7 @@ where
         let mut data = writer.into_inner().unwrap().into_inner();
         if len > 0 {
             data.push(W::ZERO);
+            data.push(W::ZERO); // Padding for safe unaligned reads
         }
         data.shrink_to_fit();
 

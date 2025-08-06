@@ -203,11 +203,13 @@ where
         }
 
         let total_bits = len * bit_width;
-        let data_words = total_bits.div_ceil(<W as traits::Word>::BITS);
+        let data_words = (total_bits + <W as traits::Word>::BITS - 1) / <W as traits::Word>::BITS;
 
-        if bits.as_ref().len() < data_words + 1 {
+        // Essential safety check: ensure the buffer is large enough for the data
+        // AND the 2 padding words required.
+        if bits.as_ref().len() < data_words + 2 {
             return Err(Error::InvalidParameters(format!(
-                "The provided buffer is too small. It has {} words, but {} data words + 1 padding word are required.",
+                "The provided buffer is too small. It has {} words, but {} data words + 2 padding words are required.",
                 bits.as_ref().len(),
                 data_words
             )));
@@ -246,7 +248,7 @@ where
     /// The caller must ensure that:
     /// 1. `len * bit_width` is not larger than the number of bits available in `bits`.
     /// 2. The `bits` slice has at least one extra padding word at the end
-    ///    to prevent out-of-bounds reads during `get_unchecked`.
+    ///    to prevent out-of-bounds reads during [`get_unchecked`].
     /// 3. `bit_width` is not greater than `W::BITS`.
     pub(crate) unsafe fn new_unchecked(bits: B, len: usize, bit_width: usize) -> Self {
         let mask = if bit_width == <W as traits::Word>::BITS {
@@ -315,6 +317,52 @@ where
         <T as Storable<W>>::from_word(final_word)
     }
 
+
+    /// Retrieves the element at `index` using potentially unaligned memory access.
+    ///
+    /// This method is a high-performance alternative to `get_unchecked`. Instead
+    /// of potentially performing two memory reads for elements that span word
+    /// boundaries, it performs a single (potentially unaligned) read of a `Word`
+    /// and extracts the bits with shifts.
+    ///
+    /// On architectures that handle unaligned reads efficiently (e.g., x86-64),
+    /// this can be significantly faster, especially for random access patterns.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is Undefined Behavior.
+    /// The `FixedVec` must also have been constructed with sufficient padding
+    /// (at least 2 `Word`s) to guarantee that the unaligned read does not go
+    /// past the allocated memory buffer. This is guaranteed by the default builders.
+    #[inline(always)]
+    pub unsafe fn get_unaligned_unchecked(&self, index: usize) -> T {
+        debug_assert!(index < self.len);
+
+        if E::IS_LITTLE {
+            let bits_per_word = <W as Word>::BITS;
+            if self.bit_width == bits_per_word {
+                return self.get_unchecked(index);
+            }
+
+            let bit_pos = index * self.bit_width;
+            let byte_pos = bit_pos / 8;
+            let bit_rem = bit_pos % 8;
+
+            let limbs_ptr = self.as_limbs().as_ptr() as *const u8;
+            
+            let word: W = (limbs_ptr.add(byte_pos) as *const W).read_unaligned();
+            let extracted_word = word >> bit_rem;
+            
+            <T as Storable<W>>::from_word(extracted_word & self.mask)
+        } else {
+            // For Big-Endian, the logic for unaligned reads is highly complex
+            // and architecture-dependent. The standard `get_unchecked` is already
+            // heavily optimized for this case. We fall back to it for correctness
+            // and robust performance.
+            self.get_unchecked(index)
+        }
+    }
+    
     /// Returns a safe iterator over the decompressed values.
     pub fn iter(&self) -> iter::FixedVecIter<T, W, E, B> {
         iter::FixedVecIter::new(self)
