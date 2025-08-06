@@ -101,7 +101,7 @@ fn test_chunks_mut_with_remainder() {
     }
     
     for mut chunk in vec.chunks_mut(3) {
-        if chunk.len() > 0 {
+        if !chunk.is_empty() {
             *chunk.at_mut(0).unwrap() = 99;
         }
     }

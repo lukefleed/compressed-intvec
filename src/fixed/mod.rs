@@ -203,7 +203,7 @@ where
         }
 
         let total_bits = len * bit_width;
-        let data_words = (total_bits + <W as traits::Word>::BITS - 1) / <W as traits::Word>::BITS;
+        let data_words = total_bits.div_ceil(<W as traits::Word>::BITS);
 
         if bits.as_ref().len() < data_words + 1 {
             return Err(Error::InvalidParameters(format!(
@@ -553,7 +553,7 @@ where
 
         let bit_pos = self.len * self.bit_width;
         let required_total_bits = bit_pos + self.bit_width;
-        let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+        let required_words = required_total_bits.div_ceil(bits_per_word);
         
         // +1 for the padding word.
         let required_vec_len_for_write = required_words + 1;
@@ -605,7 +605,7 @@ where
         }
         let bits_per_word = <W as traits::Word>::BITS;
         let total_bits = capacity.saturating_mul(bit_width);
-        let num_words = (total_bits + bits_per_word - 1) / bits_per_word;
+        let num_words = total_bits.div_ceil(bits_per_word);
         
         // +1 for the padding word, unless capacity is 0.
         let buffer = if capacity == 0 {
@@ -641,7 +641,7 @@ where
         if self.capacity() >= target_element_capacity { return; }
         let bits_per_word = <W as Word>::BITS;
         let required_total_bits = target_element_capacity.saturating_mul(self.bit_width);
-        let required_data_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+        let required_data_words = required_total_bits.div_ceil(bits_per_word);
         let required_word_capacity = required_data_words + 1;
         
         let current_len = self.bits.len();
@@ -677,7 +677,7 @@ where
 
             // Ensure the underlying Vec has enough *initialized* words to write into.
             let required_total_bits = new_len * self.bit_width;
-            let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+            let required_words = required_total_bits.div_ceil(bits_per_word);
             let required_vec_len = required_words + 1; // +1 for padding
             if self.bits.len() < required_vec_len {
                 self.bits.resize(required_vec_len, W::ZERO);
@@ -705,7 +705,7 @@ where
         } else {
             let bits_per_word = <W as traits::Word>::BITS;
             let required_total_bits = self.len.saturating_mul(self.bit_width);
-            let required_words = (required_total_bits + bits_per_word - 1) / bits_per_word;
+            let required_words = required_total_bits.div_ceil(bits_per_word);
             // +1 for the padding word.
             required_words + 1
         };
@@ -778,7 +778,7 @@ where
         if shift_amount % bits_per_word == 0 {
             let start_write_word = start_write_bit / bits_per_word;
             let start_read_word = (start_write_bit + shift_amount) / bits_per_word;
-            let num_words_to_move = (num_bits_to_move + bits_per_word - 1) / bits_per_word;
+            let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
             
             if start_read_word >= self.bits.len() { return; }
             let read_end = (start_read_word + num_words_to_move).min(self.bits.len());
@@ -835,7 +835,7 @@ where
         let bits_per_word = <W as Word>::BITS;
         
         let end_write_bit = start_bit + shift_amount + num_bits_to_move;
-        let required_words = (end_write_bit + bits_per_word - 1) / bits_per_word;
+        let required_words = end_write_bit.div_ceil(bits_per_word);
         let required_vec_len = required_words + 1;
         if self.bits.len() < required_vec_len {
             self.bits.resize(required_vec_len, W::ZERO);
@@ -845,7 +845,7 @@ where
         if shift_amount % bits_per_word == 0 {
             let start_read_word = start_bit / bits_per_word;
             let start_write_word = (start_bit + shift_amount) / bits_per_word;
-            let num_words_to_move = (num_bits_to_move + bits_per_word - 1) / bits_per_word;
+            let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
             
             self.bits.copy_within(start_read_word..start_read_word + num_words_to_move, start_write_word);
             return;

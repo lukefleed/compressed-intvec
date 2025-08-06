@@ -78,7 +78,7 @@ where
     }
 
     /// Returns an iterator over the values in the slice.
-    pub fn iter<'s>(&'s self) -> FixedVecSliceIter<'s, T, W, E, B, V> {
+    pub fn iter(&self) -> FixedVecSliceIter<'_, T, W, E, B, V> {
         FixedVecSliceIter::new(self)
     }
 

@@ -99,7 +99,7 @@ where
         }
 
         let total_bits = input.len() * final_bit_width;
-        let num_words = (total_bits + bits_per_word - 1) / bits_per_word;
+        let num_words = total_bits.div_ceil(bits_per_word);
         let buffer = vec![W::ZERO; num_words + 1];
 
         let mut writer = BufBitWriter::new(MemWordWriterVec::new(buffer));

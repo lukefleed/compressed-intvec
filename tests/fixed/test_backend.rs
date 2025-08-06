@@ -53,7 +53,7 @@ fn test_from_parts_validation() {
 
     // Fail: buffer too small (no space for padding word)
     let total_bits = len * bit_width;
-    let data_words = (total_bits + bits_per_word - 1) / bits_per_word;
+    let data_words = total_bits.div_ceil(bits_per_word);
     let insufficient_limbs = &limbs[..data_words]; // Exactly enough for data, but not padding.
     let result = FixedVec::<u64, usize, dsi_bitstream::prelude::LE, _>::from_parts(insufficient_limbs, len, bit_width);
     assert!(matches!(result, Err(FixedVecError::InvalidParameters(_))));

@@ -59,7 +59,7 @@ where
 // is `Send`. The raw pointer is managed safely, and Rayon's `par_bridge`
 // ensures that the iterator itself is processed sequentially on each worker
 // thread, while the items (the non-overlapping slices) are processed in parallel.
-unsafe impl<'a, T, W, E, B> Send for ChunksMut<'a, T, W, E, B>
+unsafe impl<T, W, E, B> Send for ChunksMut<'_, T, W, E, B>
 where
     T: Storable<W>,
     W: Word,

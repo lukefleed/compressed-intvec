@@ -23,7 +23,7 @@ impl TestData for u64 { fn get_test_data() -> Vec<Self> { (0..100).collect() } f
 // For signed types, we use a range that is guaranteed to fit in a bit_width of 7.
 impl TestData for i8 { fn get_test_data() -> Vec<Self> { (-50..50).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
 impl TestData for i16 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x as i16).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
-impl TestData for i32 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x as i32).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
+impl TestData for i32 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
 impl TestData for i64 { fn get_test_data() -> Vec<Self> { (-50..50).map(|x| x as i64).collect() } fn get_test_index_and_val() -> (usize, Self) { (10, -40) }}
 
 
@@ -64,11 +64,9 @@ where
         let corruption_mask = corruption_pattern << offset_in_word;
         limbs[word_idx] ^= corruption_mask;
 
-        if offset_in_word + bit_width > word_bits {
-            if word_idx + 1 < limbs.len() {
-                let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
-                limbs[word_idx + 1] ^= spill_mask;
-            }
+        if offset_in_word + bit_width > word_bits && word_idx + 1 < limbs.len() {
+            let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
+            limbs[word_idx + 1] ^= spill_mask;
         }
     }
 
@@ -82,11 +80,9 @@ where
         let corruption_mask = corruption_pattern << offset_in_word;
         limbs[word_idx] ^= corruption_mask;
 
-        if offset_in_word + bit_width > word_bits {
-             if word_idx + 1 < limbs.len() {
-                let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
-                limbs[word_idx + 1] ^= spill_mask;
-            }
+        if offset_in_word + bit_width > word_bits && word_idx + 1 < limbs.len() {
+            let spill_mask = corruption_pattern >> (word_bits - offset_in_word);
+            limbs[word_idx + 1] ^= spill_mask;
         }
     }
 
