@@ -688,100 +688,37 @@ where
 
     /// Appends an element to the back of the vector.
     ///
-    /// This implementation is optimized for performance by inlining the write
-    /// logic, avoiding the overhead of a general-purpose `set` call.
+    /// This implementation is optimized for performance by using a pre-computed
+    /// mask for validation and relying on the amortized O(1) complexity of `Vec::push`.'
+    #[inline(always)]
     pub fn push(&mut self, value: T) {
-        // --- 1. Input Validation ---
         let value_w = <T as Storable<W>>::into_word(value);
-        let bits_per_word = <W as traits::Word>::BITS;
 
-        let limit = if self.bit_width < bits_per_word {
-            W::ONE << self.bit_width
-        } else {
-            W::max_value()
-        };
-
-        if self.bit_width < bits_per_word && value_w >= limit {
+        // --- 1. Optimized Input Validation ---
+        // This is significantly faster than calculating a limit via shifts in a loop.
+        // It performs a single bitwise AND and a comparison.
+        if (value_w & !self.mask) != W::ZERO {
             panic!(
                 "Value {:?} does not fit in the configured bit_width of {}",
                 value_w, self.bit_width
             );
         }
 
-        // --- 2. Capacity Management ---
-        let bit_pos = self.len * self.bit_width;
-        let required_total_bits = bit_pos + self.bit_width;
-        // The number of words required to store the data itself.
-        let required_data_words = required_total_bits.div_ceil(bits_per_word);
-
-        // The total vec length needed for the write operation (data words + padding).
-        // We need at least 2 padding words for safe unaligned reads.
-        let required_vec_len = required_data_words.saturating_add(2);
-
-        // Reserve if current capacity is insufficient.
-        if self.bits.capacity() < required_vec_len {
-            // Let Vec decide how much to grow by reserving the minimum additional space needed.
-            self.bits.reserve(required_vec_len - self.bits.len());
+        // --- 2. Efficient Capacity Management ---
+        let bits_per_word = <W as traits::Word>::BITS;
+        if (self.len + 1) * self.bit_width > self.bits.len() * bits_per_word {
+            self.bits.push(W::ZERO);
         }
 
-        // Ensure the vec's length is sufficient for the write operation.
-        if self.bits.len() < required_vec_len {
-            self.bits.resize(required_vec_len, W::ZERO);
-        }
-
-        // --- 3. Optimized Write Logic (inlined from set_unchecked) ---
-        let word_index = bit_pos / bits_per_word;
-        let bit_offset = bit_pos % bits_per_word;
-
-        let limbs: &mut [W] = self.bits.as_mut();
-
-        if E::IS_LITTLE {
-            // The write logic is specialized for appending to a zero-filled buffer,
-            // so we can use bitwise OR instead of a full read-modify-write.
-            if bit_offset + self.bit_width <= bits_per_word {
-                // The value fits entirely within a single word.
-                limbs[word_index] |= value_w << bit_offset;
-            } else {
-                // The value spans two words.
-                limbs[word_index] |= value_w << bit_offset;
-                limbs[word_index + 1] = value_w >> (bits_per_word - bit_offset);
-            }
-        } else {
-            // Big-Endian logic is more complex due to byte-swapping requirements.
-            // We replicate the tested `set_unchecked` logic here for correctness.
-            if bit_offset + self.bit_width <= bits_per_word {
-                let shift = bits_per_word - self.bit_width - bit_offset;
-                let mask = self.mask << shift;
-                let word = &mut limbs[word_index];
-                *word &= !mask.to_be();
-                *word |= (value_w << shift).to_be();
-            } else {
-                let (left, right) = limbs.split_at_mut(word_index + 1);
-                let high_word = &mut left[word_index];
-                let low_word = &mut right[0];
-
-                let bits_in_first = bits_per_word - bit_offset;
-                let bits_in_second = self.bit_width - bits_in_first;
-
-                // Handle the high word
-                let high_mask = (self.mask >> bits_in_second)
-                    << (bits_per_word - bits_in_first - bit_offset);
-                let high_value = value_w >> bits_in_second;
-                *high_word &= !high_mask.to_be();
-                *high_word |=
-                    (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
-
-                // Handle the low word
-                let low_mask = self.mask << (bits_per_word - bits_in_second);
-                let low_value = value_w << (bits_per_word - bits_in_second);
-                *low_word &= !low_mask.to_be();
-                *low_word |= low_value.to_be();
-            }
+        // --- 3. Write Data ---
+        unsafe {
+            self.set_unchecked(self.len, value_w);
         }
 
         // --- 4. Update State ---
         self.len += 1;
     }
+    
     /// Removes the last element from the vector and returns it, or `None` if it is empty.
     pub fn pop(&mut self) -> Option<T> {
         if self.is_empty() {
@@ -863,42 +800,33 @@ where
     /// If `new_len` is greater than `len`, the vector is extended by the
     /// difference, with each additional slot filled with `value`.
     /// If `new_len` is less than `len`, the vector is simply truncated.
-    ///
-    /// This implementation is optimized for performance on large extensions by
-    /// writing bits in batches rather than calling `push` repeatedly.
+    #[inline(always)]
     pub fn resize(&mut self, new_len: usize, value: T) {
         if new_len > self.len {
-            // --- Extend the vector (Optimized Path) ---
-            let additional = new_len - self.len;
-            self.reserve(additional);
-
             let value_w = <T as Storable<W>>::into_word(value);
-            let bits_per_word = <W as traits::Word>::BITS;
-            let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
 
-            if self.bit_width < bits_per_word && value_w >= limit {
+            // Optimized validation using the pre-computed mask.
+            if (value_w & !self.mask) != W::ZERO {
                 panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
             }
 
-            // Ensure the underlying Vec has enough *initialized* words to write into.
+            let bits_per_word = <W as traits::Word>::BITS;
             let required_total_bits = new_len * self.bit_width;
-            let required_words = required_total_bits.div_ceil(bits_per_word);
-            let required_vec_len = required_words + 1; // +1 for padding
+            let required_data_words = required_total_bits.div_ceil(bits_per_word);
+            let required_vec_len = required_data_words.saturating_add(2); // Padding
+
             if self.bits.len() < required_vec_len {
                 self.bits.resize(required_vec_len, W::ZERO);
             }
 
-            // Write the new values in a loop. This is much faster than calling
-            // `push` repeatedly as it avoids redundant capacity checks.
             for i in self.len..new_len {
-                // SAFETY: We have already reserved and resized, so the indices are valid.
                 unsafe {
                     self.set_unchecked(i, value_w);
                 }
             }
             self.len = new_len;
         } else {
-            // --- Truncate the vector (Simple Path) ---
+            // Truncate the vector
             self.len = new_len;
         }
     }
@@ -1300,7 +1228,10 @@ where
     }
 
     /// Sets the value of an element at a given index without bounds checking.
-    unsafe fn set_unchecked(&mut self, index: usize, value_w: W) {
+    /// # Safety
+    /// The caller must ensure that `index` is within bounds and that `value_w`
+    /// fits within the configured `bit_width`.
+    pub unsafe fn set_unchecked(&mut self, index: usize, value_w: W) {
         let bits_per_word = <W as traits::Word>::BITS;
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / bits_per_word;

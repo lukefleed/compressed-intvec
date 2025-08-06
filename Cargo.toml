@@ -36,7 +36,29 @@ rand = "0.9.0"
 serde_json = "1.0.141"
 sux = "0.8.0"
 
+[[bench]]
+name = "bench_random_access"
+harness = false
+path = "benches/fixed/bench_random_access.rs"
+
+[[bench]]
+name = "bench_access_patterns"
+harness = false
+path = "benches/fixed/bench_access_patterns.rs"
+
+[[bench]]
+name = "bench_sequential_ops"
+harness = false
+path = "benches/fixed/bench_sequential_ops.rs"
+
+[[bench]]
+name = "bench_mutable_ops"
+harness = false
+path = "benches/fixed/bench_mutable_ops.rs"
+
 [features]
 default = ["parallel"]
 parallel = ["rayon"]
 serde = ["dep:serde"]
+
+
