@@ -12,10 +12,11 @@
 //!   power of two), all operations are implemented using highly-efficient,
 //!   lock-free compare-and-swap (CAS) loops.
 //!
-//! - **Striped Locking (Multi-Word)**: For configurations where elements may
-//!   span word boundaries, atomicity is guaranteed using a fine-grained striped
-//!   locking mechanism. This avoids torn reads/writes and provides excellent
-//!   scalability by minimizing lock contention.
+//! - **Hybrid SeqLock/Mutex (Multi-Word)**: For configurations where elements may
+//!   span word boundaries, atomicity is guaranteed using a hybrid mechanism.
+//!   Reads are performed optimistically using non-blocking seqlocks for maximum
+//!   concurrency. All write operations (`store`, `swap`, `compare_exchange`) use
+//!   fine-grained striped mutexes to ensure correctness and prevent torn writes.
 //!
 //! The choice of strategy is a compile-time decision, ensuring zero runtime
 //! overhead for the dispatch mechanism.
@@ -25,17 +26,17 @@ mod access;
 mod backend;
 mod strategy;
 
-use super::traits::{Storable, Word};
 use crate::fixed::atomic::access::private::SealedAtomicAccess;
 use crate::fixed::atomic::access::CompareExchangeParams;
 use crate::fixed::atomic::backend::{AtomicBackend, OwnedAtomicBackend};
+use crate::fixed::traits::{Storable, Word};
 use crate::fixed::Error;
 use common_traits::IntoAtomic;
 use dsi_bitstream::prelude::Endianness;
 use num_traits::{Bounded, One, Zero};
+use std::fmt::Debug;
 use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
-use crate::fixed::fmt::Debug;
 
 /// A thread-safe, compressed, randomly accessible vector of integers with
 /// fixed-width encoding.
@@ -49,7 +50,6 @@ pub struct AtomicFixedVec<T, W, E, B = OwnedAtomicBackend<W>>
 where
     T: Storable<W>,
     W: Word + IntoAtomic,
-    W::AtomicType: Debug,
     E: Endianness,
     B: AtomicBackend<W>,
 {
@@ -69,8 +69,7 @@ where
 impl<T, W, E, B> AtomicFixedVec<T, W, E, B>
 where
     T: Storable<W>,
-    W: Word + IntoAtomic + Zero + One,
-    W::AtomicType: Debug,
+    W: Word + IntoAtomic + Zero + One + Bounded,
     E: Endianness,
     B: AtomicBackend<W> + SealedAtomicAccess<W>,
 {
@@ -108,18 +107,12 @@ where
     /// Atomically stores `value` at `index`.
     ///
     /// # Panics
-    /// Panics if `index` is out of bounds or if `value` does not fit in the
-    /// configured `bit_width`.
+    /// Panics if `index` is out of bounds. The provided `value` will be
+    /// automatically truncated to fit the configured `bit_width`.
     #[inline]
     pub fn store(&self, index: usize, value: T, order: Ordering) {
         assert!(index < self.len, "store index out of bounds");
         let value_w = <T as Storable<W>>::into_word(value);
-        if self.bit_width < <W as Word>::BITS && (value_w & !self.mask) != <W as Zero>::zero() {
-            panic!(
-                "Value {:?} does not fit in the configured bit_width of {}",
-                value_w, self.bit_width
-            );
-        }
         self.backend
             .atomic_store(index, value_w, self.bit_width, self.mask, order);
     }
@@ -127,18 +120,12 @@ where
     /// Atomically swaps the value at `index` with `value`, returning the previous value.
     ///
     /// # Panics
-    /// Panics if `index` is out of bounds or if `value` does not fit in the
-    /// configured `bit_width`.
+    /// Panics if `index` is out of bounds. The provided `value` will be
+    /// automatically truncated to fit the configured `bit_width`.
     #[inline]
     pub fn swap(&self, index: usize, value: T, order: Ordering) -> T {
         assert!(index < self.len, "swap index out of bounds");
         let value_w = <T as Storable<W>>::into_word(value);
-        if self.bit_width < <W as Word>::BITS && (value_w & !self.mask) != <W as Zero>::zero() {
-            panic!(
-                "Value {:?} does not fit in the configured bit_width of {}",
-                value_w, self.bit_width
-            );
-        }
         let old_word = self
             .backend
             .atomic_swap(index, value_w, self.bit_width, self.mask, order);
@@ -151,8 +138,8 @@ where
     /// See `std::sync::atomic::AtomicU64::compare_exchange` for details on memory ordering.
     ///
     /// # Panics
-    /// Panics if `index` is out of bounds or if `new` does not fit in the
-    /// configured `bit_width`.
+    /// Panics if `index` is out of bounds. The provided `new` value will be
+    /// automatically truncated to fit the configured `bit_width`.
     #[inline]
     pub fn compare_exchange(
         &self,
@@ -165,12 +152,6 @@ where
         assert!(index < self.len, "compare_exchange index out of bounds");
         let current_w = <T as Storable<W>>::into_word(current);
         let new_w = <T as Storable<W>>::into_word(new);
-        if self.bit_width < <W as Word>::BITS && (new_w & !self.mask) != <W as Zero>::zero() {
-            panic!(
-                "New value {:?} does not fit in the configured bit_width of {}",
-                new_w, self.bit_width
-            );
-        }
 
         match self.backend.atomic_compare_exchange(
             index,
@@ -194,7 +175,6 @@ impl<T, W, E> AtomicFixedVec<T, W, E, OwnedAtomicBackend<W>>
 where
     T: Storable<W>,
     W: Word + IntoAtomic + Zero + One + Bounded,
-    W::AtomicType: Debug,
     E: Endianness,
 {
     /// Creates a new, zero-initialized `AtomicFixedVec`.
@@ -214,7 +194,7 @@ where
         let mask = if bit_width == <W as Word>::BITS {
             <W as Bounded>::max_value()
         } else {
-            (<W as One>::one() << bit_width) - <W as One>::one()
+            (<W as One>::one() << bit_width).wrapping_sub(<W as One>::one())
         };
 
         let backend = OwnedAtomicBackend::new(len, bit_width);

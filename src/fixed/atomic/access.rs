@@ -45,8 +45,14 @@ pub(super) mod private {
         fn atomic_store(&self, index: usize, value: W, bit_width: usize, mask: W, order: Ordering);
 
         /// Atomically swaps a value at the specified index, returning the old value.
-        fn atomic_swap(&self, index: usize, value: W, bit_width: usize, mask: W, order: Ordering)
-            -> W;
+        fn atomic_swap(
+            &self,
+            index: usize,
+            value: W,
+            bit_width: usize,
+            mask: W,
+            order: Ordering,
+        ) -> W;
 
         /// Atomically compares the value at `index` with `current`. If they are
         /// equal, it is replaced with `new`.
