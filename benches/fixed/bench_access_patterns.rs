@@ -139,7 +139,6 @@ fn benchmark_access_patterns(c: &mut Criterion) {
         let access_indices =
             pattern.generate_indices(&mut rng, NUM_ACCESSES, VECTOR_SIZE, BLOCK_SIZE);
 
-        // --- Baseline: Vec<u64> ---
         group.bench_function("Vec<u64>/get_unchecked_loop", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -149,7 +148,6 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             })
         });
 
-        // --- Our LEFixedVec benchmarks ---
         group.bench_function("LEFixedVec/get_unchecked_loop", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -159,16 +157,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             })
         });
 
-        #[cfg(feature = "parallel")]
-        group.bench_function("LEFixedVec/par_get_many_unchecked", |b| {
-            b.iter(|| {
-                // SAFETY: Indices are generated within bounds.
-                let _ =
-                    black_box(unsafe { intvec.par_get_many_unchecked(black_box(&access_indices)) });
-            })
-        });
-
-        // --- sux::BitFieldVec benchmarks ---
+        
         group.bench_function("sux::BitFieldVec/get_unchecked_loop", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -177,7 +166,15 @@ fn benchmark_access_patterns(c: &mut Criterion) {
                 }
             })
         });
-
+        
+        #[cfg(feature = "parallel")]
+        group.bench_function("LEFixedVec/par_get_many_unchecked", |b| {
+            b.iter(|| {
+                // SAFETY: Indices are generated within bounds.
+                let _ =
+                    black_box(unsafe { intvec.par_get_many_unchecked(black_box(&access_indices)) });
+            })
+        });
         group.finish();
     }
 }
@@ -187,7 +184,7 @@ criterion_group! {
     config = Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(5));
+        .measurement_time(Duration::from_secs(2));
 
     targets = benchmark_access_patterns
 }

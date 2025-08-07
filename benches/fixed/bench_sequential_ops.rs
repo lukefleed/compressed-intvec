@@ -103,22 +103,20 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
             );
         });
 
-        group.bench_function("LEFixedVec/map_in_place", |b| {
+        group.bench_function("LEFixedVec/map_in_place_unchecked", |b| {
             b.iter_with_setup(
                 || le_fixed_vec.clone(),
                 |mut vec| {
-                    // Now this is correct because map_fn itself is safe.
-                    vec.map_in_place(map_fn);
+                    unsafe { vec.map_in_place_unchecked(map_fn) };
                     black_box(vec);
                 },
             );
         });
 
-        group.bench_function("sux::BitFieldVec/map_in_place", |b| {
+        group.bench_function("sux::BitFieldVec/map_in_place_unchecked", |b| {
             b.iter_with_setup(
                 || sux_bfv.clone(),
                 |mut vec| {
-                    // SAFETY: The map_fn is guaranteed to be safe because of the mask.
                     unsafe {
                         vec.apply_in_place_unchecked(map_fn);
                     }
@@ -137,7 +135,7 @@ criterion_group! {
     config = Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(5));
+        .measurement_time(Duration::from_secs(2));
 
     targets = benchmark_sequential_ops
 }

@@ -6,7 +6,7 @@
 
 use common_traits::{SignedInt, UnsignedInt};
 use dsi_bitstream::{prelude::{ToInt, ToNat}, traits::Endianness};
-use num_traits::{Bounded, ToPrimitive};
+use num_traits::{Bounded, NumCast, ToPrimitive};
 use std::fmt::Debug;
 
 /// A trait that abstracts over the primitive unsigned integer types that can
@@ -18,8 +18,9 @@ use std::fmt::Debug;
 pub trait Word:
     UnsignedInt
     + Bounded
-    + ToPrimitive // Added for converting to u128 in error types
-    + dsi_bitstream::traits::Word // Compatibility with dsi-bitstream
+    + ToPrimitive 
+    + dsi_bitstream::traits::Word 
+    + NumCast
     + Copy
     + Send
     + Sync

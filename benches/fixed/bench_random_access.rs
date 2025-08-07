@@ -10,15 +10,9 @@ use sux::prelude::{BitFieldSlice, BitFieldSliceMut, BitFieldVec};
 ///
 /// # Arguments
 /// * `size` - The number of elements to generate.
-/// * `max_val_exclusive` - The exclusive upper bound for the random values. A value of 0
-///   indicates that the full range of `u64` should be used.
+/// * `max_val_exclusive` - The exclusive upper bound for the random values.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
     let mut rng = SmallRng::seed_from_u64(42);
-    if max_val_exclusive == 0 {
-        // This case occurs if the requested bit width is 64.
-        // We generate full-range u64 values.
-        return (0..size).map(|_| rng.random::<u64>()).collect();
-    }
     (0..size)
         .map(|_| rng.random_range(0..max_val_exclusive))
         .collect()
@@ -46,8 +40,13 @@ fn benchmark_random_access(c: &mut Criterion) {
         let mut group = c.benchmark_group(format!("RandomAccess/{}bit", bit_width));
 
         // Generate a single data vector for this bit_width to be used by all structures.
-        // `wrapping_shl` correctly handles the case where `bit_width` is 64 by wrapping to 0.
-        let data = generate_random_vec(VECTOR_SIZE, 1u64.wrapping_shl(bit_width));
+        // The 64-bit case is handled explicitly to generate full-range u64 values.
+        let data = if bit_width == 64 {
+            let mut rng = SmallRng::seed_from_u64(42);
+            (0..VECTOR_SIZE).map(|_| rng.random::<u64>()).collect()
+        } else {
+            generate_random_vec(VECTOR_SIZE, 1u64 << bit_width)
+        };
 
         // --- 1. Baseline: Standard Vec<u64> ---
         group.bench_function("Baseline_Vec<u64>/Unchecked", |b| {
@@ -65,10 +64,10 @@ fn benchmark_random_access(c: &mut Criterion) {
             .bit_width(BitWidth::Explicit(bit_width as usize))
             .build(&data)
             .unwrap();
-        let be_fixed_vec = BEFixedVec::builder()
-            .bit_width(BitWidth::Explicit(bit_width as usize))
-            .build(&data)
-            .unwrap();
+        // let be_fixed_vec = BEFixedVec::builder()
+        //     .bit_width(BitWidth::Explicit(bit_width as usize))
+        //     .build(&data)
+        //     .unwrap();
 
         // `from_slice` correctly infers the bit width from the data.
         let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
@@ -93,15 +92,15 @@ fn benchmark_random_access(c: &mut Criterion) {
             })
         });
 
-        // --- 4. Benchmark Our BEFixedVec ---
-        group.bench_function("BEFixedVec/Unchecked", |b| {
-            b.iter(|| {
-                for &index in black_box(&access_indices) {
-                    // SAFETY: Indices are generated within bounds.
-                    black_box(unsafe { be_fixed_vec.get_unchecked(index) });
-                }
-            })
-        });
+        // // --- 4. Benchmark Our BEFixedVec ---
+        // group.bench_function("BEFixedVec/Unchecked", |b| {
+        //     b.iter(|| {
+        //         for &index in black_box(&access_indices) {
+        //             // SAFETY: Indices are generated within bounds.
+        //             black_box(unsafe { be_fixed_vec.get_unchecked(index) });
+        //         }
+        //     })
+        // });
 
         // --- 5. Benchmark sux::BitFieldVec ---
         group.bench_function("sux::BitFieldVec/Unchecked", |b| {
@@ -144,7 +143,7 @@ criterion_group! {
     config = Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(5));
+        .measurement_time(Duration::from_secs(2));
 
     targets = benchmark_random_access
 }

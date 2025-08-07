@@ -1342,57 +1342,135 @@ where
     where
         F: FnMut(T) -> T,
     {
+        if self.len == 0 || self.bit_width == 0 {
+            return;
+        }
+
         let bits_per_word = <W as Word>::BITS;
+        let bit_width = self.bit_width;
 
         // --- Fast Path ---
-        // Condition: bit_width is a power of two and fits evenly into a word.
-        // This guarantees that elements never span word boundaries.
-        if self.bit_width.is_power_of_two() && bits_per_word % self.bit_width == 0 {
-            let elems_per_word = bits_per_word / self.bit_width;
+        // This path is taken when elements are perfectly aligned within words (i.e.,
+        // the bit width is a power of two that divides the word size). This allows
+        // for a highly optimized loop that processes one word at a time without
+        // handling complex boundary-crossing logic.
+        if bit_width.is_power_of_two() && bits_per_word % bit_width == 0 {
+            let elems_per_word = bits_per_word / bit_width;
             let mask = self.mask;
-
             let num_full_words = self.len / elems_per_word;
 
-            // Process full words
             for word_idx in 0..num_full_words {
                 let mut new_word = W::ZERO;
-                
                 if E::IS_LITTLE {
                     let old_word = self.bits.as_ref()[word_idx];
                     for i in 0..elems_per_word {
-                        let shift = i * self.bit_width;
+                        let shift = i * bit_width;
                         let old_val_w = (old_word >> shift) & mask;
-                        let old_val_t = <T as Storable<W>>::from_word(old_val_w);
-                        let new_val_t = f(old_val_t);
-                        let new_val_w = <T as Storable<W>>::into_word(new_val_t);
+                        let new_val_w = <T as Storable<W>>::into_word(f(<T as Storable<W>>::from_word(old_val_w)));
                         new_word |= new_val_w << shift;
                     }
                     self.bits.as_mut()[word_idx] = new_word;
                 } else { // Big-Endian
                     let old_word = W::from_be(self.bits.as_ref()[word_idx]);
                     for i in 0..elems_per_word {
-                        let shift = bits_per_word - (i + 1) * self.bit_width;
+                        let shift = bits_per_word - (i + 1) * bit_width;
                         let old_val_w = (old_word >> shift) & mask;
-                        let old_val_t = <T as Storable<W>>::from_word(old_val_w);
-                        let new_val_t = f(old_val_t);
-                        let new_val_w = <T as Storable<W>>::into_word(new_val_t);
+                        let new_val_w = <T as Storable<W>>::into_word(f(<T as Storable<W>>::from_word(old_val_w)));
                         new_word |= new_val_w << shift;
                     }
                     self.bits.as_mut()[word_idx] = new_word.to_be();
                 }
             }
 
-            // Process remaining elements in the last, potentially partial, word
+            // Process any remaining elements that do not fill a complete final word.
             let start_idx = num_full_words * elems_per_word;
             for i in start_idx..self.len {
-                let old_val_t = self.get_unchecked(i);
-                let new_val_t = f(old_val_t);
-                self.set_unchecked(i, <T as Storable<W>>::into_word(new_val_t));
+                self.set_unchecked(i, <T as Storable<W>>::into_word(f(self.get_unchecked(i))));
             }
+            return;
         }
-        // --- Generic Path ---
-        // This path is for any bit_width where elements might span words.
-        else {
+
+        // --- Optimized Generic Path (Little-Endian) ---
+        // This path handles any bit width by processing the vector as a stream of bits.
+        // It reads elements that may span word boundaries and accumulates the modified
+        // results into a local write buffer. The buffer is flushed to memory only when
+        // a full word is ready, minimizing memory writes.
+        if E::IS_LITTLE {
+            let limbs = self.bits.as_mut();
+            let num_limbs = (self.len * bit_width).div_ceil(bits_per_word);
+            let limbs_ptr = limbs.as_ptr();
+
+            let mut bit_pos = 0;
+            let mut write_word_idx = 0;
+            
+            let mut write_buffer = W::ZERO;
+            let mut bits_in_write_buffer = 0;
+            
+            let mask = self.mask;
+
+            // Prefetch distance (in words) to fetch memory ahead of processing.
+            const PREFETCH_DISTANCE: usize = 3;
+
+            for i in 0..self.len {
+                // On supported architectures, prefetch the memory word that will likely
+                // be needed in a few iterations, hiding memory latency.
+                #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+                {
+                    let next_bit_pos = (i + PREFETCH_DISTANCE) * bit_width;
+                    let prefetch_word_idx = next_bit_pos / bits_per_word;
+                    if prefetch_word_idx < num_limbs {
+                        use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+                        // SAFETY: The calculated index is within the slice bounds for future iterations.
+                        _mm_prefetch(limbs_ptr.add(prefetch_word_idx) as *const i8, _MM_HINT_T0);
+                    }
+                }
+
+                let word_idx = bit_pos / bits_per_word;
+                let bit_offset = bit_pos % bits_per_word;
+
+                // Extract the value. This logic handles both aligned and boundary-crossing elements.
+                let val_w = if bit_offset + bit_width <= bits_per_word {
+                    // Element is fully contained within a single word.
+                    (*limbs.get_unchecked(word_idx) >> bit_offset) & mask
+                } else {
+                    // Element spans two words. Combine bits from both using a `u128` temporary
+                    // to avoid overflow during the shift.
+                    let w1 = (*limbs.get_unchecked(word_idx)).to_u128().unwrap();
+                    let w2 = (*limbs.get_unchecked(word_idx + 1)).to_u128().unwrap();
+                    let combined = w1 | (w2 << bits_per_word);
+                    num_traits::cast((combined >> bit_offset) & mask.to_u128().unwrap()).unwrap()
+                };
+
+                // Apply the user-provided function.
+                let new_val_w = <T as Storable<W>>::into_word(f(<T as Storable<W>>::from_word(val_w)));
+
+                // Accumulate the new value into the local write buffer.
+                write_buffer |= new_val_w << bits_in_write_buffer;
+                bits_in_write_buffer += bit_width;
+
+                // If the write buffer is full, flush it to memory.
+                if bits_in_write_buffer >= bits_per_word {
+                    *limbs.get_unchecked_mut(write_word_idx) = write_buffer;
+                    write_word_idx += 1;
+                    bits_in_write_buffer -= bits_per_word;
+                    // Carry over the remaining bits from the new value to the next word's buffer.
+                    write_buffer = new_val_w >> (bit_width - bits_in_write_buffer);
+                }
+                
+                bit_pos += bit_width;
+            }
+
+            // After the loop, flush any remaining partial data in the write buffer.
+            if bits_in_write_buffer > 0 {
+                let final_mask = (W::ONE << bits_in_write_buffer).wrapping_sub(W::ONE);
+                let word_to_write = limbs.get_unchecked_mut(write_word_idx);
+                *word_to_write &= !final_mask;
+                *word_to_write |= write_buffer & final_mask;
+            }
+
+        } else {
+            // Fallback Path for Big Endian. This logic is correct but less optimized
+            // than the streaming approach for Little Endian.
             for i in 0..self.len {
                 let old_val_t = self.get_unchecked(i);
                 let new_val_t = f(old_val_t);
