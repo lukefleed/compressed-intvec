@@ -1,4 +1,38 @@
-//! Defines a mutable chunk iterator for `FixedVec`.
+//! # Mutable Iterators
+//!
+//! This module provides iterators for mutable, sequential access to the
+//! elements of a [`FixedVec`].
+//!
+//! # Examples
+//!
+//! ## Mutating elements in parallel
+//!
+//! The [`ChunksMut`] iterator is designed to be compatible with Rayon's
+//! `par_bridge` method, allowing for safe, parallel mutation of vector chunks.
+//!
+//! ```rust
+//! # #[cfg(feature = "parallel")]
+//! # {
+//! use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
+//! use rayon::prelude::*;
+//!
+//! let data: Vec<u32> = (0..100).collect();
+//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(8)).build(&data).unwrap();
+//!
+//! // Use `par_bridge` to process chunks in parallel.
+//! vec.chunks_mut(10).par_bridge().for_each(|mut chunk| {
+//!     // Each chunk is a `FixedVecSlice` that can be mutated.
+//!     for i in 0..chunk.len() {
+//!         if let Some(mut proxy) = chunk.at_mut(i) {
+//!             *proxy *= 2;
+//!         }
+//!     }
+//! });
+//!
+//! assert_eq!(vec.get(10), Some(20));
+//! assert_eq!(vec.get(99), Some(198));
+//! # }
+//! ```
 
 use crate::fixed::{
     slice::FixedVecSlice,
@@ -8,11 +42,11 @@ use crate::fixed::{
 use dsi_bitstream::prelude::Endianness;
 use std::{cmp::min, marker::PhantomData};
 
-/// An iterator over mutable, non-overlapping chunks of a `FixedVec`.
+/// An iterator over non-overlapping, mutable chunks of a [`FixedVec`].
 ///
-/// This struct is created by the [`chunks_mut`](super::FixedVec::chunks_mut) method.
-/// It is designed to be compatible with Rayon's `par_bridge`, allowing for
-/// safe parallel mutation of the vector's chunks.
+/// This struct is created by the [`chunks_mut`](super::FixedVec::chunks_mut)
+/// method. It is designed to be compatible with Rayon's `par_bridge`, allowing
+/// for safe parallel mutation of the vector's chunks.
 #[derive(Debug)]
 pub struct ChunksMut<'a, T, W, E, B>
 where

@@ -1,4 +1,7 @@
-//! Macros for creating `FixedVec` instances with a `vec!`-like syntax.
+//! # Macros for `FixedVec`
+//!
+//! This module provides the [`fixed_vec!`] macro for creating a [`FixedVec`]
+//! with a `vec!`-like syntax.
 
 /// Creates a `FixedVec` with default parameters.
 ///
