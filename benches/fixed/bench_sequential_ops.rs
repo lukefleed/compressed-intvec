@@ -33,7 +33,7 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
     // 16: Power-of-two, should trigger fast paths.
     // 21: Not a power-of-two, forces generic logic.
     // 64: Full word width, another special case.
-    let bit_widths_to_test = [16, 21, 64];
+    let bit_widths_to_test: Vec<u32> = (8..64).step_by(8).collect();
 
     for &bit_width in &bit_widths_to_test {
         let mut group = c.benchmark_group(format!("SequentialOps/{}bit", bit_width));

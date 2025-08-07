@@ -16,7 +16,7 @@ use common::helpers::{generate_random_signed_vec, generate_random_vec};
 /// Central test function called by the macro for each type combination.
 fn run_test_for_type<T, W, E>(data: &[T], type_name: &str)
 where
-    T: Storable<W> + Debug + PartialEq + Default + Copy + ToPrimitive,
+    T: Storable<W> + Debug + PartialEq + Default + Copy + ToPrimitive + 'static,
     W: Word,
     E: Endianness,
     dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
