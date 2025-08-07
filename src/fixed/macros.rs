@@ -7,7 +7,6 @@
 ///
 /// This macro simplifies the creation of `FixedVec` by using default parameters
 /// (`usize` for the storage word, `LittleEndian` for byte order) inferred
-
 /// from the element type. It uses `BitWidth::Minimal` for space efficiency.
 #[macro_export]
 macro_rules! fixed_vec {

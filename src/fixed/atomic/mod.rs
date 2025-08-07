@@ -20,24 +20,21 @@
 //! The choice of strategy is a compile-time decision, ensuring zero runtime
 //! overhead for the dispatch mechanism.
 
-#![cfg(feature = "atomic")]
-
-// Declare submodules. `backend` is the foundational storage layer.
-// `access` defines the trait for dispatching atomic strategies.
-// `strategy` contains the concrete implementations of those strategies.
-mod backend;
+// Declare submodules.
 mod access;
+mod backend;
 mod strategy;
 
 use super::traits::{Storable, Word};
+use crate::fixed::atomic::access::private::SealedAtomicAccess;
+use crate::fixed::atomic::backend::{AtomicBackend, OwnedAtomicBackend};
 use crate::fixed::Error;
-use access::AtomicAccess;
-use backend::OwnedAtomicBackend;
-use common_traits::Atomic;
+use common_traits::IntoAtomic;
 use dsi_bitstream::prelude::Endianness;
-use mem_dbg::{MemDbg, MemSize};
+use num_traits::{Bounded, One, Zero};
 use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
+use crate::fixed::fmt::Debug;
 
 /// A thread-safe, compressed, randomly accessible vector of integers with
 /// fixed-width encoding.
@@ -46,11 +43,12 @@ use std::sync::atomic::Ordering;
 /// methods like `load`, `store`, `swap`, and `compare_exchange`. It ensures
 /// that all operations are atomic, even for elements that span across the
 /// boundaries of the underlying storage words.
-#[derive(Debug, MemDbg, MemSize)]
+#[derive(Debug)]
 pub struct AtomicFixedVec<T, W, E, B = OwnedAtomicBackend<W>>
 where
     T: Storable<W>,
-    W: Word + Atomic,
+    W: Word + IntoAtomic,
+    W::AtomicType: Debug,
     E: Endianness,
     B: AtomicBackend<W>,
 {
@@ -70,9 +68,10 @@ where
 impl<T, W, E, B> AtomicFixedVec<T, W, E, B>
 where
     T: Storable<W>,
-    W: Word + Atomic,
+    W: Word + IntoAtomic + Zero + One,
+    W::AtomicType: Debug,
     E: Endianness,
-    B: AtomicBackend<W>,
+    B: AtomicBackend<W> + SealedAtomicAccess<W>,
 {
     /// Returns the number of elements in the vector.
     #[inline]
@@ -102,7 +101,7 @@ where
         let loaded_word = self
             .backend
             .atomic_load(index, self.bit_width, self.mask, order);
-        T::from_word(loaded_word)
+        <T as Storable<W>>::from_word(loaded_word)
     }
 
     /// Atomically stores `value` at `index`.
@@ -113,8 +112,8 @@ where
     #[inline]
     pub fn store(&self, index: usize, value: T, order: Ordering) {
         assert!(index < self.len, "store index out of bounds");
-        let value_w = T::into_word(value);
-        if self.bit_width < W::BITS && (value_w & !self.mask) != W::ZERO {
+        let value_w = <T as Storable<W>>::into_word(value);
+        if self.bit_width < <W as Word>::BITS && (value_w & !self.mask) != <W as Zero>::zero() {
             panic!(
                 "Value {:?} does not fit in the configured bit_width of {}",
                 value_w, self.bit_width
@@ -132,8 +131,8 @@ where
     #[inline]
     pub fn swap(&self, index: usize, value: T, order: Ordering) -> T {
         assert!(index < self.len, "swap index out of bounds");
-        let value_w = T::into_word(value);
-        if self.bit_width < W::BITS && (value_w & !self.mask) != W::ZERO {
+        let value_w = <T as Storable<W>>::into_word(value);
+        if self.bit_width < <W as Word>::BITS && (value_w & !self.mask) != <W as Zero>::zero() {
             panic!(
                 "Value {:?} does not fit in the configured bit_width of {}",
                 value_w, self.bit_width
@@ -142,7 +141,7 @@ where
         let old_word = self
             .backend
             .atomic_swap(index, value_w, self.bit_width, self.mask, order);
-        T::from_word(old_word)
+        <T as Storable<W>>::from_word(old_word)
     }
 
     /// Atomically compares the value at `index` with `current`. If they are
@@ -163,9 +162,9 @@ where
         failure: Ordering,
     ) -> Result<T, T> {
         assert!(index < self.len, "compare_exchange index out of bounds");
-        let current_w = T::into_word(current);
-        let new_w = T::into_word(new);
-        if self.bit_width < W::BITS && (new_w & !self.mask) != W::ZERO {
+        let current_w = <T as Storable<W>>::into_word(current);
+        let new_w = <T as Storable<W>>::into_word(new);
+        if self.bit_width < <W as Word>::BITS && (new_w & !self.mask) != <W as Zero>::zero() {
             panic!(
                 "New value {:?} does not fit in the configured bit_width of {}",
                 new_w, self.bit_width
@@ -181,8 +180,8 @@ where
             success,
             failure,
         ) {
-            Ok(w) => Ok(T::from_word(w)),
-            Err(w) => Err(T::from_word(w)),
+            Ok(w) => Ok(<T as Storable<W>>::from_word(w)),
+            Err(w) => Err(<T as Storable<W>>::from_word(w)),
         }
     }
 }
@@ -191,7 +190,8 @@ where
 impl<T, W, E> AtomicFixedVec<T, W, E, OwnedAtomicBackend<W>>
 where
     T: Storable<W>,
-    W: Word + Atomic,
+    W: Word + IntoAtomic + Zero + One + Bounded,
+    W::AtomicType: Debug,
     E: Endianness,
 {
     /// Creates a new, zero-initialized `AtomicFixedVec`.
@@ -200,18 +200,18 @@ where
     /// * `bit_width`: The number of bits for each element.
     /// * `len`: The number of elements in the vector.
     pub fn new(bit_width: usize, len: usize) -> Result<Self, Error> {
-        if bit_width > W::BITS {
+        if bit_width > <W as Word>::BITS {
             return Err(Error::InvalidParameters(format!(
                 "bit_width ({}) cannot be greater than the word size ({})",
                 bit_width,
-                W::BITS
+                <W as Word>::BITS
             )));
         }
 
-        let mask = if bit_width == W::BITS {
-            W::max_value()
+        let mask = if bit_width == <W as Word>::BITS {
+            <W as Bounded>::max_value()
         } else {
-            (W::ONE << bit_width) - W::ONE
+            (<W as One>::one() << bit_width) - <W as One>::one()
         };
 
         let backend = OwnedAtomicBackend::new(len, bit_width);

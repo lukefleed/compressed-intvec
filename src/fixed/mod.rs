@@ -12,7 +12,6 @@
 //!
 //! The data structure is highly generic and can be adapted to different integer
 //! types, storage backends, and endianness, providing flexibility for various
-
 //! performance and memory requirements.
 //!
 //! # Examples
@@ -74,9 +73,9 @@ pub mod parallel;
 pub mod proxy;
 pub mod iter_mut;
 
-// // Conditionally compile the atomic module.
-// #[cfg(feature = "atomic")]
-// pub mod atomic;
+// Conditionally compile the atomic module.
+#[cfg(feature = "atomic")]
+pub mod atomic;
 
 // Conditionally compile the serde module.
 #[cfg(feature = "serde")]

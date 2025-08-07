@@ -17,19 +17,18 @@
 
 #![cfg(feature = "atomic")]
 
-use super::traits::Word;
-use super::backend::AtomicBackend;
-use common_traits::Atomic;
+use crate::fixed::traits::Word;
+use common_traits::IntoAtomic;
 use std::sync::atomic::Ordering;
 
 /// A private module to seal the `AtomicAccess` trait.
-mod private {
+pub(super) mod private {
     use super::*;
 
     /// The sealed trait that defines the contract for atomic access strategies.
     ///
     /// This trait is implemented by `AtomicBackend` in the `strategy.rs` file.
-    pub trait SealedAtomicAccess<W: Word + Atomic> {
+    pub trait SealedAtomicAccess<W: Word + IntoAtomic> {
         /// Atomically loads a value from the specified index.
         fn atomic_load(&self, index: usize, bit_width: usize, mask: W, order: Ordering) -> W;
 
@@ -37,7 +36,8 @@ mod private {
         fn atomic_store(&self, index: usize, value: W, bit_width: usize, mask: W, order: Ordering);
 
         /// Atomically swaps a value at the specified index, returning the old value.
-        fn atomic_swap(&self, index: usize, value: W, bit_width: usize, mask: W, order: Ordering) -> W;
+        fn atomic_swap(&self, index: usize, value: W, bit_width: usize, mask: W, order: Ordering)
+            -> W;
 
         /// Atomically compares the value at `index` with `current`. If they are
         /// equal, it is replaced with `new`.
@@ -55,22 +55,4 @@ mod private {
             failure: Ordering,
         ) -> Result<W, W>;
     }
-}
-
-/// A trait that abstracts the specific strategy for atomic operations.
-///
-/// This trait is implemented by the storage backend (`AtomicBackend`) and allows
-/// `AtomicFixedVec` to transparently use the most efficient and correct atomic
-/// strategy (lock-free or striped-locking) based on its configuration.
-pub(super) trait AtomicAccess<W: Word + Atomic>:
-    AtomicBackend<W> + private::SealedAtomicAccess<W>
-{
-}
-
-/// Blanket implementation of the public trait for any type that implements the sealed trait.
-impl<B, W> AtomicAccess<W> for B
-where
-    B: AtomicBackend<W> + private::SealedAtomicAccess<W>,
-    W: Word + Atomic,
-{
 }

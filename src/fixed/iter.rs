@@ -341,7 +341,7 @@ where
     }
 }
 
-impl<'a, T, W, E, B> Iterator for FixedVecIntoIter<'a, T, W, E, B>
+impl<T, W, E, B> Iterator for FixedVecIntoIter<'_, T, W, E, B>
 where
     T: Storable<W>,
     W: Word,
@@ -360,7 +360,7 @@ where
     }
 }
 
-impl<'a, T, W, E, B> ExactSizeIterator for FixedVecIntoIter<'a, T, W, E, B>
+impl<T, W, E, B> ExactSizeIterator for FixedVecIntoIter<'_, T, W, E, B>
 where
     T: Storable<W>,
     W: Word,

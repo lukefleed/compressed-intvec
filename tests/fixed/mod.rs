@@ -11,3 +11,4 @@ mod test_chunks;
 mod test_low_level_apis;
 mod test_iter;
 mod test_in_place;
+mod test_atomic;
