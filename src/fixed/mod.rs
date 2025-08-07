@@ -378,26 +378,6 @@ where
         iter::FixedVecIter::new(self)
     }
 
-    /// Returns an iterator that does not perform bounds checking.
-    ///
-    /// # Safety
-    /// The returned iterator is unsafe to use. The caller must ensure that the
-    /// iterator's `next_unchecked` method is not called more times than the
-    /// length of the vector.
-    pub unsafe fn iter_unchecked(&self) -> iter::FixedVecUncheckedIter<T, W, E, B> {
-        iter::FixedVecUncheckedIter::new(self)
-    }
-
-    /// Returns an iterator that does not perform bounds checking, in reverse.
-    ///
-    /// # Safety
-    /// The returned iterator is unsafe to use. The caller must ensure that the
-    /// iterator's `next_unchecked` method is not called more times than the
-    /// length of the vector.
-    pub unsafe fn iter_rev_unchecked(&self) -> iter::FixedVecReverseUncheckedIter<T, W, E, B> {
-        iter::FixedVecReverseUncheckedIter::new(self)
-    }
-
     /// Creates a zero-copy immutable view (slice) of this vector.
     ///
     /// # Arguments
@@ -607,7 +587,7 @@ where
     E: Endianness,
 {
     type Item = T;
-    type IntoIter = iter::FixedVecIntoIter<T, W, E>;
+    type IntoIter = iter::FixedVecIntoIter<'static, T, W, E>;
 
     /// Consumes the `FixedVec` and creates an iterator over its decompressed values.
     ///

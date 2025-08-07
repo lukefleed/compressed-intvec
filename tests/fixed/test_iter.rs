@@ -52,31 +52,11 @@ where
     assert_eq!(mixed_iter.next_back(), Some(T::from(98)), "Context: {}", context);
     assert_eq!(mixed_iter.len(), 96, "Context: {}", context);
 
-    // 1.4. Forward unchecked iteration
-    let mut collected_unchecked_fwd = Vec::with_capacity(vec.len());
-    let mut unchecked_iter_fwd = unsafe { vec.iter_unchecked() };
-    for _ in 0..vec.len() {
-        collected_unchecked_fwd.push(unsafe { unchecked_iter_fwd.next_unchecked() });
-    }
-    assert_eq!(collected_unchecked_fwd, data, "Forward unchecked iter failed. Context: {}", context);
-
-    // 1.5. Reverse unchecked iteration
-    let mut collected_unchecked_rev = Vec::with_capacity(vec.len());
-    let mut unchecked_iter_rev = unsafe { vec.iter_rev_unchecked() };
-    for _ in 0..vec.len() {
-        collected_unchecked_rev.push(unsafe { unchecked_iter_rev.next_unchecked() });
-    }
-    assert_eq!(collected_unchecked_rev, expected_rev, "Reverse unchecked iter failed. Context: {}", context);
-
     // --- Test Case 2: Empty vector ---
     let empty_vec: FixedVec<T, W, E> = FixedVec::new(8).unwrap();
 
     assert!(empty_vec.iter().next().is_none(), "Empty iter().next() should be None. Context: {}", context);
     assert!(empty_vec.iter().next_back().is_none(), "Empty iter().next_back() should be None. Context: {}", context);
-    let empty_unchecked_fwd = unsafe { empty_vec.iter_unchecked() };
-    let empty_unchecked_rev = unsafe { empty_vec.iter_rev_unchecked() };
-    // These should not be called, but we have the iterators.
-    let _ = (empty_unchecked_fwd, empty_unchecked_rev);
 
 
     // --- Test Case 3: Single element vector ---
@@ -93,12 +73,6 @@ where
     let mut single_iter_rev = single_vec.iter();
     assert_eq!(single_iter_rev.next_back(), Some(T::from(42)), "Context: {}", context);
     assert_eq!(single_iter_rev.next(), None, "Context: {}", context);
-
-    let mut single_unchecked = unsafe { single_vec.iter_unchecked() };
-    assert_eq!(unsafe { single_unchecked.next_unchecked() }, T::from(42), "Context: {}", context);
-
-    let mut single_rev_unchecked = unsafe { single_vec.iter_rev_unchecked() };
-    assert_eq!(unsafe { single_rev_unchecked.next_unchecked() }, T::from(42), "Context: {}", context);
 }
 
 /// A macro to instantiate the iterator test suite for different configurations.
@@ -116,25 +90,3 @@ test_iterators!(iterators_u32_usize_le, u32, usize, LE);
 test_iterators!(iterators_u64_u64_be, u64, u64, BE);
 test_iterators!(iterators_i16_u32_le, i16, u32, LE);
 test_iterators!(iterators_u8_u16_be, u8, u16, BE);
-
-#[test]
-#[should_panic]
-fn test_unchecked_iterator_forward_panic_safety() {
-    let vec: FixedVec<u32, usize, LE> = vec![1, 2].into_iter().collect();
-    let mut iter = unsafe { vec.iter_unchecked() };
-    let _ = unsafe { iter.next_unchecked() };
-    let _ = unsafe { iter.next_unchecked() };
-    // This call should go out of bounds. In debug mode, it should panic due to the assert.
-    let _ = unsafe { iter.next_unchecked() };
-}
-
-#[test]
-#[should_panic]
-fn test_unchecked_iterator_reverse_panic_safety() {
-    let vec: FixedVec<u32, usize, LE> = vec![1, 2].into_iter().collect();
-    let mut iter = unsafe { vec.iter_rev_unchecked() };
-    let _ = unsafe { iter.next_unchecked() };
-    let _ = unsafe { iter.next_unchecked() };
-    // This call should go out of bounds. In debug mode, it should panic due to the assert.
-    let _ = unsafe { iter.next_unchecked() };
-}

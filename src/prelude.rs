@@ -6,7 +6,7 @@
 // --- Fixed-Width Vector Prelude ---
 pub use crate::fixed::{
     builder::{FixedVecBuilder, FixedVecFromIterBuilder},
-    iter::{FixedVecIntoIter, FixedVecIter, FixedVecUncheckedIter},
+    iter::{FixedVecIntoIter, FixedVecIter},
     traits::{Storable, Word},
     BitWidth, Error as FixedVecError, FixedVec,
     // Direct re-export of the most common aliases

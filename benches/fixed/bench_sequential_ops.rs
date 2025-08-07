@@ -9,12 +9,6 @@ use sux::prelude::{BitFieldSliceMut, BitFieldVec};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-/// Generates a vector with uniformly random values up to a given maximum.
-///
-/// # Arguments
-/// * `size` - The number of elements to generate.
-/// * `max_val_exclusive` - The exclusive upper bound for the random values. A value of 0
-///   indicates that the full range of `u64` should be used.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
     let mut rng = SmallRng::seed_from_u64(42);
     if max_val_exclusive == 0 {
@@ -29,10 +23,6 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 fn benchmark_sequential_ops(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 5_000_000;
 
-    // Test a few representative bit widths to compare fast vs. generic paths.
-    // 16: Power-of-two, should trigger fast paths.
-    // 21: Not a power-of-two, forces generic logic.
-    // 64: Full word width, another special case.
     let bit_widths_to_test: Vec<u32> = (8..64).step_by(8).collect();
 
     for &bit_width in &bit_widths_to_test {
@@ -67,6 +57,7 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
                 black_box(black_box(&sux_bfv).iter().sum::<u64>());
             })
         });
+
 
         // --- 2. Parallel Iteration Benchmarks ---
         #[cfg(feature = "parallel")]
