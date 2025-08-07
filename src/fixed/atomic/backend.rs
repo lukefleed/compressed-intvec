@@ -4,46 +4,38 @@
 //! `AtomicFixedVec`. It encapsulates the raw data buffer and the
 //! synchronization primitives required for safe concurrent access.
 //!
-//! The central component is `OwnedAtomicBackend`, which implements a hybrid
-//! synchronization strategy:
-//! - **SeqLock**: For reads and simple stores, it uses a per-word seqlock,
-//!   allowing for highly concurrent, non-blocking reads. Readers retry if a
-//!   write occurs, but are never blocked.
-//! - **Striped Mutexes**: For complex read-modify-write operations (like
-//!   `compare_exchange`), it falls back to a striped mutex locking strategy.
-//!   This guarantees correctness and atomicity for these operations while
-//!   minimizing contention.
+//! The central component is `OwnedAtomicBackend`, which holds an `AtomicStorage`
+//! enum. This enum allows the backend to transparently switch between two highly
+//! optimized strategies based on the vector's configuration:
+//!
+//! - **`AtomicStorage::LockFree`**: For configurations where elements fit within
+//!   a single word (i.e., power-of-two bit widths), this variant uses a simple
+//!   `Vec` of atomic words. All operations are dispatched to a high-performance,
+//!   lock-free implementation.
+//!
+//! - **`AtomicStorage::SeqLock`**: For configurations where elements may span
+//!   word boundaries, this variant uses a hybrid mechanism. Reads are performed
+//!   optimistically using non-blocking seqlocks for maximum concurrency. All
+//!   write operations (`store`, `swap`, `compare_exchange`) use fine-grained
+//!   striped mutexes to ensure correctness and prevent torn reads/writes.
 
 #![cfg(feature = "atomic")]
 
 use crate::fixed::traits::Word;
-use common_traits::IntoAtomic;
+use common_traits::{Atomic, IntoAtomic};
 use num_traits::Zero;
 use parking_lot::Mutex;
 use std::cell::UnsafeCell;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// The number of concurrent locks to use for the striped locking strategy,
-/// which is reserved for complex read-modify-write operations.
-///
-/// A power of two is chosen to allow for efficient calculation of a stripe index
-/// from a word index using a bitwise AND operation instead of a slower modulo.
-/// 64 stripes provide a good balance, offering high granularity to reduce
-/// lock contention without excessive memory overhead for the lock array itself.
+/// The number of concurrent writer locks for the striped locking strategy.
 pub(super) const NUM_STRIPES: usize = 64;
 
-/// A single word of data protected by a seqlock.
-///
-/// This allows for highly concurrent reads. A read operation checks the version
-/// counter before and after reading the data. If the counter has changed, the
-/// read is retried. Writes increment the counter to an odd number, perform the
-/// write, and then increment it back to an even number.
+/// A single word of data protected by a seqlock for optimistic reads.
 #[derive(Debug)]
 pub(super) struct SeqLockWord<W: Word> {
-    /// The version counter for the seqlock. Even = unlocked, Odd = write in progress.
     pub(super) version: AtomicUsize,
-    /// The actual data, wrapped in UnsafeCell for interior mutability.
     pub(super) data: UnsafeCell<W>,
 }
 
@@ -57,130 +49,87 @@ impl<W: Word + Zero> SeqLockWord<W> {
     }
 }
 
-// SAFETY: `SeqLockWord` is safe to send across threads if `W` is `Send`.
-// The internal `UnsafeCell` is only accessed according to the seqlock protocol,
-// which ensures thread safety.
+// SAFETY: `SeqLockWord` is safe to send/sync if `W` is `Send`.
+// The `UnsafeCell` is only accessed via the seqlock protocol.
 unsafe impl<W: Word + Send> Send for SeqLockWord<W> {}
 unsafe impl<W: Word + Send> Sync for SeqLockWord<W> {}
 
-/// A trait that defines the interface for an atomic storage backend.
-///
-/// This abstraction allows the `AtomicFixedVec` to be generic over its
-/// storage, facilitating testing and potential future extensions.
-pub trait AtomicBackend<W: Word + IntoAtomic>: Send + Sync + Debug {
-    /// Returns a slice of the underlying seqlocked words.
-    fn seqlocks(&self) -> &[SeqLockWord<W>];
-
-    /// Returns a slice of the mutexes used for striped locking complex RMW operations.
-    fn writer_locks(&self) -> &[Mutex<()>];
-}
-
-/// An owned, growable atomic storage backend for `AtomicFixedVec`.
-///
-/// It contains:
-/// * `seqlocks`: A vector of `SeqLockWord`s that holds the packed data,
-///   enabling highly concurrent reads.
-/// * `writer_locks`: A fixed-size array of `parking_lot::Mutex`es for write operations.
+/// An enum representing the two possible storage strategies for the atomic vector.
 #[derive(Debug)]
-pub struct OwnedAtomicBackend<W: Word + IntoAtomic> {
-    /// The bit-packed data, stored in seqlocked words.
-    seqlocks: Vec<SeqLockWord<W>>,
-    /// A fixed-size array of lightweight mutexes for complex write operations.
-    writer_locks: Box<[Mutex<()>; NUM_STRIPES]>,
+pub(super) enum AtomicStorage<W: Word + IntoAtomic>
+where
+    W::AtomicType: Debug,
+{
+    /// Storage for lock-free operations (power-of-two bit widths).
+    LockFree(Vec<W::AtomicType>),
+    /// Storage for seqlock/mutex-based operations (other bit widths).
+    SeqLock {
+        seqlocks: Vec<SeqLockWord<W>>,
+        writer_locks: Box<[Mutex<()>; NUM_STRIPES]>,
+    },
 }
 
-impl<W: Word + IntoAtomic + Zero> OwnedAtomicBackend<W> {
-    /// Creates a new `OwnedAtomicBackend` with a specified capacity.
-    ///
-    /// # Arguments
-    ///
-    /// * `capacity`: The number of elements the backend should be able to hold
-    ///   without reallocating.
-    /// * `bit_width`: The number of bits used for each element.
-    pub fn new(capacity: usize, bit_width: usize) -> Self {
-        // Calculate the number of words needed for the data buffer.
-        // We add padding to ensure that even boundary-crossing reads/writes
-        // near the end of the vector do not go out of bounds.
+/// The owned storage backend for an `AtomicFixedVec`.
+///
+/// This struct holds the actual storage and decides which strategy to use
+/// upon construction based on the provided `bit_width`.
+#[derive(Debug)]
+pub(super) struct OwnedAtomicBackend<W: Word + IntoAtomic>
+where
+    W::AtomicType: Debug,
+{
+    pub(super) storage: AtomicStorage<W>,
+}
+
+impl<W: Word + IntoAtomic + Zero> OwnedAtomicBackend<W>
+where
+    W::AtomicType: Debug,
+{
+    /// Creates a new `OwnedAtomicBackend`, automatically selecting the optimal
+    /// storage strategy.
+    pub(super) fn new(bit_width: usize, capacity: usize) -> Self {
         let total_bits = capacity.saturating_mul(bit_width);
         let num_words = total_bits.div_ceil(<W as Word>::BITS);
-        let buffer_len = if capacity == 0 { 0 } else { num_words + 2 };
+        let buffer_len = if capacity == 0 { 0 } else { num_words + 2 }; // +2 for padding
 
-        // Initialize the seqlocked data buffer with zeros.
-        let seqlocks = (0..buffer_len).map(|_| SeqLockWord::new()).collect();
+        let storage = if bit_width.is_power_of_two() {
+            // --- Lock-Free Strategy ---
+            // The backend is a simple vector of atomic words.
+            let atomic_limbs = (0..buffer_len)
+                .map(|_| <W::AtomicType as Atomic>::new(W::zero()))
+                .collect();
+            AtomicStorage::LockFree(atomic_limbs)
+        } else {
+            // --- SeqLock/Mutex Strategy ---
+            // The backend holds seqlocked words for reading and mutexes for writing.
+            let seqlocks = (0..buffer_len).map(|_| SeqLockWord::new()).collect();
+            let writer_locks = Box::new(std::array::from_fn(|_| Mutex::new(())));
+            AtomicStorage::SeqLock {
+                seqlocks,
+                writer_locks,
+            }
+        };
 
-        // Initialize the array of mutexes for striped locking.
-        // `std::array::from_fn` is the idiomatic way to create an array of
-        // non-Copy types like Mutex.
-        let writer_locks = Box::new(std::array::from_fn(|_| Mutex::new(())));
-
-        Self {
-            seqlocks,
-            writer_locks,
-        }
+        Self { storage }
     }
 }
-
-impl<W: Word + IntoAtomic + Zero> AtomicBackend<W> for OwnedAtomicBackend<W> {
-    /// Returns a slice of the underlying seqlocked words.
-    #[inline]
-    fn seqlocks(&self) -> &[SeqLockWord<W>] {
-        &self.seqlocks
-    }
-
-    /// Returns a slice of the mutexes used for striped locking.
-    #[inline]
-    fn writer_locks(&self) -> &[Mutex<()>] {
-        &*self.writer_locks
-    }
-}
-
-// The following implementations for SeqLockWord are not strictly required by the
-// backend itself but are the core of the seqlock mechanism that will be used
-// in the `strategy.rs` module. They are included here for completeness.
 
 impl<W: Word> SeqLockWord<W> {
-    /// Performs a lock-free, optimistic read of the data.
-    ///
-    /// This function will spin if a write is in progress.
+    /// Performs a lock-free, optimistic read of the data. Spins if a write is in progress.
     #[inline(always)]
     pub(super) fn optimistic_read(&self) -> W {
         loop {
             let version1 = self.version.load(Ordering::Acquire);
             if version1 % 2 != 0 {
-                // A write is in progress, spin.
                 std::hint::spin_loop();
                 continue;
             }
-
-            // SAFETY: The version check ensures no writer is active.
+            // SAFETY: Version check ensures no writer is active.
             let data = unsafe { *self.data.get() };
-
             let version2 = self.version.load(Ordering::Acquire);
-
             if version1 == version2 {
-                // The version is unchanged, so the read was consistent.
                 return data;
             }
-            // A write occurred during our read, so we retry.
         }
-    }
-
-    /// Writes a value, locking optimistically.
-    ///
-    /// This is used for simple `store` operations.
-    #[inline(always)]
-    pub(super) fn write(&self, f: impl FnOnce(W) -> W) {
-        // Increment version to odd, signaling a write is starting.
-        self.version.fetch_add(1, Ordering::Release);
-
-        // SAFETY: We have signaled that we are writing, so we can safely mutate.
-        let current_data = unsafe { *self.data.get() };
-        let new_data = f(current_data);
-        unsafe {
-            *self.data.get() = new_data;
-        }
-
-        // Increment version to even, signaling the write is complete.
-        self.version.fetch_add(1, Ordering::Release);
     }
 }
