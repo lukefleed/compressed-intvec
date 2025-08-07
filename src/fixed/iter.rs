@@ -1,7 +1,46 @@
 //! # `FixedVec` Iterators
 //!
-//! This module provides iterators for performing efficient, sequential
-//! decompression of a [`FixedVec`].
+//! This module provides iterators for sequential access to the elements of a
+//! [`FixedVec`]. The iterators decode values on the fly without allocating an
+//! intermediate buffer, making them efficient for processing large datasets.
+//!
+//! # Examples
+//!
+//! ## Iterating over elements
+//!
+//! ```rust
+//! use compressed_intvec::fixed::{FixedVec, SFixedVec};
+//!
+//! let data: &[i16] = &[-100, 0, 100, 200];
+//! let vec: SFixedVec<i16> = FixedVec::builder().build(data).unwrap();
+//!
+//! let mut sum = 0;
+//! for value in vec.iter() {
+//!     sum += value;
+//! }
+//!
+//! assert_eq!(sum, 200);
+//! ```
+//!
+//! ## Iterating over chunks
+//!
+//! ```rust
+//! use compressed_intvec::fixed::{FixedVec, BEFixedVec};
+//!
+//! let data: Vec<u64> = (0..10).collect();
+//! let vec: BEFixedVec = FixedVec::builder().build(&data).unwrap();
+//!
+//! let mut chunks_iter = vec.chunks(3);
+//!
+//! let first_chunk = chunks_iter.next().unwrap();
+//! assert_eq!(first_chunk.len(), 3);
+//! assert_eq!(first_chunk.get(0), Some(0));
+//! assert_eq!(first_chunk.get(2), Some(2));
+//!
+//! let last_chunk = chunks_iter.last().unwrap();
+//! assert_eq!(last_chunk.len(), 1);
+//! assert_eq!(last_chunk.get(0), Some(9));
+//! ```
 
 use crate::fixed::{
     slice::FixedVecSlice,
@@ -13,12 +52,39 @@ use std::{marker::PhantomData, ops::Deref};
 
 use std::cmp::min;
 
-/// An iterator over the decompressed values of a borrowed [`FixedVec`].
+/// An iterator over the elements of a borrowed [`FixedVec`].
 ///
 /// This struct is created by the [`iter`](FixedVec::iter) method. It is a
-/// highly optimized, stateful bitstream reader that decodes values on the fly
-/// for both forward and reverse iteration. It minimizes memory access and
-/// expensive arithmetic, operating primarily on word-sized buffers in registers.
+/// stateful bitstream reader that decodes values on the fly for both forward
+/// and reverse iteration.
+///
+/// # Examples
+///
+/// ## Forward iteration
+///
+/// ```rust
+/// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+///
+/// let data: &[u8] = &[1, 2, 3, 4, 5];
+/// let vec: UFixedVec<u8> = FixedVec::builder().build(data).unwrap();
+/// let mut iter = vec.iter();
+///
+/// assert_eq!(iter.next(), Some(1));
+/// assert_eq!(iter.next(), Some(2));
+/// ```
+///
+/// ## Reverse iteration
+///
+/// ```rust
+/// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+///
+/// let data: &[u8] = &[1, 2, 3, 4, 5];
+/// let vec: UFixedVec<u8> = FixedVec::builder().build(data).unwrap();
+/// let mut iter = vec.iter();
+///
+/// assert_eq!(iter.next_back(), Some(5));
+/// assert_eq!(iter.next_back(), Some(4));
+/// ```
 pub struct FixedVecIter<'a, T, W, E, B>
 where
     T: Storable<W>,
@@ -42,9 +108,10 @@ where
     _phantom: PhantomData<T>,
 }
 
-/// An iterator over immutable, non-overlapping chunks of a `FixedVec`.
+/// An iterator over non-overlapping, immutable chunks of a [`FixedVec`].
 ///
 /// This struct is created by the [`chunks`](super::FixedVec::chunks) method.
+/// Each item in the iterator is a [`FixedVecSlice`].
 #[derive(Debug)]
 pub struct Chunks<'a, T, W, E, B>
 where
@@ -237,7 +304,10 @@ where
     }
 }
 
-/// An iterator that consumes an owned [`FixedVec`] and yields its decompressed values.
+/// An iterator that consumes an owned [`FixedVec`] and yields its elements.
+///
+/// This struct is created by the `into_iter` method on `FixedVec` (which is
+/// part of the [`IntoIterator`] trait).
 pub struct FixedVecIntoIter<'a, T, W, E, B = Vec<W>>
 where
     T: Storable<W>,
@@ -302,7 +372,10 @@ where
     }
 }
 
-/// An iterator over the decompressed values of a [`FixedVecSlice`].
+/// An iterator over the elements of a [`FixedVecSlice`].
+///
+/// This struct is created by the [`iter`](super::slice::FixedVecSlice::iter)
+/// method on [`FixedVecSlice`].
 pub struct FixedVecSliceIter<'s, T, W, E, B, V>
 where
     T: Storable<W>,

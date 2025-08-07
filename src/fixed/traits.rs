@@ -1,20 +1,20 @@
-//! # Foundational Traits for Generic Fixed-Width Vectors
+//! # Core Traits
 //!
-//! This module defines the core traits that enable the generic and unified
-//! `FixedVec` architecture. These traits abstract away the details of the
-//! underlying storage words and the conversion logic for different element types.
+//! This module defines the traits that enable the generic implementation of
+//! [`FixedVec`]. These traits abstract the underlying storage words and the
+//`! conversion logic for different element types.
 
 use common_traits::{SignedInt, UnsignedInt};
 use dsi_bitstream::{prelude::{ToInt, ToNat}, traits::Endianness};
 use num_traits::{Bounded, NumCast, ToPrimitive};
 use std::fmt::Debug;
 
-/// A trait that abstracts over the primitive unsigned integer types that can
-/// serve as the storage words in the underlying bit buffer of a `FixedVec`.
+/// A trait for primitive unsigned integer types that can be used as storage
+/// words in a [`FixedVec`].
 ///
-/// This trait establishes a contract for what constitutes a "machine word"
-/// for storage, providing access to its size in bits. It also requires the
-/// necessary traits for integration with the `dsi-bitstream` library.
+/// This trait establishes a contract for what constitutes a "machine word" for
+/// the underlying bit buffer, providing access to its size in bits and requiring
+/// the necessary traits for bitstream operations.
 pub trait Word:
     UnsignedInt
     + Bounded
@@ -54,14 +54,20 @@ mod private {
     impl<T: SealedStorable<W>, W: Word> Storable<W> for T {}
 }
 
-/// A trait that defines a bidirectional, lossless conversion between a user-facing
-/// element type `T` and its storage representation of type `W`.
+/// A trait for types that can be stored in a [`FixedVec`].
+///
+/// This trait defines a bidirectional, lossless conversion between a user-facing
+/// element type `T` and its storage representation `W`. For signed integers,
+/// this conversion involves ZigZag encoding to map signed values to unsigned
+/// words.
 pub trait Storable<W: Word>: private::SealedStorable<W> {
+    /// Converts the element into its storage representation.
     #[inline(always)]
     fn into_word(self) -> W {
         <Self as private::SealedStorable<W>>::into_word(self)
     }
 
+    /// Converts a storage word back into the element type.
     #[inline(always)]
     fn from_word(word: W) -> Self {
         <Self as private::SealedStorable<W>>::from_word(word)

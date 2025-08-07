@@ -1,7 +1,38 @@
-//! # `FixedVec` Builder
+//! # `FixedVec` Builders
 //!
-//! This module provides the generic builder for creating an owned, compressed
-//! fixed-width integer vector, [`FixedVec`].
+//! This module provides builders for constructing an owned [`FixedVec`].
+//!
+//! There are two main builders:
+//! - [`FixedVecBuilder`]: For building from a slice (`&[T]`). It can automatically
+//!   determine the optimal bit width from the data.
+//! - [`FixedVecFromIterBuilder`]: For building from an iterator. This is useful
+//!   for large datasets, but requires the bit width to be specified manually.
+//!
+//! # Examples
+//!
+//! ## Building from a slice
+//!
+//! ```
+//! use compressed_intvec::fixed::builder::FixedVecBuilder;
+//! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
+//!
+//! let data: &[u32] = &[10, 20, 30, 40, 50];
+//!
+//! // The builder can infer the minimal bit width.
+//! let vec: UFixedVec<u32> = FixedVecBuilder::new()
+//!     .build(data)
+//!     .unwrap();
+//!
+//! assert_eq!(vec.bit_width(), 6); // 50 requires 6 bits
+//!
+//! // Or a specific strategy can be chosen.
+//! let vec_pow2: UFixedVec<u32> = FixedVecBuilder::new()
+//!     .bit_width(BitWidth::PowerOfTwo)
+//!     .build(data)
+//!     .unwrap();
+//!
+//! assert_eq!(vec_pow2.bit_width(), 8);
+//! ```
 
 use crate::fixed::{BitWidth, Error, FixedVec};
 use crate::fixed::traits::{Storable, Word};
@@ -11,11 +42,10 @@ use dsi_bitstream::{
 };
 use std::marker::PhantomData;
 
-/// A builder for creating an owned [`FixedVec<T, W, E, Vec<W>>`] from a slice of integers.
+/// A builder for creating a [`FixedVec`] from a slice of integers.
 ///
-/// The builder is designed to be ergonomic and efficient, inferring necessary
-/// parameters from the data when possible and pre-allocating memory to avoid
-/// reallocations.
+/// This builder analyzes a slice to determine the optimal `bit_width` based on
+/// the selected [`BitWidth`] strategy and then constructs the compressed vector.
 #[derive(Debug, Clone)]
 pub struct FixedVecBuilder<T: Storable<W>, W: Word, E: Endianness> {
     bit_width_strategy: BitWidth,
@@ -43,23 +73,33 @@ where
     E: Endianness,
     BufBitWriter<E, MemWordWriterVec<W, Vec<W>>>: BitWrite<E, Error = std::convert::Infallible>,
 {
-    /// Creates a new builder with the default `BitWidth::Minimal` strategy.
+    /// Creates a new builder with the default [`BitWidth::Minimal`] strategy.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Sets the strategy for determining the number of bits for encoding each element.
+    /// Sets the strategy for determining the number of bits for each element.
     pub fn bit_width(mut self, strategy: BitWidth) -> Self {
         self.bit_width_strategy = strategy;
         self
     }
 
-    /// Builds the `FixedVec` from a slice of data, consuming the builder.
+    /// Builds the [`FixedVec`] from a slice of data.
+    ///
+    /// This method consumes the builder and returns a new [`FixedVec`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if a value in the input is too large for the
+    /// specified `bit_width`, or if the parameters are invalid.
     pub fn build(self, input: &[T]) -> Result<FixedVec<T, W, E, Vec<W>>, Error> {
         let bits_per_word = <W as crate::fixed::traits::Word>::BITS;
 
+        // Determine the final bit width based on the chosen strategy.
         let final_bit_width = match self.bit_width_strategy {
+            // If the user specified an exact bit width, use it.
             BitWidth::Explicit(n) => n,
+            // Otherwise, we need to analyze the data to find the maximum value.
             _ => {
                 let max_val: W = input
                     .iter()
@@ -67,15 +107,19 @@ where
                     .max()
                     .unwrap_or(W::ZERO);
 
+                // Calculate the minimum number of bits required to store the max value.
                 let min_bits = if max_val == W::ZERO {
-                    1
+                    1 // Handle the edge case of all zeros.
                 } else {
+                    // This is a common trick to find the number of bits in a number.
                     bits_per_word - max_val.leading_zeros() as usize
                 };
 
+                // Apply the selected strategy.
                 match self.bit_width_strategy {
                     BitWidth::Minimal => min_bits,
                     BitWidth::PowerOfTwo => min_bits.next_power_of_two().min(bits_per_word),
+                    // This case is unreachable because we handled it above.
                     BitWidth::Explicit(_) => unreachable!(),
                 }
             }
@@ -130,7 +174,11 @@ where
     }
 }
 
-/// A builder for creating an owned `FixedVec` from an iterator.
+/// A builder for creating a [`FixedVec`] from an iterator.
+///
+/// This builder is designed for streaming data from an iterator without first
+/// collecting it into a slice. It requires the `bit_width` to be specified
+/// manually, as it cannot analyze the data in advance.
 #[derive(Debug)]
 pub struct FixedVecFromIterBuilder<T: Storable<W>, W: Word, E: Endianness, I: IntoIterator<Item = T>> {
     iter: I,
@@ -155,7 +203,12 @@ where
         }
     }
 
-    /// Builds the `FixedVec` by consuming the iterator.
+    /// Builds the [`FixedVec`] by consuming the iterator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if a value from the iterator is too large for the
+    /// specified `bit_width`, or if the parameters are invalid.
     pub fn build(self) -> Result<FixedVec<T, W, E, Vec<W>>, Error> {
         let bits_per_word = <W as crate::fixed::traits::Word>::BITS;
         if self.bit_width > bits_per_word {

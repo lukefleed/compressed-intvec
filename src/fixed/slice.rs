@@ -1,7 +1,30 @@
-//! # Zero-Copy Slices for `FixedVec`
+//! # Zero-copy Slices
 //!
-//! This module provides `FixedVecSlice`, a zero-copy, generic view into a
-//! portion of a `FixedVec`.
+//! This module provides [`FixedVecSlice`], a zero-copy view into a portion of a
+//! [`FixedVec`]. Slices can be created from both immutable and mutable vectors
+//! and provide a way to operate on a sub-region of the data without copying.
+//!
+//! # Examples
+//!
+//! ## Creating and using an immutable slice
+//!
+//! ```rust
+//! use compressed_intvec::fixed::{FixedVec, UFixedVec};
+//!
+//! let data: Vec<u32> = (0..10).collect();
+//! let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+//!
+//! // Create a slice of the elements from index 2 to 6.
+//! let slice = vec.slice(2, 5).unwrap();
+//!
+//! assert_eq!(slice.len(), 5);
+//! assert_eq!(slice.get(0), Some(2));
+//! assert_eq!(slice.get(4), Some(6));
+//!
+//! // The slice can be iterated over.
+//! let sum: u32 = slice.iter().sum();
+//! assert_eq!(sum, 2 + 3 + 4 + 5 + 6);
+//! ```
 
 use crate::fixed::{
     iter::FixedVecSliceIter,
@@ -14,20 +37,20 @@ use std::ops::{Deref, DerefMut, Range};
 
 /// A zero-copy view into a contiguous portion of a [`FixedVec`].
 ///
-/// This struct is generic over the type of reference to the parent vector (`V`),
-/// allowing it to represent both immutable slices (when `V` is `&FixedVec`)
-/// and mutable slices (when `V` is `&mut FixedVec`).
+/// A slice is a view that allows for operations on a sub-region of a `FixedVec`
+/// without copying the underlying data. It can be created from both immutable
+/// and mutable vectors.
 ///
-/// It is created by the `slice`, `slice_mut`, `split_at`, etc., methods on a `FixedVec`.
+/// This struct is generic over `V`, the type of reference to the parent vector,
+/// which can be `&FixedVec` (for an immutable slice) or `&mut FixedVec` (for a
+/// mutable slice).
 #[derive(Debug)]
 pub struct FixedVecSlice<V> {
-    /// The parent vector reference (`&FixedVec` or `&mut FixedVec`).
     parent: V,
-    /// The start index and length of the slice within the parent.
     range: Range<usize>,
 }
 
-// --- Common Implementation for both Immutable and Mutable Slices ---
+// Common implementation for both immutable and mutable slices.
 impl<T, W, E, B, V> FixedVecSlice<V>
 where
     T: Storable<W>,
@@ -37,9 +60,6 @@ where
     V: Deref<Target = FixedVec<T, W, E, B>>,
 {
     /// Creates a new `FixedVecSlice`.
-    ///
-    /// This is `pub(super)` and is called by methods on `FixedVec`.
-    /// It assumes the provided range is within the parent's bounds.
     pub(super) fn new(parent: V, range: Range<usize>) -> Self {
         debug_assert!(range.end <= parent.len());
         Self { parent, range }
@@ -51,38 +71,42 @@ where
         self.range.len()
     }
 
-    /// Returns `true` if the slice contains no elements.
+    /// Returns `true` if the slice is empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.range.is_empty()
     }
 
-    /// Retrieves the element at the specified index within the slice.
+    /// Returns the element at `index`, or `None` if the index is out of bounds.
     #[inline]
     pub fn get(&self, index: usize) -> Option<T> {
         if index >= self.len() {
             return None;
         }
-        // SAFETY: The bounds check has been performed.
         Some(unsafe { self.get_unchecked(index) })
     }
 
-    /// Retrieves the element at `index` within the slice without bounds checking.
+    /// Returns the element at `index` without bounds checking.
     ///
     /// # Safety
-    /// Calling this method with an out-of-bounds index is Undefined Behavior.
+    ///
+    /// Calling this method with an out-of-bounds index is undefined behavior.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len());
         self.parent.get_unchecked(self.range.start + index)
     }
 
-    /// Returns an iterator over the values in the slice.
+    /// Returns an iterator over the elements in the slice.
     pub fn iter(&self) -> FixedVecSliceIter<'_, T, W, E, B, V> {
         FixedVecSliceIter::new(self)
     }
 
     /// Binary searches this slice for a given element.
+    ///
+    /// If the value is found, returns `Ok(usize)` with the index of the
+    /// matching element. If the value is not found, returns `Err(usize)` with
+    /// the index where the value could be inserted to maintain order.
     pub fn binary_search(&self, value: &T) -> Result<usize, usize>
     where
         T: Ord,
@@ -105,7 +129,7 @@ where
     }
 }
 
-// --- Mutable-Only Implementation ---
+// Mutable-only implementation.
 impl<T, W, E, B, V> FixedVecSlice<V>
 where
     T: Storable<W>,
@@ -114,7 +138,7 @@ where
     B: AsRef<[W]> + AsMut<[W]>,
     V: Deref<Target = FixedVec<T, W, E, B>> + DerefMut,
 {
-    /// Returns a mutable proxy for an element at a given index within the slice.
+    /// Returns a mutable proxy for an element at `index` within the slice.
     ///
     /// This allows for syntax like `*slice.at_mut(i).unwrap() = new_value;`.
     ///
@@ -123,8 +147,6 @@ where
         if index >= self.len() {
             return None;
         }
-        // The proxy gets a mutable reference to the *parent* vector, but uses
-        // the global index from the slice's perspective.
         Some(MutProxy::new(&mut self.parent, self.range.start + index))
     }
 }

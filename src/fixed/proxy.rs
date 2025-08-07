@@ -1,14 +1,39 @@
-//! Defines a proxy object for mutable access to `FixedVec` elements.
+//! # Mutable Access Proxy
+//!
+//! This module defines [`MutProxy`], a proxy object that enables mutable access
+//! to elements within a [`FixedVec`].
+//!
+//! The proxy holds a temporary copy of an element's value. When the proxy is
+//! dropped, its `Drop` implementation writes the (potentially modified) value
+//! back into the vector. This allows for an ergonomic, "index-like" mutation
+//! syntax.
+//!
+//! # Examples
+//!
+//! ```rust
+//! use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
+//!
+//! let data: &[u32] = &[10, 20, 30];
+//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(data).unwrap();
+//!
+//! // Get a mutable proxy for the element at index 1.
+//! if let Some(mut proxy) = vec.at_mut(1) {
+//!     // DerefMut allows us to modify the value.
+//!     *proxy = 99;
+//! } // The proxy is dropped here, and the new value is written back.
+//!
+//! assert_eq!(vec.get(1), Some(99));
+//! ```
 
 use super::{FixedVec, traits::{Storable, Word}};
 use dsi_bitstream::prelude::Endianness;
 use std::ops::{Deref, DerefMut};
 
-/// A proxy object that allows mutable access to an element within a `FixedVec`.
+/// A proxy object for mutable access to an element within a [`FixedVec`].
 ///
-/// This struct is returned by `FixedVec::at_mut`. It holds a temporary copy of
-/// the element's value. When this proxy is dropped, its `Drop` implementation
-/// writes the (potentially modified) value back into the `FixedVec`.
+/// This struct is returned by [`FixedVec::at_mut`]. It holds a temporary copy
+/// of an element's value. When the proxy is dropped, its `Drop` implementation
+/// writes the (potentially modified) value back into the parent vector.
 pub struct MutProxy<'a, T, W, E, B>
 where
     T: Storable<W>,
