@@ -16,6 +16,7 @@
 #![cfg(feature = "atomic")]
 
 use super::access::private::SealedAtomicAccess;
+use super::access::CompareExchangeParams;
 use super::backend::{AtomicBackend, NUM_STRIPES};
 use crate::fixed::traits::Word;
 use common_traits::{Atomic, IntoAtomic};
@@ -88,19 +89,16 @@ where
     fn atomic_compare_exchange(
         &self,
         index: usize,
-        current: W,
-        new: W,
         bit_width: usize,
         mask: W,
-        success: Ordering,
-        failure: Ordering,
+        params: CompareExchangeParams<W>,
     ) -> Result<W, W> {
         if is_single_word(bit_width) {
             let dispatch = AccessDispatch::<W, B, true> { backend: self, _phantom: PhantomData };
-            dispatch.atomic_compare_exchange(index, current, new, bit_width, mask, success, failure)
+            dispatch.atomic_compare_exchange(index, bit_width, mask, params)
         } else {
             let dispatch = AccessDispatch::<W, B, false> { backend: self, _phantom: PhantomData };
-            dispatch.atomic_compare_exchange(index, current, new, bit_width, mask, success, failure)
+            dispatch.atomic_compare_exchange(index, bit_width, mask, params)
         }
     }
 }
@@ -162,12 +160,9 @@ where
     fn atomic_compare_exchange(
         &self,
         index: usize,
-        current: W,
-        new: W,
         bit_width: usize,
         mask: W,
-        success: Ordering,
-        failure: Ordering,
+        params: CompareExchangeParams<W>,
     ) -> Result<W, W> {
         let bit_pos = index * bit_width;
         let word_index = bit_pos / <W as Word>::BITS;
@@ -177,20 +172,20 @@ where
         let word_ref = &self.backend.as_atomic_slice()[word_index];
 
         // Loop until the CAS succeeds or fails definitively.
-        let mut old_word = word_ref.load(failure);
+        let mut old_word = word_ref.load(params.failure);
         loop {
             let old_val = (old_word >> bit_offset) & mask;
 
-            if old_val != current {
+            if old_val != params.current {
                 return Err(old_val);
             }
 
             let mut new_word = old_word;
             new_word &= !store_mask;
-            new_word |= new << bit_offset;
+            new_word |= params.new << bit_offset;
 
-            match word_ref.compare_exchange_weak(old_word, new_word, success, failure) {
-                Ok(_) => return Ok(current),
+            match word_ref.compare_exchange_weak(old_word, new_word, params.success, params.failure) {
+                Ok(_) => return Ok(params.current),
                 Err(previous_word) => old_word = previous_word,
             }
         }
@@ -199,7 +194,7 @@ where
 
 // --- Implementation for Striped-Locking (Multi-Word) Strategy ---
 
-impl<'a, W, B> AccessDispatch<'a, W, B, false>
+impl<W, B> AccessDispatch<'_, W, B, false>
 where
     W: Word + IntoAtomic + One,
     B: AtomicBackend<W>,
@@ -327,12 +322,9 @@ where
     fn atomic_compare_exchange(
         &self,
         index: usize,
-        current: W,
-        new: W,
         bit_width: usize,
         mask: W,
-        _success: Ordering,
-        _failure: Ordering,
+        params: CompareExchangeParams<W>,
     ) -> Result<W, W> {
         let bit_pos = index * bit_width;
         let word_idx1 = bit_pos / <W as Word>::BITS;
@@ -346,16 +338,16 @@ where
             let fetched_word = limbs[word_idx1].load(Ordering::Relaxed);
             let fetched_val = (fetched_word >> bit_offset) & mask;
 
-            if fetched_val != current {
+            if fetched_val != params.current {
                 return Err(fetched_val);
             }
 
             let mut new_word = fetched_word;
             new_word &= !(mask << bit_offset);
-            new_word |= new << bit_offset;
+            new_word |= params.new << bit_offset;
             limbs[word_idx1].store(new_word, Ordering::Relaxed);
 
-            Ok(current)
+            Ok(params.current)
         } else {
             let word_idx2 = word_idx1 + 1;
             let lock_idx1 = word_idx1 % NUM_STRIPES;
@@ -369,21 +361,21 @@ where
             let word2 = limbs[word_idx2].load(Ordering::Relaxed);
             let fetched_val = ((word1 >> bit_offset) | (word2 << (<W as Word>::BITS - bit_offset))) & mask;
 
-            if fetched_val != current {
+            if fetched_val != params.current {
                 return Err(fetched_val);
             }
 
             let mut new_word1 = word1;
             new_word1 &= (<W as One>::one() << bit_offset) - <W as One>::one();
-            new_word1 |= new << bit_offset;
+            new_word1 |= params.new << bit_offset;
             limbs[word_idx1].store(new_word1, Ordering::Relaxed);
 
             let mut new_word2 = word2;
             new_word2 &= !(mask >> (<W as Word>::BITS - bit_offset));
-            new_word2 |= new >> (<W as Word>::BITS - bit_offset);
+            new_word2 |= params.new >> (<W as Word>::BITS - bit_offset);
             limbs[word_idx2].store(new_word2, Ordering::Relaxed);
 
-            Ok(current)
+            Ok(params.current)
         }
     }
 }

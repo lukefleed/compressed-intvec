@@ -322,7 +322,7 @@ where
         }
 
         let total_bits = len * bit_width;
-        let data_words = (total_bits + <W as traits::Word>::BITS - 1) / <W as traits::Word>::BITS;
+        let data_words = total_bits.div_ceil(<W as traits::Word>::BITS);
 
         // Essential safety check: ensure the buffer is large enough for the data
         // AND the 2 padding words required.
@@ -1453,31 +1453,29 @@ where
                 *high_word &= !high_mask;
                 *high_word |= value_w >> (self.bit_width - bits_in_high);
             }
+        } else if bit_offset + self.bit_width <= bits_per_word {
+            let shift = bits_per_word - self.bit_width - bit_offset;
+            let mask = self.mask << shift;
+            let word = &mut limbs[word_index];
+            *word &= !mask.to_be();
+            *word |= (value_w << shift).to_be();
         } else {
-            if bit_offset + self.bit_width <= bits_per_word {
-                let shift = bits_per_word - self.bit_width - bit_offset;
-                let mask = self.mask << shift;
-                let word = &mut limbs[word_index];
-                *word &= !mask.to_be();
-                *word |= (value_w << shift).to_be();
-            } else {
-                let (left, right) = limbs.split_at_mut(word_index + 1);
-                let high_word = &mut left[word_index];
-                let low_word = &mut right[0];
-                
-                let bits_in_first = bits_per_word - bit_offset;
-                let bits_in_second = self.bit_width - bits_in_first;
+            let (left, right) = limbs.split_at_mut(word_index + 1);
+            let high_word = &mut left[word_index];
+            let low_word = &mut right[0];
+            
+            let bits_in_first = bits_per_word - bit_offset;
+            let bits_in_second = self.bit_width - bits_in_first;
 
-                let high_mask = (self.mask >> bits_in_second) << (bits_per_word - bits_in_first - bit_offset);
-                let high_value = value_w >> bits_in_second;
-                *high_word &= !high_mask.to_be();
-                *high_word |= (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
+            let high_mask = (self.mask >> bits_in_second) << (bits_per_word - bits_in_first - bit_offset);
+            let high_value = value_w >> bits_in_second;
+            *high_word &= !high_mask.to_be();
+            *high_word |= (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
 
-                let low_mask = self.mask << (bits_per_word - bits_in_second);
-                let low_value = value_w << (bits_per_word - bits_in_second);
-                *low_word &= !low_mask.to_be();
-                *low_word |= low_value.to_be();
-            }
+            let low_mask = self.mask << (bits_per_word - bits_in_second);
+            let low_value = value_w << (bits_per_word - bits_in_second);
+            *low_word &= !low_mask.to_be();
+            *low_word |= low_value.to_be();
         }
     }
 

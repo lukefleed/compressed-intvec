@@ -65,10 +65,9 @@ where
             return Vec::new();
         }
 
-        // Pre-allocate the results vector to avoid allocations within threads.
-        let mut results = Vec::with_capacity(indices.len());
-        // SAFETY: We are about to fill this vector completely.
-        results.set_len(indices.len());
+        // Use MaybeUninit to avoid creating uninitialized values
+        let mut results: Vec<std::mem::MaybeUninit<T>> = Vec::with_capacity(indices.len());
+        results.resize_with(indices.len(), std::mem::MaybeUninit::uninit);
 
         results
             .par_iter_mut()
@@ -76,9 +75,10 @@ where
             .for_each(|(res_val, &index)| {
                 // Each thread performs a scalar lookup for its assigned indices.
                 // The `get_unchecked` call is thread-safe as it is read-only.
-                *res_val = self.get_unchecked(index);
+                res_val.write(self.get_unchecked(index));
             });
 
-        results
+        // SAFETY: We have initialized all elements in the vector above
+        std::mem::transmute(results)
     }
 }

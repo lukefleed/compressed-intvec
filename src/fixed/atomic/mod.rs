@@ -27,6 +27,7 @@ mod strategy;
 
 use super::traits::{Storable, Word};
 use crate::fixed::atomic::access::private::SealedAtomicAccess;
+use crate::fixed::atomic::access::CompareExchangeParams;
 use crate::fixed::atomic::backend::{AtomicBackend, OwnedAtomicBackend};
 use crate::fixed::Error;
 use common_traits::IntoAtomic;
@@ -173,12 +174,14 @@ where
 
         match self.backend.atomic_compare_exchange(
             index,
-            current_w,
-            new_w,
             self.bit_width,
             self.mask,
-            success,
-            failure,
+            CompareExchangeParams {
+                current: current_w,
+                new: new_w,
+                success,
+                failure,
+            },
         ) {
             Ok(w) => Ok(<T as Storable<W>>::from_word(w)),
             Err(w) => Err(<T as Storable<W>>::from_word(w)),

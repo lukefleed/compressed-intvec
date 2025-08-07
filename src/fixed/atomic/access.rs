@@ -21,6 +21,15 @@ use crate::fixed::traits::Word;
 use common_traits::IntoAtomic;
 use std::sync::atomic::Ordering;
 
+/// Parameters for atomic compare-exchange operations.
+#[derive(Clone, Copy)]
+pub struct CompareExchangeParams<W> {
+    pub current: W,
+    pub new: W,
+    pub success: Ordering,
+    pub failure: Ordering,
+}
+
 /// A private module to seal the `AtomicAccess` trait.
 pub(super) mod private {
     use super::*;
@@ -47,12 +56,9 @@ pub(super) mod private {
         fn atomic_compare_exchange(
             &self,
             index: usize,
-            current: W,
-            new: W,
             bit_width: usize,
             mask: W,
-            success: Ordering,
-            failure: Ordering,
+            params: CompareExchangeParams<W>,
         ) -> Result<W, W>;
     }
 }
