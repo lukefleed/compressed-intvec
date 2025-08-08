@@ -73,8 +73,6 @@ pub mod parallel;
 pub mod proxy;
 pub mod iter_mut;
 
-// Conditionally compile the atomic module.
-#[cfg(feature = "atomic")]
 pub mod atomic;
 
 // Conditionally compile the serde module.
@@ -88,6 +86,9 @@ use traits::{Storable, Word};
 use num_traits::ToPrimitive;
 
 use crate::fixed::proxy::MutProxy;
+
+// Re-export atomic aliases for convenience
+pub use atomic::{SAtomicFixedVec, UAtomicFixedVec, AtomicFixedVec};
 
 // Type aliases for common `FixedVec` configurations.
 

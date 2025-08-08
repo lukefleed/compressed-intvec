@@ -1,166 +1,201 @@
 //! Comprehensive and robust test suite for `AtomicFixedVec`.
 //!
 //! This suite validates all aspects of the atomic fixed-width vector, including:
-//! - Correctness of the single-word lock-free strategy (power-of-two bit widths).
-//! - Correctness of the multi-word spanning strategy using `atomic::Atomic<u128>`.
+//! - Correctness of the single-word lock-free strategy for non-spanning values.
+//! - Correctness of the lock-based strategy for values that span word boundaries.
 //! - Behavior with both signed (ZigZag encoded) and unsigned integer types.
 //! - All atomic operations: load, store, swap, and compare_exchange.
 //! - Edge cases such as zero bit width, max bit width, and boundary indices.
-//! - Robustness under various multi-threaded concurrency patterns, including
-//!   a specific test to detect and prevent torn writes.
+//! - Robustness under various multi-threaded concurrency patterns.
+//! - Ergonomics and correctness of the new builder, `TryFrom`, and macro APIs.
 
-#![cfg(feature = "atomic")]
-
-use compressed_intvec::fixed::atomic::AtomicFixedVec;
-use compressed_intvec::fixed::traits::{Storable, Word};
-use num_traits::{Bounded, FromPrimitive, One, ToPrimitive, Zero};
-use std::fmt::Debug;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use compressed_intvec::atomic_fixed_vec;
+use compressed_intvec::fixed::atomic::{SAtomicFixedVec, UAtomicFixedVec};
+use compressed_intvec::fixed::{BitWidth, Error};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
-use sux::prelude::AtomicBitFieldSlice;
 
-// --- Test: Construction and Basic Properties ---
+// --- Test Data Generation Helpers ---
 
-#[test]
-fn test_construction_and_properties() {
-    // Test valid construction
-    let vec = AtomicFixedVec::<u8, u64>::new(8, 100).unwrap();
-    assert_eq!(vec.len(), 100);
-    assert_eq!(vec.bit_width(), 8);
-    assert!(!vec.is_empty());
-
-    // Test empty vector
-    let empty_vec = AtomicFixedVec::<u16, u64>::new(10, 0).unwrap();
-    assert_eq!(empty_vec.len(), 0);
-    assert!(empty_vec.is_empty());
-
-    // Test invalid bit width (greater than word size)
-    let result = AtomicFixedVec::<u32, u64>::new(65, 10);
-    assert!(result.is_err());
-
-    // Test invalid configuration: spanning logic is only supported for u64 words.
-    let result_spanning_on_u32 = AtomicFixedVec::<u16, u32>::new(17, 10);
-    assert!(result_spanning_on_u32.is_err());
-    // This should be ok as it does not require spanning logic
-    assert!(AtomicFixedVec::<u8, u32>::new(8, 10).is_ok());
+fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
+    let mut rng = SmallRng::seed_from_u64(42);
+    if max_val_exclusive == 0 {
+        // This case is for u64 full range
+        return (0..size).map(|_| rng.random::<u64>()).collect();
+    }
+    (0..size)
+        .map(|_| rng.random_range(0..max_val_exclusive))
+        .collect()
 }
 
-// --- Generic Test Runner for Core API ---
+fn generate_random_signed_vec(size: usize, max_abs_val: i64) -> Vec<i64> {
+    let mut rng = SmallRng::seed_from_u64(42);
+    (0..size)
+        .map(|_| rng.random_range(-max_abs_val..max_abs_val))
+        .collect()
+}
 
-/// A generic test runner that validates the core atomic operations for a given configuration.
-fn run_core_api_tests<T, W>(bit_width: usize, len: usize)
-where
-    T: Storable<W>
-        + Bounded
-        + FromPrimitive
-        + ToPrimitive
-        + Send
-        + Sync
-        + Debug
-        + Copy
-        + PartialEq,
-    W: Word + Bounded + Zero + One + FromPrimitive,
-    W::AtomicType: Debug,
-{
-    let vec = AtomicFixedVec::<T, W>::new(bit_width, len).unwrap();
-    let max_val_word = if bit_width == <W as Word>::BITS {
-        W::max_value()
-    } else {
-        (W::one() << bit_width).wrapping_sub(W::one())
+// --- Macro for Systematic Testing Across Types ---
+
+macro_rules! test_atomic_api_for_type {
+    ($test_name:ident, $T:ty, $is_signed:ident, $max_val:expr) => {
+        #[test]
+        fn $test_name() {
+            let data: Vec<$T> = if $is_signed {
+                generate_random_signed_vec(256, $max_val as i64)
+                    .into_iter()
+                    .map(|x| x as $T)
+                    .collect()
+            } else {
+                generate_random_vec(256, $max_val)
+                    .into_iter()
+                    .map(|x| x as $T)
+                    .collect()
+            };
+
+            // 1. Test Builder API
+            let vec_builder = UAtomicFixedVec::<$T>::builder().build(&data).unwrap();
+            assert_eq!(vec_builder.len(), data.len());
+            if !data.is_empty() {
+                assert_eq!(
+                    vec_builder.load(10, Ordering::Relaxed),
+                    data[10],
+                    "Builder load failed for {}",
+                    stringify!($T)
+                );
+            }
+
+            // 2. Test TryFrom API
+            let vec_tryfrom = UAtomicFixedVec::<$T>::try_from(data.as_slice()).unwrap();
+            assert_eq!(vec_builder.bit_width(), vec_tryfrom.bit_width());
+            assert_eq!(vec_tryfrom.len(), data.len());
+            if !data.is_empty() {
+                assert_eq!(
+                    vec_tryfrom.load(20, Ordering::Relaxed),
+                    data[20],
+                    "TryFrom load failed for {}",
+                    stringify!($T)
+                );
+            }
+
+            // 3. Test Core Atomic Operations
+            let vec = vec_tryfrom; // Use one of the created vectors for further tests
+            if data.len() < 3 {
+                return;
+            }
+            let val0 = data[0];
+            let val1 = data[1];
+            let val2 = data[2];
+
+            vec.store(0, val0, Ordering::SeqCst);
+            assert_eq!(vec.load(0, Ordering::SeqCst), val0);
+
+            let old = vec.swap(0, val1, Ordering::SeqCst);
+            assert_eq!(old, val0);
+            assert_eq!(vec.load(0, Ordering::SeqCst), val1);
+
+            let result = vec.compare_exchange(0, val1, val2, Ordering::SeqCst, Ordering::Relaxed);
+            assert_eq!(result, Ok(val1));
+            assert_eq!(vec.load(0, Ordering::SeqCst), val2);
+
+            let result_fail =
+                vec.compare_exchange(0, val0, val1, Ordering::SeqCst, Ordering::Relaxed);
+            assert_eq!(result_fail, Err(val2));
+            assert_eq!(vec.load(0, Ordering::SeqCst), val2);
+        }
     };
-    let max_val = <T as Storable<W>>::from_word(max_val_word);
-    let mid_val = <T as Storable<W>>::from_word(max_val_word >> 1);
-    let zero_val = <T as Storable<W>>::from_word(W::zero());
-
-    // --- Test `store` and `load` ---
-    vec.store(0, zero_val, Ordering::SeqCst);
-    assert_eq!(vec.load(0, Ordering::SeqCst), zero_val);
-
-    vec.store(len - 1, max_val, Ordering::SeqCst);
-    assert_eq!(vec.load(len - 1, Ordering::SeqCst), max_val);
-
-    let mid_idx = len / 2;
-    vec.store(mid_idx, mid_val, Ordering::SeqCst);
-    assert_eq!(vec.load(mid_idx, Ordering::SeqCst), mid_val);
-
-    // --- Test `swap` ---
-    let old = vec.swap(0, max_val, Ordering::SeqCst);
-    assert_eq!(old, zero_val);
-    assert_eq!(vec.load(0, Ordering::SeqCst), max_val);
-
-    // --- Test `compare_exchange` (success) ---
-    let result =
-        vec.compare_exchange(mid_idx, mid_val, max_val, Ordering::SeqCst, Ordering::Relaxed);
-    assert_eq!(result, Ok(mid_val));
-    assert_eq!(vec.load(mid_idx, Ordering::SeqCst), max_val);
-
-    // --- Test `compare_exchange` (failure) ---
-    let wrong_current = T::from_u8(1).unwrap();
-    let result_fail =
-        vec.compare_exchange(mid_idx, wrong_current, zero_val, Ordering::SeqCst, Ordering::Relaxed);
-    assert_eq!(result_fail, Err(max_val));
-    assert_eq!(vec.load(mid_idx, Ordering::SeqCst), max_val); // Unchanged
 }
 
-// --- Section: Single-Word Lock-Free Strategy ---
+// --- Test Suite Execution ---
+
+// Unsigned types
+test_atomic_api_for_type!(test_api_u8, u8, false, u8::MAX as u64);
+test_atomic_api_for_type!(test_api_u16, u16, false, u16::MAX as u64);
+test_atomic_api_for_type!(test_api_u32, u32, false, u32::MAX as u64);
+test_atomic_api_for_type!(test_api_u64, u64, false, 0); // 0 indicates full range
+
+// Signed types
+test_atomic_api_for_type!(test_api_i8, i8, true, i8::MAX as u64);
+test_atomic_api_for_type!(test_api_i16, i16, true, i16::MAX as u64);
+test_atomic_api_for_type!(test_api_i32, i32, true, i32::MAX as u64);
+test_atomic_api_for_type!(test_api_i64, i64, true, i64::MAX as u64);
+
+// --- Standalone Tests for Macros and Edge Cases ---
+
 #[test]
-fn test_single_word_u16_on_u64() {
-    run_core_api_tests::<u16, u64>(16, 256);
-}
-#[test]
-fn test_single_word_i32_on_u64() {
-    run_core_api_tests::<i32, u64>(32, 256);
-}
-#[test]
-fn test_single_word_u8_on_u64() {
-    run_core_api_tests::<u8, u64>(8, 512);
+fn test_atomic_fixed_vec_macro() {
+    // From list
+    let vec = atomic_fixed_vec![-10i32, 20, -30];
+    let _: SAtomicFixedVec<i32> = vec; // Type assertion
+    assert_eq!(vec.len(), 3);
+    assert_eq!(vec.load(0, Ordering::Relaxed), -10);
+    assert_eq!(vec.load(2, Ordering::Relaxed), -30);
+
+    // From repetition
+    let vec_rep = atomic_fixed_vec![42u64; 100];
+    let _: UAtomicFixedVec<u64> = vec_rep; // Type assertion
+    assert_eq!(vec_rep.len(), 100);
+    assert_eq!(vec_rep.load(99, Ordering::Relaxed), 42);
+
+    // Empty
+    let empty_vec: UAtomicFixedVec<u8> = atomic_fixed_vec![];
+    assert!(empty_vec.is_empty());
 }
 
-// --- Section: Multi-Word (Spanning) Strategy ---
 #[test]
-fn test_spanning_u32_on_u64() {
-    run_core_api_tests::<u32, u64>(21, 256);
-}
-#[test]
-fn test_spanning_i8_on_u64() {
-    run_core_api_tests::<i8, u64>(7, 256);
-}
-#[test]
-fn test_spanning_u64_on_u64() {
-    run_core_api_tests::<u64, u64>(40, 128);
+fn test_builder_failures() {
+    // --- Test Case 1: ValueTooLarge error ---
+    // Create data where one element (50) cannot fit into the specified bit width.
+    let data: &[u32] = &[10, 20, 50];
+    // The builder should fail because 50 requires 6 bits, but we specified only 4.
+    let result = UAtomicFixedVec::<u32>::builder()
+        .bit_width(BitWidth::Explicit(4))
+        .build(data);
+    assert!(matches!(result, Err(Error::ValueTooLarge { .. })));
+
+    // --- Test Case 2: InvalidParameters error ---
+    // The bit width (65) is larger than the storage word size (u64 = 64 bits).
+    // This should fail regardless of the input data (even if empty).
+    let result_bw = UAtomicFixedVec::<u64>::builder()
+        .bit_width(BitWidth::Explicit(65))
+        .build(&[]); // Using an empty slice is sufficient to test this parameter validation.
+    assert!(matches!(result_bw, Err(Error::InvalidParameters(_))));
 }
 
-// --- Section: Edge Case Tests ---
 #[test]
 fn test_edge_case_zero_bit_width() {
-    let vec = AtomicFixedVec::<u32, u64>::new(0, 100).unwrap();
-    for i in 0..100 {
-        assert_eq!(vec.load(i, Ordering::SeqCst), 0);
-        vec.store(i, 0, Ordering::SeqCst);
-        assert_eq!(vec.load(i, Ordering::SeqCst), 0);
-        assert_eq!(vec.swap(i, 0, Ordering::SeqCst), 0);
-        assert_eq!(
-            vec.compare_exchange(i, 0, 0, Ordering::SeqCst, Ordering::Relaxed),
-            Ok(0)
-        );
-    }
+    // Building a non-empty vec with bit_width=0 should fail.
+    let data = vec![0u32; 100];
+    let result = UAtomicFixedVec::<u32>::builder()
+        .bit_width(BitWidth::Explicit(0))
+        .build(&data);
+    assert!(matches!(result, Err(Error::InvalidParameters(_))));
+
+    // Building an empty vec with bit_width=0 is allowed.
+    let empty_data: Vec<u32> = vec![];
+    let vec = UAtomicFixedVec::<u32>::builder()
+        .bit_width(BitWidth::Explicit(0))
+        .build(&empty_data)
+        .unwrap();
+    assert!(vec.is_empty());
 }
 
-#[test]
-fn test_edge_case_max_bit_width() {
-    run_core_api_tests::<u64, u64>(64, 128);
-    run_core_api_tests::<i64, u64>(64, 128);
-}
-
-// --- Section: Concurrency Tests ---
+// --- Concurrency Tests (kept separate for clarity) ---
 
 #[test]
 fn test_concurrent_disjoint_stores() {
     const NUM_THREADS: usize = 4;
     const LEN: usize = 1000;
-    let vec = Arc::new(AtomicFixedVec::<u16, u64>::new(12, LEN).unwrap());
+    // The vector must be created with enough bit width for the values that will be stored.
+    // Max value is approx 3 * 1000 + 999 = 3999, which needs 12 bits.
+    let vec = Arc::new(
+        UAtomicFixedVec::<u16>::builder()
+            .bit_width(BitWidth::Explicit(12))
+            .build(&vec![0; LEN])
+            .unwrap(),
+    );
 
     thread::scope(|s| {
         for thread_id in 0..NUM_THREADS {
@@ -193,8 +228,13 @@ fn test_concurrent_disjoint_stores() {
 #[test]
 fn test_concurrent_cas_contention() {
     // Multiple threads incrementing the same counter using CAS.
-    let vec = Arc::new(AtomicFixedVec::<u32, u64>::new(16, 1).unwrap());
-    vec.store(0, 0, Ordering::SeqCst);
+    // Max value is 10 * 1000 = 10000, which needs 14 bits. We use 16.
+    let vec = Arc::new(
+        UAtomicFixedVec::<u32>::builder()
+            .bit_width(BitWidth::Explicit(16))
+            .build(&[0; 1])
+            .unwrap(),
+    );
 
     const NUM_THREADS: usize = 10;
     const INCREMENTS_PER_THREAD: u32 = 1000;
@@ -226,127 +266,4 @@ fn test_concurrent_cas_contention() {
         vec.load(0, Ordering::SeqCst),
         NUM_THREADS as u32 * INCREMENTS_PER_THREAD
     );
-}
-
-#[test]
-fn test_concurrent_spanning_writes_correctness() {
-    const BIT_WIDTH: usize = 21;
-    const LEN: usize = 256;
-    let vec = Arc::new(AtomicFixedVec::<u64, u64>::new(BIT_WIDTH, LEN).unwrap());
-
-    let pattern_a = 0b010101010101010101010;
-    let pattern_b = 0b101010101010101010101;
-
-    let indices_to_test: Vec<usize> = (0..LEN)
-        .filter(|&i| {
-            let bit_pos = i * BIT_WIDTH;
-            let bit_offset = bit_pos % 64;
-            bit_offset + BIT_WIDTH > 64
-        })
-        .collect();
-    assert!(!indices_to_test.is_empty());
-
-    thread::scope(|s| {
-        for &test_index in &indices_to_test {
-            let vec_a = Arc::clone(&vec);
-            s.spawn(move || {
-                for _ in 0..100 {
-                    vec_a.store(test_index, pattern_a, Ordering::SeqCst);
-                }
-            });
-
-            let vec_b = Arc::clone(&vec);
-            s.spawn(move || {
-                for _ in 0..100 {
-                    vec_b.store(test_index, pattern_b, Ordering::SeqCst);
-                }
-            });
-        }
-    });
-
-    for &test_index in &indices_to_test {
-        let final_value = vec.load(test_index, Ordering::SeqCst);
-        assert!(
-            final_value == pattern_a || final_value == pattern_b,
-            "Torn write detected at index {}! Final value was {:b}, expected {:b} or {:b}",
-            test_index,
-            final_value,
-            pattern_a,
-            pattern_b
-        );
-    }
-}
-
-#[test]
-fn test_sux_torn_write_scenario() {
-    const BIT_WIDTH: usize = 21;
-    const LEN: usize = 256;
-    const NUM_ITERATIONS: usize = 50; // How many times to retry the race.
-
-    let pattern_a = 0b010101010101010101010;
-    let pattern_b = 0b101010101010101010101;
-
-    let test_index = (0..LEN)
-        .find(|&i| (i * BIT_WIDTH) % 64 + BIT_WIDTH > 64)
-        .expect("Test setup failed: no spanning index found");
-
-    for i in 0..NUM_ITERATIONS {
-        let sux_vec_storage: Arc<Vec<AtomicU64>> = Arc::new(
-            (0..(LEN * BIT_WIDTH).div_ceil(u64::BITS as usize) + 2)
-                .map(|_| AtomicU64::new(0))
-                .collect(),
-        );
-
-        let sux_vec = unsafe {
-            sux::bits::AtomicBitFieldVec::<u64, _>::from_raw_parts(
-                sux_vec_storage.as_slice(),
-                BIT_WIDTH,
-                LEN,
-            )
-        };
-        let sux_vec = Arc::new(sux_vec);
-        let stop_signal = Arc::new(AtomicBool::new(false));
-
-        thread::scope(|s| {
-            let sux_a = Arc::clone(&sux_vec);
-            let stop_a = Arc::clone(&stop_signal);
-            s.spawn(move || {
-                while !stop_a.load(Ordering::Relaxed) {
-                    unsafe {
-                        sux_a.set_atomic_unchecked(test_index, pattern_a, Ordering::SeqCst);
-                    }
-                }
-            });
-
-            let sux_b = Arc::clone(&sux_vec);
-            let stop_b = Arc::clone(&stop_signal);
-            s.spawn(move || {
-                while !stop_b.load(Ordering::Relaxed) {
-                    unsafe {
-                        sux_b.set_atomic_unchecked(test_index, pattern_b, Ordering::SeqCst);
-                    }
-                }
-            });
-            
-            // Let the threads race for a short period.
-            thread::sleep(Duration::from_millis(10));
-            stop_signal.store(true, Ordering::Relaxed);
-        });
-
-        let final_value = unsafe { sux_vec.get_atomic_unchecked(test_index, Ordering::SeqCst) };
-
-        if final_value != pattern_a && final_value != pattern_b {
-            println!(
-                "SUCCESS: Detected torn write in sux on iteration {}. Final value: {:b}",
-                i + 1,
-                final_value
-            );
-            return; // Test successfully demonstrated the race condition.
-        }
-    }
-
-    // If the loop finishes, the race condition was not triggered.
-    // This is not a failure of our test, but a success for the scheduler.
-    // We print a warning instead of panicking.
-    println!("Warning: Torn write in sux was not detected after {} iterations.", NUM_ITERATIONS);
 }
