@@ -15,9 +15,11 @@ use compressed_intvec::fixed::atomic::AtomicFixedVec;
 use compressed_intvec::fixed::traits::{Storable, Word};
 use num_traits::{Bounded, FromPrimitive, One, ToPrimitive, Zero};
 use std::fmt::Debug;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
+use sux::prelude::AtomicBitFieldSlice;
 
 // --- Test: Construction and Basic Properties ---
 
@@ -232,7 +234,6 @@ fn test_concurrent_spanning_writes_correctness() {
     const LEN: usize = 256;
     let vec = Arc::new(AtomicFixedVec::<u64, u64>::new(BIT_WIDTH, LEN).unwrap());
 
-    // Two distinct, non-overlapping patterns.
     let pattern_a = 0b010101010101010101010;
     let pattern_b = 0b101010101010101010101;
 
@@ -240,14 +241,10 @@ fn test_concurrent_spanning_writes_correctness() {
         .filter(|&i| {
             let bit_pos = i * BIT_WIDTH;
             let bit_offset = bit_pos % 64;
-            // Filter for indices that are guaranteed to span a word boundary.
             bit_offset + BIT_WIDTH > 64
         })
         .collect();
-    assert!(
-        !indices_to_test.is_empty(),
-        "Test setup failed: no spanning indices found"
-    );
+    assert!(!indices_to_test.is_empty());
 
     thread::scope(|s| {
         for &test_index in &indices_to_test {
@@ -267,8 +264,6 @@ fn test_concurrent_spanning_writes_correctness() {
         }
     });
 
-    // After all writes, every tested value must be either pattern_a or pattern_b.
-    // It must NEVER be a corrupt mix of the two.
     for &test_index in &indices_to_test {
         let final_value = vec.load(test_index, Ordering::SeqCst);
         assert!(
@@ -280,4 +275,78 @@ fn test_concurrent_spanning_writes_correctness() {
             pattern_b
         );
     }
+}
+
+#[test]
+fn test_sux_torn_write_scenario() {
+    const BIT_WIDTH: usize = 21;
+    const LEN: usize = 256;
+    const NUM_ITERATIONS: usize = 50; // How many times to retry the race.
+
+    let pattern_a = 0b010101010101010101010;
+    let pattern_b = 0b101010101010101010101;
+
+    let test_index = (0..LEN)
+        .find(|&i| (i * BIT_WIDTH) % 64 + BIT_WIDTH > 64)
+        .expect("Test setup failed: no spanning index found");
+
+    for i in 0..NUM_ITERATIONS {
+        let sux_vec_storage: Arc<Vec<AtomicU64>> = Arc::new(
+            (0..(LEN * BIT_WIDTH).div_ceil(u64::BITS as usize) + 2)
+                .map(|_| AtomicU64::new(0))
+                .collect(),
+        );
+
+        let sux_vec = unsafe {
+            sux::bits::AtomicBitFieldVec::<u64, _>::from_raw_parts(
+                sux_vec_storage.as_slice(),
+                BIT_WIDTH,
+                LEN,
+            )
+        };
+        let sux_vec = Arc::new(sux_vec);
+        let stop_signal = Arc::new(AtomicBool::new(false));
+
+        thread::scope(|s| {
+            let sux_a = Arc::clone(&sux_vec);
+            let stop_a = Arc::clone(&stop_signal);
+            s.spawn(move || {
+                while !stop_a.load(Ordering::Relaxed) {
+                    unsafe {
+                        sux_a.set_atomic_unchecked(test_index, pattern_a, Ordering::SeqCst);
+                    }
+                }
+            });
+
+            let sux_b = Arc::clone(&sux_vec);
+            let stop_b = Arc::clone(&stop_signal);
+            s.spawn(move || {
+                while !stop_b.load(Ordering::Relaxed) {
+                    unsafe {
+                        sux_b.set_atomic_unchecked(test_index, pattern_b, Ordering::SeqCst);
+                    }
+                }
+            });
+            
+            // Let the threads race for a short period.
+            thread::sleep(Duration::from_millis(10));
+            stop_signal.store(true, Ordering::Relaxed);
+        });
+
+        let final_value = unsafe { sux_vec.get_atomic_unchecked(test_index, Ordering::SeqCst) };
+
+        if final_value != pattern_a && final_value != pattern_b {
+            println!(
+                "SUCCESS: Detected torn write in sux on iteration {}. Final value: {:b}",
+                i + 1,
+                final_value
+            );
+            return; // Test successfully demonstrated the race condition.
+        }
+    }
+
+    // If the loop finishes, the race condition was not triggered.
+    // This is not a failure of our test, but a success for the scheduler.
+    // We print a warning instead of panicking.
+    println!("Warning: Torn write in sux was not detected after {} iterations.", NUM_ITERATIONS);
 }
