@@ -57,6 +57,11 @@ name = "bench_mutable_ops"
 harness = false
 path = "benches/fixed/bench_mutable_ops.rs"
 
+[[bench]]
+name = "bench_atomic"
+harness = false
+path = "benches/fixed/bench_atomic.rs"
+
 [features]
 default = ["parallel", "atomic"]
 atomic = ["dep:parking_lot"]
