@@ -143,7 +143,7 @@ where
     /// This allows for syntax like `*slice.at_mut(i).unwrap() = new_value;`.
     ///
     /// Returns `None` if the index is out of bounds.
-    pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<T, W, E, B>> {
+    pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<'_, T, W, E, B>> {
         if index >= self.len() {
             return None;
         }

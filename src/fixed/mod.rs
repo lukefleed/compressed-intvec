@@ -542,7 +542,7 @@ where
     /// assert_eq!(iter.next(), Some(30));
     /// assert_eq!(iter.next(), None);
     /// ```
-    pub fn iter(&self) -> iter::FixedVecIter<T, W, E, B> {
+    pub fn iter(&self) -> iter::FixedVecIter<'_, T, W, E, B> {
         iter::FixedVecIter::new(self)
     }
 
@@ -583,7 +583,7 @@ where
     /// # Panics
     ///
     /// Panics if `chunk_size` is 0.
-    pub fn chunks(&self, chunk_size: usize) -> iter::Chunks<T, W, E, B> {
+    pub fn chunks(&self, chunk_size: usize) -> iter::Chunks<'_, T, W, E, B> {
         iter::Chunks::new(self, chunk_size)
     }
 
@@ -1357,7 +1357,7 @@ where
     /// vector when it is dropped.
     ///
     /// Returns `None` if the index is out of bounds.
-    pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<T, W, E, B>> {
+    pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<'_, T, W, E, B>> {
         if index >= self.len {
             return None;
         }
@@ -1522,7 +1522,7 @@ where
     /// # Panics
     ///
     /// Panics if `chunk_size` is 0.
-    pub fn chunks_mut(&mut self, chunk_size: usize) -> iter_mut::ChunksMut<T, W, E, B> {
+    pub fn chunks_mut(&mut self, chunk_size: usize) -> iter_mut::ChunksMut<'_, T, W, E, B> {
         iter_mut::ChunksMut::new(self, chunk_size)
     }
 

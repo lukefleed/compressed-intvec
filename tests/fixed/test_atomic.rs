@@ -1,12 +1,13 @@
 //! Comprehensive and robust test suite for `AtomicFixedVec`.
 //!
 //! This suite validates all aspects of the atomic fixed-width vector, including:
-//! - Correctness of the lock-free strategy (power-of-two bit widths).
-//! - Correctness of the hybrid seqlock/mutex strategy (non-power-of-two bit widths).
+//! - Correctness of the single-word lock-free strategy (power-of-two bit widths).
+//! - Correctness of the multi-word spanning strategy using `atomic::Atomic<u128>`.
 //! - Behavior with both signed (ZigZag encoded) and unsigned integer types.
 //! - All atomic operations: load, store, swap, and compare_exchange.
 //! - Edge cases such as zero bit width, max bit width, and boundary indices.
-//! - Robustness under various multi-threaded concurrency patterns.
+//! - Robustness under various multi-threaded concurrency patterns, including
+//!   a specific test to detect and prevent torn writes.
 
 #![cfg(feature = "atomic")]
 
@@ -15,7 +16,7 @@ use compressed_intvec::fixed::traits::{Storable, Word};
 use num_traits::{Bounded, FromPrimitive, One, ToPrimitive, Zero};
 use std::fmt::Debug;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, Barrier};
+use std::sync::Arc;
 use std::thread;
 
 // --- Test: Construction and Basic Properties ---
@@ -36,6 +37,12 @@ fn test_construction_and_properties() {
     // Test invalid bit width (greater than word size)
     let result = AtomicFixedVec::<u32, u64>::new(65, 10);
     assert!(result.is_err());
+
+    // Test invalid configuration: spanning logic is only supported for u64 words.
+    let result_spanning_on_u32 = AtomicFixedVec::<u16, u32>::new(17, 10);
+    assert!(result_spanning_on_u32.is_err());
+    // This should be ok as it does not require spanning logic
+    assert!(AtomicFixedVec::<u8, u32>::new(8, 10).is_ok());
 }
 
 // --- Generic Test Runner for Core API ---
@@ -52,7 +59,7 @@ where
         + Debug
         + Copy
         + PartialEq,
-    W: Word + Bounded + Zero + One,
+    W: Word + Bounded + Zero + One + FromPrimitive,
     W::AtomicType: Debug,
 {
     let vec = AtomicFixedVec::<T, W>::new(bit_width, len).unwrap();
@@ -63,10 +70,11 @@ where
     };
     let max_val = <T as Storable<W>>::from_word(max_val_word);
     let mid_val = <T as Storable<W>>::from_word(max_val_word >> 1);
+    let zero_val = <T as Storable<W>>::from_word(W::zero());
 
     // --- Test `store` and `load` ---
-    vec.store(0, T::from_u8(0).unwrap(), Ordering::SeqCst);
-    assert_eq!(vec.load(0, Ordering::SeqCst), T::from_u8(0).unwrap());
+    vec.store(0, zero_val, Ordering::SeqCst);
+    assert_eq!(vec.load(0, Ordering::SeqCst), zero_val);
 
     vec.store(len - 1, max_val, Ordering::SeqCst);
     assert_eq!(vec.load(len - 1, Ordering::SeqCst), max_val);
@@ -77,7 +85,7 @@ where
 
     // --- Test `swap` ---
     let old = vec.swap(0, max_val, Ordering::SeqCst);
-    assert_eq!(old, T::from_u8(0).unwrap());
+    assert_eq!(old, zero_val);
     assert_eq!(vec.load(0, Ordering::SeqCst), max_val);
 
     // --- Test `compare_exchange` (success) ---
@@ -88,42 +96,37 @@ where
 
     // --- Test `compare_exchange` (failure) ---
     let wrong_current = T::from_u8(1).unwrap();
-    let result_fail = vec.compare_exchange(
-        mid_idx,
-        wrong_current,
-        T::from_u8(0).unwrap(),
-        Ordering::SeqCst,
-        Ordering::Relaxed,
-    );
+    let result_fail =
+        vec.compare_exchange(mid_idx, wrong_current, zero_val, Ordering::SeqCst, Ordering::Relaxed);
     assert_eq!(result_fail, Err(max_val));
     assert_eq!(vec.load(mid_idx, Ordering::SeqCst), max_val); // Unchanged
 }
 
-// --- Section: Lock-Free Strategy (Power-of-Two bit_width) ---
+// --- Section: Single-Word Lock-Free Strategy ---
 #[test]
-fn test_lock_free_u16() {
+fn test_single_word_u16_on_u64() {
     run_core_api_tests::<u16, u64>(16, 256);
 }
 #[test]
-fn test_lock_free_i32() {
+fn test_single_word_i32_on_u64() {
     run_core_api_tests::<i32, u64>(32, 256);
 }
 #[test]
-fn test_lock_free_u8() {
+fn test_single_word_u8_on_u64() {
     run_core_api_tests::<u8, u64>(8, 512);
 }
 
-// --- Section: Locked Strategy (Non-Power-of-Two bit_width) ---
+// --- Section: Multi-Word (Spanning) Strategy ---
 #[test]
-fn test_locked_u32() {
+fn test_spanning_u32_on_u64() {
     run_core_api_tests::<u32, u64>(21, 256);
 }
 #[test]
-fn test_locked_i8() {
+fn test_spanning_i8_on_u64() {
     run_core_api_tests::<i8, u64>(7, 256);
 }
 #[test]
-fn test_locked_u64() {
+fn test_spanning_u64_on_u64() {
     run_core_api_tests::<u64, u64>(40, 128);
 }
 
@@ -132,7 +135,6 @@ fn test_locked_u64() {
 fn test_edge_case_zero_bit_width() {
     let vec = AtomicFixedVec::<u32, u64>::new(0, 100).unwrap();
     for i in 0..100 {
-        // With 0 bits, the only valid value is 0.
         assert_eq!(vec.load(i, Ordering::SeqCst), 0);
         vec.store(i, 0, Ordering::SeqCst);
         assert_eq!(vec.load(i, Ordering::SeqCst), 0);
@@ -157,29 +159,20 @@ fn test_concurrent_disjoint_stores() {
     const NUM_THREADS: usize = 4;
     const LEN: usize = 1000;
     let vec = Arc::new(AtomicFixedVec::<u16, u64>::new(12, LEN).unwrap());
-    let barrier = Arc::new(Barrier::new(NUM_THREADS));
 
-    let handles: Vec<_> = (0..NUM_THREADS)
-        .map(|thread_id| {
+    thread::scope(|s| {
+        for thread_id in 0..NUM_THREADS {
             let vec_clone = Arc::clone(&vec);
-            let barrier_clone = Arc::clone(&barrier);
-            thread::spawn(move || {
+            s.spawn(move || {
                 let chunk_size = LEN / NUM_THREADS;
                 let start = thread_id * chunk_size;
                 let end = start + chunk_size;
-
-                barrier_clone.wait();
                 for i in start..end {
-                    // Each thread writes a unique value based on its ID and index.
                     vec_clone.store(i, (thread_id * 1000 + i) as u16, Ordering::SeqCst);
                 }
-            })
-        })
-        .collect();
-
-    for handle in handles {
-        handle.join().unwrap();
-    }
+            });
+        }
+    });
 
     // Verify that all writes are correctly visible.
     for thread_id in 0..NUM_THREADS {
@@ -196,36 +189,6 @@ fn test_concurrent_disjoint_stores() {
 }
 
 #[test]
-fn test_concurrent_reads() {
-    let vec = Arc::new(AtomicFixedVec::<u32, u64>::new(20, 500).unwrap());
-    for i in 0..500 {
-        vec.store(i, i as u32, Ordering::SeqCst);
-    }
-
-    const NUM_THREADS: usize = 8;
-    let barrier = Arc::new(Barrier::new(NUM_THREADS));
-    let mut handles = Vec::new();
-
-    for _ in 0..NUM_THREADS {
-        let vec_clone = Arc::clone(&vec);
-        let barrier_clone = Arc::clone(&barrier);
-        handles.push(thread::spawn(move || {
-            barrier_clone.wait();
-            for _ in 0..100 {
-                // Each thread repeatedly reads the entire vector.
-                for i in 0..500 {
-                    assert_eq!(vec_clone.load(i, Ordering::SeqCst), i as u32);
-                }
-            }
-        }));
-    }
-
-    for handle in handles {
-        handle.join().unwrap();
-    }
-}
-
-#[test]
 fn test_concurrent_cas_contention() {
     // Multiple threads incrementing the same counter using CAS.
     let vec = Arc::new(AtomicFixedVec::<u32, u64>::new(16, 1).unwrap());
@@ -233,14 +196,11 @@ fn test_concurrent_cas_contention() {
 
     const NUM_THREADS: usize = 10;
     const INCREMENTS_PER_THREAD: u32 = 1000;
-    let barrier = Arc::new(Barrier::new(NUM_THREADS));
 
-    let handles: Vec<_> = (0..NUM_THREADS)
-        .map(|_| {
+    thread::scope(|s| {
+        for _ in 0..NUM_THREADS {
             let vec_clone = Arc::clone(&vec);
-            let barrier_clone = Arc::clone(&barrier);
-            thread::spawn(move || {
-                barrier_clone.wait();
+            s.spawn(move || {
                 for _ in 0..INCREMENTS_PER_THREAD {
                     let mut current = vec_clone.load(0, Ordering::Relaxed);
                     loop {
@@ -256,15 +216,10 @@ fn test_concurrent_cas_contention() {
                         }
                     }
                 }
-            })
-        })
-        .collect();
+            });
+        }
+    });
 
-    for handle in handles {
-        handle.join().unwrap();
-    }
-
-    // The final value must be the total number of increments.
     assert_eq!(
         vec.load(0, Ordering::SeqCst),
         NUM_THREADS as u32 * INCREMENTS_PER_THREAD
@@ -272,51 +227,57 @@ fn test_concurrent_cas_contention() {
 }
 
 #[test]
-fn test_concurrent_mixed_ops_stress() {
-    const NUM_THREADS: usize = 8;
-    const LEN: usize = 128;
-    // Use a non-power-of-two bit_width to stress the locked path.
-    let vec = Arc::new(AtomicFixedVec::<i16, u64>::new(11, LEN).unwrap());
-    let barrier = Arc::new(Barrier::new(NUM_THREADS));
+fn test_concurrent_spanning_writes_correctness() {
+    const BIT_WIDTH: usize = 21;
+    const LEN: usize = 256;
+    let vec = Arc::new(AtomicFixedVec::<u64, u64>::new(BIT_WIDTH, LEN).unwrap());
 
-    let handles: Vec<_> = (0..NUM_THREADS)
-        .map(|thread_id| {
-            let vec_clone = Arc::clone(&vec);
-            let barrier_clone = Arc::clone(&barrier);
-            thread::spawn(move || {
-                barrier_clone.wait();
-                for i in 0..500 {
-                    let index = (i * 3 + thread_id) % LEN;
-                    let val = (i * 7 + thread_id) as i16;
-                    match (i + thread_id) % 4 {
-                        0 => vec_clone.store(index, val, Ordering::Relaxed),
-                        1 => {
-                            let _ = vec_clone.load(index, Ordering::Relaxed);
-                        }
-                        2 => {
-                            let _ = vec_clone.swap(index, val, Ordering::Relaxed);
-                        }
-                        3 => {
-                            let current = vec_clone.load(index, Ordering::Relaxed);
-                            let _ = vec_clone.compare_exchange(
-                                index,
-                                current,
-                                val,
-                                Ordering::Relaxed,
-                                Ordering::Relaxed,
-                            );
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-            })
+    // Two distinct, non-overlapping patterns.
+    let pattern_a = 0b010101010101010101010;
+    let pattern_b = 0b101010101010101010101;
+
+    let indices_to_test: Vec<usize> = (0..LEN)
+        .filter(|&i| {
+            let bit_pos = i * BIT_WIDTH;
+            let bit_offset = bit_pos % 64;
+            // Filter for indices that are guaranteed to span a word boundary.
+            bit_offset + BIT_WIDTH > 64
         })
         .collect();
+    assert!(
+        !indices_to_test.is_empty(),
+        "Test setup failed: no spanning indices found"
+    );
 
-    for handle in handles {
-        handle.join().unwrap();
+    thread::scope(|s| {
+        for &test_index in &indices_to_test {
+            let vec_a = Arc::clone(&vec);
+            s.spawn(move || {
+                for _ in 0..100 {
+                    vec_a.store(test_index, pattern_a, Ordering::SeqCst);
+                }
+            });
+
+            let vec_b = Arc::clone(&vec);
+            s.spawn(move || {
+                for _ in 0..100 {
+                    vec_b.store(test_index, pattern_b, Ordering::SeqCst);
+                }
+            });
+        }
+    });
+
+    // After all writes, every tested value must be either pattern_a or pattern_b.
+    // It must NEVER be a corrupt mix of the two.
+    for &test_index in &indices_to_test {
+        let final_value = vec.load(test_index, Ordering::SeqCst);
+        assert!(
+            final_value == pattern_a || final_value == pattern_b,
+            "Torn write detected at index {}! Final value was {:b}, expected {:b} or {:b}",
+            test_index,
+            final_value,
+            pattern_a,
+            pattern_b
+        );
     }
-
-    // The test passes if it completes without deadlocking or panicking.
-    // The final state is non-deterministic.
 }

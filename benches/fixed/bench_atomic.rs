@@ -42,7 +42,7 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
             // Baseline: std::sync::atomic
             let std_vec: Vec<AtomicU64> = (0..VECTOR_SIZE).map(|_| AtomicU64::new(0)).collect();
             // Our AtomicFixedVec
-            let our_vec = AtomicFixedVec::<u64, u64>::new(bit_width, VECTOR_SIZE).unwrap();
+            let vec = AtomicFixedVec::<u64, u64>::new(bit_width, VECTOR_SIZE).unwrap();
             // sux::bits::AtomicBitFieldVec
             let sux_vec_storage: Vec<AtomicU64> =
                 (0..(VECTOR_SIZE * bit_width).div_ceil(u64::BITS.try_into().unwrap()) + 2)
@@ -64,10 +64,10 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
                     }
                 })
             });
-            group.bench_function("Our_AtomicFixedVec/load", |b| {
+            group.bench_function("AtomicFixedVec/load", |b| {
                 b.iter(|| {
                     for &idx in black_box(&access_indices) {
-                        black_box(our_vec.load(idx, Ordering::SeqCst));
+                        black_box(vec.load(idx, Ordering::SeqCst));
                     }
                 })
             });
@@ -80,10 +80,10 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
             });
 
             // Benchmark Store
-            group.bench_function("Our_AtomicFixedVec/store", |b| {
+            group.bench_function("AtomicFixedVec/store", |b| {
                 b.iter(|| {
                     for i in 0..NUM_ACCESSES {
-                        our_vec.store(access_indices[i], access_values[i] & max_val, Ordering::SeqCst);
+                        vec.store(access_indices[i], access_values[i] & max_val, Ordering::SeqCst);
                     }
                 })
             });
@@ -102,12 +102,12 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
             });
 
             // Benchmark Compare-Exchange
-            group.bench_function("Our_AtomicFixedVec/cas", |b| {
+            group.bench_function("AtomicFixedVec/cas", |b| {
                 b.iter(|| {
                     for i in 0..NUM_ACCESSES {
                         let idx = access_indices[i];
-                        let current = our_vec.load(idx, Ordering::Relaxed);
-                        let _ = our_vec.compare_exchange(
+                        let current = vec.load(idx, Ordering::Relaxed);
+                        let _ = vec.compare_exchange(
                             idx,
                             current,
                             access_values[i] & max_val,
@@ -127,7 +127,7 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
             let values_chunks: Vec<_> = access_values.chunks(NUM_ACCESSES / NUM_THREADS).collect();
 
             // Our AtomicFixedVec
-            let our_vec = Arc::new(AtomicFixedVec::<u64, u64>::new(bit_width, VECTOR_SIZE).unwrap());
+            let vec = Arc::new(AtomicFixedVec::<u64, u64>::new(bit_width, VECTOR_SIZE).unwrap());
             // sux::bits::AtomicBitFieldVec
             let sux_vec_storage: Arc<Vec<AtomicU64>> = Arc::new(
                 (0..(VECTOR_SIZE * bit_width).div_ceil(u64::BITS.try_into().unwrap()) + 2)
@@ -136,12 +136,12 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
             );
 
             // Benchmark Load (Multi-threaded)
-            group.bench_function("Our_AtomicFixedVec/load", |b| {
+            group.bench_function("AtomicFixedVec/load", |b| {
                 b.iter(|| {
                     let barrier = Arc::new(Barrier::new(NUM_THREADS));
                     thread::scope(|s| {
                         for chunk in &indices_chunks {
-                            let vec_clone = Arc::clone(&our_vec);
+                            let vec_clone = Arc::clone(&vec);
                             let barrier_clone = Arc::clone(&barrier);
                             s.spawn(move || {
                                 barrier_clone.wait();
@@ -182,12 +182,12 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
             });
             
             // Benchmark Store (Multi-threaded)
-            group.bench_function("Our_AtomicFixedVec/store", |b| {
+            group.bench_function("AtomicFixedVec/store", |b| {
                 b.iter(|| {
                     let barrier = Arc::new(Barrier::new(NUM_THREADS));
                     thread::scope(|s| {
                         for (idx_chunk, val_chunk) in indices_chunks.iter().zip(&values_chunks) {
-                            let vec_clone = Arc::clone(&our_vec);
+                            let vec_clone = Arc::clone(&vec);
                             let barrier_clone = Arc::clone(&barrier);
                             s.spawn(move || {
                                 barrier_clone.wait();
