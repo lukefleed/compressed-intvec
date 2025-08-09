@@ -175,17 +175,11 @@ where
     _phantom: PhantomData<T>,
 }
 
-// Public API implementation
+// General API, not dependent on `ToPrimitive`.
 impl<T> AtomicFixedVec<T>
 where
-    T: Storable<u64> + Copy + ToPrimitive,
+    T: Storable<u64>,
 {
-    /// Creates a builder for constructing an `AtomicFixedVec` from a slice.
-    #[inline(always)]
-    pub fn builder() -> builder::AtomicFixedVecBuilder<T> {
-        builder::AtomicFixedVecBuilder::new()
-    }
-
     /// Returns the number of elements in the vector.
     #[inline(always)]
     pub fn len(&self) -> usize {
@@ -208,6 +202,18 @@ where
     #[inline(always)]
     pub fn as_slice(&self) -> &[AtomicU64] {
         &self.storage
+    }
+}
+
+// API that requires `ToPrimitive` for element conversion.
+impl<T> AtomicFixedVec<T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    /// Creates a builder for constructing an `AtomicFixedVec` from a slice.
+    #[inline(always)]
+    pub fn builder() -> builder::AtomicFixedVecBuilder<T> {
+        builder::AtomicFixedVecBuilder::new()
     }
 
     /// Atomically loads the value at `index`.
@@ -819,3 +825,29 @@ where
         self.iter()
     }
 }
+
+// In src/fixed/atomic/mod.rs
+
+// --- PartialEq Implementation ---
+
+impl<T> PartialEq for AtomicFixedVec<T>
+where
+    T: Storable<u64> + PartialEq + Copy + ToPrimitive,
+{
+    /// Checks for equality between two `AtomicFixedVec` instances.
+    ///
+    /// This comparison is performed by iterating over both vectors and comparing
+    /// their elements one by one. The reads are done atomically but the overall
+    /// comparison is not a single atomic operation.
+    fn eq(&self, other: &Self) -> bool {
+        if self.len() != other.len() || self.bit_width() != other.bit_width() {
+            return false;
+        }
+        // Use SeqCst for a strong guarantee in tests.
+        self.iter()
+            .zip(other.iter())
+            .all(|(a, b)| a == b)
+    }
+}
+
+impl<T> Eq for AtomicFixedVec<T> where T: Storable<u64> + Eq + Copy + ToPrimitive {}
