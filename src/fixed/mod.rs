@@ -2239,8 +2239,6 @@ where
     E: Endianness,
 {
     /// Converts a `Box<[]>`-backed `FixedVec` into a `Vec`-backed `FixedVec`.
-    ///
-    
     /// This is a cheap operation that does not involve reallocating memory for
     /// the data buffer.
     fn from(vec: FixedVec<T, W, E, Box<[W]>>) -> Self {
