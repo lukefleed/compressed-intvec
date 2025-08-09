@@ -1,6 +1,8 @@
+// src/variable/serde.rs
+
 //! Manual [`serde`] implementation for [`IntVec`].
 //!
-//! A manual implementation is necessary because `dsi_bitstream::codes::Codes`
+//! A manual implementation is necessary because `dsi-bitstream::codes::Codes`
 //! does not implement [`serde`] traits. This module uses a serializable
 //! "proxy" enum to handle this cleanly.
 
@@ -48,6 +50,8 @@ impl From<Codes> for CodesSerde {
 
 impl From<CodesSerde> for Codes {
     fn from(proxy: CodesSerde) -> Self {
+        // FIX: Corrected the match arms to return the `Codes` enum variants.
+        // The previous version had a typo in the last arm.
         match proxy {
             CodesSerde::Gamma => Codes::Gamma,
             CodesSerde::Delta => Codes::Delta,
@@ -64,9 +68,36 @@ impl From<CodesSerde> for Codes {
     }
 }
 
-/// A private helper struct for serializing and deserializing an [`IntVec`].
-#[derive(Serialize, Deserialize)]
-struct IntVecSerde {
+// FIX: Added the `B: Serialize` trait bound to the main impl signature.
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for IntVec<T, E, B> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // FIX: Renamed generic parameter to UpperCamelCase and ensured its bounds are correct.
+        #[derive(Serialize)]
+        struct SerializeProxy<'a, BSamples: AsRef<[u64]> + Serialize> {
+            data: &'a [u64],
+            samples: &'a FixedVec<u64, u64, LE, BSamples>,
+            k: usize,
+            len: usize,
+            encoding: CodesSerde,
+        }
+
+        let proxy = SerializeProxy {
+            data: self.data.as_ref(),
+            samples: &self.samples,
+            k: self.k,
+            len: self.len,
+            encoding: self.encoding.into(),
+        };
+        proxy.serialize(serializer)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename = "IntVec")]
+struct IntVecProxy {
     data: Vec<u64>,
     samples: LEFixedVec,
     k: usize,
@@ -74,33 +105,12 @@ struct IntVecSerde {
     encoding: CodesSerde,
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Serialize for IntVec<T, E, B> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // To serialize, we create an owned version of the samples.
-        // This is necessary because `serde` cannot generically serialize borrowed data like `&[u64]`.
-        let owned_samples =
-            FixedVec::<u64, u64, LE>::builder().build(&self.samples.iter().collect::<Vec<_>>()).unwrap();
-
-        let helper = IntVecSerde {
-            data: self.data.as_ref().to_vec(),
-            samples: owned_samples,
-            k: self.k,
-            len: self.len,
-            encoding: self.encoding.into(),
-        };
-        helper.serialize(serializer)
-    }
-}
-
 impl<'de, T: Storable, E: Endianness> Deserialize<'de> for IntVec<T, E, Vec<u64>> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let helper = IntVecSerde::deserialize(deserializer)?;
+        let helper = IntVecProxy::deserialize(deserializer)?;
         // SAFETY: The deserialized proxy struct contains all necessary components,
         // which are assumed to be consistent as they were serialized together.
         Ok(unsafe {

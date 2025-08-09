@@ -1,3 +1,5 @@
+// tests/variable/test_serde.rs
+
 //! Integration tests for Serde functionality.
 
 #[cfg(all(test, feature = "serde"))]
@@ -6,13 +8,14 @@ mod test_serde {
     use compressed_intvec::prelude::*;
     use dsi_bitstream::prelude::{BE, LE};
 
-    /// A helper macro to generate round-trip serialization tests for `IntVec`.
+    /// A helper macro to generate round-trip serialization tests for `IntVec<u64, E>`.
     macro_rules! test_intvec_serde_roundtrip {
         ($test_name:ident, $endianness:ty, $input:expr, $k:expr, $codec_spec:expr) => {
             #[test]
             fn $test_name() {
                 let input_data = &$input;
-                let original_intvec = IntVec::<$endianness>::builder(input_data)
+                // FIX: Use the new generic signature IntVec<T, E> by specifying u64.
+                let original_intvec = IntVec::<u64, $endianness>::builder(input_data)
                     .k($k)
                     .codec($codec_spec)
                     .build()
@@ -20,7 +23,8 @@ mod test_serde {
 
                 // 1. Test with bincode (binary format)
                 let encoded_bincode = bincode::serialize(&original_intvec).unwrap();
-                let decoded_bincode: IntVec<$endianness> =
+                // FIX: Specify the full generic type for deserialization.
+                let decoded_bincode: IntVec<u64, $endianness> =
                     bincode::deserialize(&encoded_bincode).unwrap();
 
                 assert_eq!(
@@ -36,7 +40,7 @@ mod test_serde {
 
                 // 2. Test with serde_json (text format)
                 let encoded_json = serde_json::to_string(&original_intvec).unwrap();
-                let decoded_json: IntVec<$endianness> =
+                let decoded_json: IntVec<u64, $endianness> =
                     serde_json::from_str(&encoded_json).unwrap();
 
                 assert_eq!(
@@ -53,13 +57,14 @@ mod test_serde {
         };
     }
 
-    /// A helper macro to generate round-trip serialization tests for `SIntVec`.
+    /// A helper macro to generate round-trip serialization tests for `IntVec<i64, E>`.
     macro_rules! test_sintvec_serde_roundtrip {
         ($test_name:ident, $endianness:ty, $input:expr, $k:expr, $codec_spec:expr) => {
             #[test]
             fn $test_name() {
                 let input_data = &$input;
-                let original_sintvec = SIntVec::<$endianness>::builder(input_data)
+                // FIX: Use the generic IntVec<i64, E> instead of the old SIntVec<E>.
+                let original_sintvec = IntVec::<i64, $endianness>::builder(input_data)
                     .k($k)
                     .codec($codec_spec)
                     .build()
@@ -67,7 +72,7 @@ mod test_serde {
 
                 // 1. Test with bincode
                 let encoded_bincode = bincode::serialize(&original_sintvec).unwrap();
-                let decoded_bincode: SIntVec<$endianness> =
+                let decoded_bincode: IntVec<i64, $endianness> =
                     bincode::deserialize(&encoded_bincode).unwrap();
 
                 assert_eq!(
@@ -83,7 +88,7 @@ mod test_serde {
 
                 // 2. Test with serde_json
                 let encoded_json = serde_json::to_string(&original_sintvec).unwrap();
-                let decoded_json: SIntVec<$endianness> =
+                let decoded_json: IntVec<i64, $endianness> =
                     serde_json::from_str(&encoded_json).unwrap();
 
                 assert_eq!(
@@ -164,7 +169,8 @@ mod test_serde {
         LE,
         Vec::<i64>::new(),
         16,
-        VariableCodecSpec::Gamma // SIntVec requires a specified codec
+        // FIX: Auto codec is now supported for signed integers as well.
+        VariableCodecSpec::Auto
     );
     test_sintvec_serde_roundtrip!(
         test_sintvec_mixed_values_be,

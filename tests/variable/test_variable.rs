@@ -1,3 +1,5 @@
+// tests/variable/test_variable.rs
+
 //! # Comprehensive integration tests for the generic `IntVec`.
 //!
 //! This test suite is designed to validate the functionality of the new generic
@@ -8,8 +10,12 @@
 use compressed_intvec::variable::codec::VariableCodecSpec;
 use compressed_intvec::variable::traits::Storable;
 use compressed_intvec::variable::{IntVec, IntVecError, LEIntVec, SIntVec, UIntVec};
-use dsi_bitstream::prelude::{BE, LE};
-use dsi_bitstream::traits::Endianness;
+
+// FIX: Import i tipi completi da dsi-bitstream per usarli nei trait bounds
+use dsi_bitstream::prelude::{
+    BitRead, BitSeek, BitWrite, BufBitReader, BufBitWriter, CodesRead, CodesWrite, Endianness,
+    MemWordReader, MemWordWriterVec, BE, LE,
+};
 use num_traits::{AsPrimitive, PrimInt};
 use std::fmt::Debug;
 
@@ -24,9 +30,16 @@ use rayon::iter::ParallelIterator;
 /// Central test function called by the macro for each type combination.
 fn run_test_for_type<T, E>(data: &[T], type_name: &str)
 where
-    T: Storable + Debug + PartialEq + PrimInt + AsPrimitive<u64> + 'static,
+    T: Storable + Debug + PartialEq + PrimInt + AsPrimitive<u64> + Send + Sync + Ord + 'static,
     for<'a> IntVec<T, E, &'a [u64]>: PartialEq<&'a [T]>,
     E: Endianness + Send + Sync,
+    // FIX: Sostituito gli alias privati con i loro tipi pubblici completi.
+    for<'a> BufBitReader<E, MemWordReader<u64, &'a [u64]>>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>
+        + Send,
+    BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>:
+        BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
 {
     // A list of codecs to test for each configuration.
     // We select a representative subset to keep test times reasonable.
@@ -57,7 +70,12 @@ where
 
         // Basic property checks
         assert_eq!(intvec.len(), data.len(), "{}", context("len()"));
-        assert_eq!(intvec.is_empty(), data.is_empty(), "{}", context("is_empty()"));
+        assert_eq!(
+            intvec.is_empty(),
+            data.is_empty(),
+            "{}",
+            context("is_empty()")
+        );
 
         // Test full decompression
         assert_eq!(
@@ -115,26 +133,38 @@ macro_rules! test_all_types {
         #[test]
         fn $test_name() {
             // Unsigned types
-            let u_data_8: Vec<u8> = generate_random_vec(100, 200).into_iter().map(|x| x as u8).collect();
+            let u_data_8: Vec<u8> =
+                generate_random_vec(100, 200).into_iter().map(|x| x as u8).collect();
             run_test_for_type::<u8, $E>(&u_data_8, "u8");
 
-            let u_data_16: Vec<u16> = generate_random_vec(100, 50_000).into_iter().map(|x| x as u16).collect();
+            let u_data_16: Vec<u16> =
+                generate_random_vec(100, 50_000).into_iter().map(|x| x as u16).collect();
             run_test_for_type::<u16, $E>(&u_data_16, "u16");
 
-            let u_data_32: Vec<u32> = generate_random_vec(100, 1_000_000_000).into_iter().map(|x| x as u32).collect();
+            let u_data_32: Vec<u32> = generate_random_vec(100, 1_000_000_000)
+                .into_iter()
+                .map(|x| x as u32)
+                .collect();
             run_test_for_type::<u32, $E>(&u_data_32, "u32");
 
             let u_data_64: Vec<u64> = generate_random_vec(100, 1_000_000_000_000);
             run_test_for_type::<u64, $E>(&u_data_64, "u64");
 
             // Signed types
-            let s_data_8: Vec<i8> = generate_random_signed_vec(100, 100).into_iter().map(|x| x as i8).collect();
+            let s_data_8: Vec<i8> =
+                generate_random_signed_vec(100, 100).into_iter().map(|x| x as i8).collect();
             run_test_for_type::<i8, $E>(&s_data_8, "i8");
 
-            let s_data_16: Vec<i16> = generate_random_signed_vec(100, 30_000).into_iter().map(|x| x as i16).collect();
+            let s_data_16: Vec<i16> = generate_random_signed_vec(100, 30_000)
+                .into_iter()
+                .map(|x| x as i16)
+                .collect();
             run_test_for_type::<i16, $E>(&s_data_16, "i16");
 
-            let s_data_32: Vec<i32> = generate_random_signed_vec(100, 1_000_000_000).into_iter().map(|x| x as i32).collect();
+            let s_data_32: Vec<i32> = generate_random_signed_vec(100, 1_000_000_000)
+                .into_iter()
+                .map(|x| x as i32)
+                .collect();
             run_test_for_type::<i32, $E>(&s_data_32, "i32");
 
             let s_data_64: Vec<i64> = generate_random_signed_vec(100, 1_000_000_000_000);

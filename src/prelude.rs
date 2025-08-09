@@ -1,3 +1,5 @@
+// src/prelude.rs
+
 //! A prelude for `compressed-intvec`.
 //!
 //! This prelude is automatically imported when you use `use compressed-intvec::prelude::*;`.
@@ -5,19 +7,22 @@
 
 // --- Fixed-Width Vector Prelude ---
 pub use crate::fixed::{
+    atomic::{AtomicFixedVec, SAtomicFixedVec, UAtomicFixedVec},
     builder::{FixedVecBuilder, FixedVecFromIterBuilder},
     iter::{FixedVecIntoIter, FixedVecIter},
-    traits::{Storable, Word},
-    BEFixedVec,
-    BESFixedVec,
-    BitWidth,
-    Error as FixedVecError,
-    FixedVec,
-    LEFixedVec,
-    LESFixedVec,
-    SFixedVec,
-    // Direct re-export of the most common aliases
-    UFixedVec,
+    traits::{Storable as FixedStorable, Word},
+    BEFixedVec, BESFixedVec, BitWidth, Error as FixedVecError, FixedVec, LEFixedVec, LESFixedVec,
+    SFixedVec, UFixedVec,
 };
 
-
+// --- Variable-Width Vector Prelude ---
+pub use crate::variable::{
+    builder::{IntVecBuilder, IntVecFromIterBuilder},
+    codec::VariableCodecSpec,
+    iter::{IntVecIntoIter, IntVecIter},
+    reader::IntVecReader,
+    seq_reader::IntVecSeqReader,
+    slice::IntVecSlice,
+    traits::Storable as VariableStorable,
+    BEIntVec, BESIntVec, IntVecError, IntVec, LEIntVec, LESIntVec, SIntVec, UIntVec,
+};

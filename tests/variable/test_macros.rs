@@ -1,6 +1,9 @@
 //! Integration tests for the `int_vec!` and `sint_vec!` macros and other convenience APIs.
 
+use compressed_intvec::prelude::LESIntVec;
 use compressed_intvec::variable::LEIntVec;
+use compressed_intvec::int_vec;
+use compressed_intvec::sint_vec;
 
 
 #[test]

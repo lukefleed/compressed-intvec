@@ -1,6 +1,8 @@
-//! Integration tests for the generic backend functionality of `IntVec`.
-
-use compressed_intvec::{prelude::*, variable::{codec::VariableCodecSpec, BEIntVec, IntVec, LEIntVec}};
+use compressed_intvec::{
+    // FIX: Rimosso l'import non utilizzato di FixedVecError
+    prelude::*,
+    variable::{codec::VariableCodecSpec, IntVec, BEIntVec, LEIntVec},
+};
 use dsi_bitstream::prelude::{BE, LE};
 
 #[path = "../common/mod.rs"]
@@ -19,17 +21,17 @@ fn test_intvec_owned_to_borrowed_conversion() {
         .unwrap();
 
     // 2. Extract references to the raw components from the owned vector.
-    let data_limbs = owned_vec.as_limbs(); // Returns &[u64]
+    let data_limbs = owned_vec.as_limbs();
     let samples_vec = owned_vec.samples_ref();
-    let samples_limbs = samples_vec.as_limbs(); // Returns &[u64]
+    let samples_limbs = samples_vec.as_limbs();
     let samples_len = samples_vec.len();
-    let samples_num_bits = samples_vec.num_bits();
+    let samples_num_bits = samples_vec.bit_width();
     let k = owned_vec.get_sampling_rate();
     let len = owned_vec.len();
     let encoding = owned_vec.encoding();
 
     // 3. Create a borrowed IntVec from the extracted parts.
-    let borrowed_vec = IntVec::<LE, &[u64]>::from_parts(
+    let borrowed_vec = IntVec::<u64, LE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
         samples_len,
@@ -65,12 +67,12 @@ fn test_from_parts_validation() {
     let samples_vec = owned_vec.samples_ref();
     let samples_limbs = samples_vec.as_limbs();
     let samples_len = samples_vec.len();
-    let samples_num_bits = samples_vec.num_bits();
+    let samples_num_bits = samples_vec.bit_width();
     let len = owned_vec.len();
     let encoding = owned_vec.encoding();
 
     // Fail: k = 0
-    let result = IntVec::<BE, &[u64]>::from_parts(
+    let result = IntVec::<u64, BE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
         samples_len,
@@ -79,13 +81,11 @@ fn test_from_parts_validation() {
         len,
         encoding,
     );
-    assert!(matches!(
-        result,
-        Err(FixedVecError::InvalidParameters(_))
-    ));
+    // FIX: L'errore restituito è IntVecError, non FixedVecError.
+    assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
 
     // Fail: Inconsistent number of samples
-    let result = IntVec::<BE, &[u64]>::from_parts(
+    let result = IntVec::<u64, BE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
         samples_len + 1, // Mismatch
@@ -96,7 +96,7 @@ fn test_from_parts_validation() {
     );
     assert!(matches!(
         result,
-        Err(FixedVecError::InvalidParameters(_))
+        Err(IntVecError::InvalidParameters(_))
     ));
 }
 
@@ -105,7 +105,7 @@ fn test_sintvec_owned_to_borrowed_conversion() {
     let data = generate_random_signed_vec(1000, 10000);
     let owned_svec: IntVec<i64, LE> = IntVec::builder(&data)
         .k(16)
-        .codec(VariableCodecSpec::Delta)
+        .codec(VariableCodecSpec::Auto)
         .build()
         .unwrap();
 
@@ -113,7 +113,7 @@ fn test_sintvec_owned_to_borrowed_conversion() {
     let samples_vec = owned_svec.samples_ref();
     let samples_limbs = samples_vec.as_limbs();
     let samples_len = samples_vec.len();
-    let samples_num_bits = samples_vec.num_bits();
+    let samples_num_bits = samples_vec.bit_width();
     let k = owned_svec.get_sampling_rate();
     let len = owned_svec.len();
     let encoding = owned_svec.encoding();
