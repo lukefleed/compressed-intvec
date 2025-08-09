@@ -25,13 +25,15 @@
 //!   words. Modifying such an element requires updating two words simultaneously,
 //!   which cannot be done in a single atomic hardware instruction.
 //!
-//! To handle this case, `AtomicFixedVec` uses a technique called "lock striping".
-//! It maintains a pool of `parking_lot::Mutex` locks. When an operation needs
+//! To handle this case, [`AtomicFixedVec`] uses a technique called _lock striping_.
+//! It maintains a pool of [`parking_lot::Mutex`] locks. When an operation needs
 //! to modify a value that spans two words, it acquires a lock for that specific
 //! memory region. This ensures that the two-word update is itself atomic with
 //! respect to other threads, while still allowing concurrent operations on
 //! different parts of the vector. This approach avoids a single global lock,
 //! preserving a high degree of parallelism.
+//! 
+//! > Future version may introduce a more sophisticated locking strategy
 //!
 //! ### Performance Considerations
 //!
@@ -404,6 +406,7 @@ where
     }
 }
 
+
 // Extended atomic RMW operations
 impl<T> AtomicFixedVec<T>
 where
@@ -418,6 +421,25 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // The initial value is 10. The result will be 15, which needs 4 bits.
+    /// let data = vec![10u32, 20];
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(5))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// let previous = vec.fetch_add(0, 5, Ordering::SeqCst);
+    ///
+    /// assert_eq!(previous, 10);
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 15);
+    /// ```
     #[inline(always)]
     pub fn fetch_add(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -433,6 +455,25 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // The initial value is 10. The result will be 5, which fits.
+    /// let data = vec![10u32, 20];
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(5))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// let previous = vec.fetch_sub(0, 5, Ordering::SeqCst);
+    ///
+    /// assert_eq!(previous, 10);
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 5);
+    /// ```
     #[inline(always)]
     pub fn fetch_sub(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -448,6 +489,27 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // 0b1100 = 12. Needs 4 bits.
+    /// let data = vec![12u32];
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(4))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// // 0b1010 = 10
+    /// let previous = vec.fetch_and(0, 10, Ordering::SeqCst);
+    ///
+    /// assert_eq!(previous, 12);
+    /// // 0b1100 & 0b1010 = 0b1000 = 8
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 8);
+    /// ```
     #[inline(always)]
     pub fn fetch_and(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -463,6 +525,27 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // 0b1100 = 12. Needs 4 bits.
+    /// let data = vec![12u32];
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(4))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// // 0b1010 = 10
+    /// let previous = vec.fetch_or(0, 10, Ordering::SeqCst);
+    ///
+    /// assert_eq!(previous, 12);
+    /// // 0b1100 | 0b1010 = 0b1110 = 14
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 14);
+    /// ```
     #[inline(always)]
     pub fn fetch_or(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -478,6 +561,27 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // 0b1100 = 12. Needs 4 bits.
+    /// let data = vec![12u32];
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(4))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// // 0b1010 = 10
+    /// let previous = vec.fetch_xor(0, 10, Ordering::SeqCst);
+    ///
+    /// assert_eq!(previous, 12);
+    /// // 0b1100 ^ 0b1010 = 0b0110 = 6
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 6);
+    /// ```
     #[inline(always)]
     pub fn fetch_xor(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -493,6 +597,30 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // Value 20 needs 6 bits with zig-zag encoding.
+    /// let data = vec![10i32];
+    /// let vec: SAtomicFixedVec<i32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(6))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// // Attempt to store a larger value
+    /// let previous = vec.fetch_max(0, 20, Ordering::SeqCst);
+    /// assert_eq!(previous, 10);
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 20);
+    ///
+    /// // Attempt to store a smaller value
+    /// let previous2 = vec.fetch_max(0, 5, Ordering::SeqCst);
+    /// assert_eq!(previous2, 20);
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 20); // Value is unchanged
+    /// ```
     #[inline(always)]
     pub fn fetch_max(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -508,6 +636,30 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // Value 10 needs 5 bits with zig-zag encoding.
+    /// let data = vec![10i32];
+    /// let vec: SAtomicFixedVec<i32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(5))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// // Attempt to store a smaller value
+    /// let previous = vec.fetch_min(0, 5, Ordering::SeqCst);
+    /// assert_eq!(previous, 10);
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 5);
+    ///
+    /// // Attempt to store a larger value
+    /// let previous2 = vec.fetch_min(0, 20, Ordering::SeqCst);
+    /// assert_eq!(previous2, 5);
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 5); // Value is unchanged
+    /// ```
     #[inline(always)]
     pub fn fetch_min(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -527,6 +679,38 @@ where
     /// # Panics
     ///
     /// Panics if `index` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// // Value 20 needs 5 bits.
+    /// let data = vec![10u32];
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(5))
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// // Successfully update the value
+    /// let result = vec.fetch_update(0, Ordering::SeqCst, Ordering::Relaxed, |val| {
+    ///     Some(val * 2)
+    /// });
+    /// assert_eq!(result, Ok(10));
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 20);
+    ///
+    /// // Abort the update
+    /// let result_aborted = vec.fetch_update(0, Ordering::SeqCst, Ordering::Relaxed, |val| {
+    ///     if val > 15 {
+    ///         None // Abort if value is > 15
+    ///     } else {
+    ///         Some(val + 1)
+    ///     }
+    /// });
+    /// assert_eq!(result_aborted, Err(20));
+    /// assert_eq!(vec.load(0, Ordering::SeqCst), 20); // Value remains unchanged
+    /// ```
     pub fn fetch_update<F>(
         &self,
         index: usize,
@@ -548,7 +732,11 @@ where
             }
         }
     }
+
+
+
 }
+
 
 // `TryFrom` implementation.
 impl<T> TryFrom<&[T]> for AtomicFixedVec<T>

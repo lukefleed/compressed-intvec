@@ -1,34 +1,59 @@
 //! A generic, compressed, and randomly accessible vector with fixed-width encoding.
 //!
-//! This module provides [`FixedVec`], a data structure for storing sequences of
-//! integers where each element is encoded using the same number of bits. This
-//! strategy, known as fixed-width encoding, allows for O(1) random access by
-//! calculating the memory location of any element.
+//! This module provides [`FixedVec`] and its thread-safe counterpart, [`AtomicFixedVec`],
+//! two data structures for storing sequences of integers where each element is encoded
+//! using the same number of bits. This strategy, known as fixed-width encoding,
+//! is suitable for data where values are bounded within a known range, as it
+//! allows for O(1) random access by directly calculating the memory location of any element.
 //!
-//! `FixedVec` is ideal for applications where integer values are bounded within a
-//! known range, and fast, predictable access is a priority. For example, storing
-//! a large sequence of random numbers from 0 to 1000 can be done efficiently
-//! by allocating exactly 10 bits for each number, as 2<sup>10</sup> = 1024.
+//! # Core Concepts
 //!
-//! The data structure is highly generic and can be adapted to different integer
-//! types, storage backends, and endianness, providing flexibility for various
-
-//! performance and memory requirements.
+//! ### Genericity
+//! The design is generic over four parameters: `FixedVec<T, W, E, B>`.
+//! - `T`: The element type as seen by the user (e.g., `u32`, `i16`), constrained by the `Storable` trait.
+//! - `W`: The underlying unsigned integer type used for storage (e.g., `u64`, `usize`), constrained by the [`Word`] trait.
+//! - `E`: The [`Endianness`] (e.g., [`LE`] or [`BE`]) for bit-level operations.
+//! - `B`: The backing buffer, which abstracts over ownership. This allows [`FixedVec`] to be an owned container (e.g., `Vec<W>`) or a zero-copy, borrowed view (e.g., `&[W]`).
+//!
+//! ### Immutability and Zero-Copy Views
+//! Immutable access is performed in O(1) time by calculating an element's bit-level offset.
+//! Structures like [`FixedVecSlice`](slice::FixedVecSlice) provide zero-copy views into a vector, representing
+//! a sub-region of the data without requiring data duplication or new allocations.
+//!
+//! ### Mutability via Proxy Objects
+//! Direct mutable references (`&mut T`) to individual bit-packed elements are not possible, as
+//! elements do not align with byte boundaries and may not even exist as discrete entities in memory.
+//! Instead, mutability is managed through the **proxy object pattern**. Methods like [`at_mut`](FixedVec::at_mut) return a temporary proxy ([`MutProxy`]) that holds a decoded copy of the value.
+//! Modifications are applied to this copy, and the value is automatically encoded and written
+//! back into the vector's bitstream when the proxy object goes out of scope (i.e., is dropped).
+//!
+//! # Core Data Structures
+//!
+//! - [`FixedVec`]: The primary implementation for single-threaded contexts, which leverages the
+//!   concepts of genericity and proxy-based mutability described above.
+//!
+//! - [`AtomicFixedVec`]: A thread-safe variant for concurrent applications. It provides an
+//!   API analogous to Rust's standard atomic types (`load`, `store`, `fetch_add`, etc.).
+//!   It uses lock-free atomic instructions for elements contained within a single machine word and
+//!   a fine-grained locking strategy (lock striping) for elements that span word boundaries. This
+//!   hybrid approach ensures thread safety for any `bit-width` configuration.
 //!
 //! # Main Components
 //!
-//! - [`FixedVec`]: The core data structure for the compressed integer vector.
-//! - [`BitWidth`]: An enum to control the bit-width selection strategy.
-//! - **Builders**: [`FixedVec::builder`] and [`FixedVec::from_iter_builder`] for
-//!   flexible and efficient vector construction.
-//! - **Slices**: [`slice::FixedVecSlice`] for creating immutable or mutable
-//!   views over a portion of the vector.
+//! - [`FixedVec`] and [`AtomicFixedVec`]: The core data structures.
+//! - [`BitWidth`]: An enum to control the bit-width selection strategy. Options include:
+//!     - [`BitWidth::Minimal`]: Selects the minimal bit-width required.
+//!     - [`BitWidth::PowerOfTwo`]: Rounds up to the nearest power of two.
+//!     - [`BitWidth::Explicit`]: Allows specifying a fixed bit-width.
+//! - **Builders**: [`FixedVecBuilder`](builder::FixedVecBuilder) and [`FixedVecFromIterBuilder`](builder::FixedVecFromIterBuilder) for
+//!   flexible vector construction.
+//! - **Slices**: [`FixedVecSlice`](slice::FixedVecSlice) for creating immutable or mutable views.
 //!
 //! # Examples
 //!
 //! ## Basic Usage
 //!
-//! You can create a [`FixedVec`] from a slice of data. The builder will
+//! Create a [`FixedVec`] from a slice of data. The builder will
 //! automatically determine the minimal number of bits required.
 //!
 //! ```
@@ -45,44 +70,18 @@
 //! assert_eq!(vec.len(), 8);
 //! assert_eq!(vec.bit_width(), 3);
 //! assert_eq!(vec.get(5), Some(5));
-//!
-//! // The underlying storage is compact.
-//! // 8 elements * 3 bits/element = 24 bits.
-//! // The storage requires ceil(24/64) = 1 word, plus 2 padding words.
-//! assert_eq!(vec.as_limbs().len(), 3);
-//! ```
-//!
-//! ## Specifying Bit Width
-//!
-//! For performance-critical applications, you can specify the bit width strategy.
-//! Using a power of two can lead to faster access times.
-//!
-//! ```
-//! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
-//!
-//! let data: &[u32] = &[10, 20, 30, 40, 50];
-//!
-//! // The values require 6 bits, but we can force it to use 8 (a power of two).
-//! let vec: UFixedVec<u32> = FixedVec::builder()
-//!     .bit_width(BitWidth::PowerOfTwo)
-//!     .build(data)
-//!     .unwrap();
-//!
-//! assert_eq!(vec.bit_width(), 8);
-//! assert_eq!(vec.get(2), Some(30));
 //! ```
 //!
 //! ## Storing Signed Integers
 //!
-//! `FixedVec` can store signed integers (e.g., `i8`, `i16`, `i32`, `i64`).
-//! The underlying storage uses zig-zag encoding, which is efficient for storing
-//! values where small negative and positive numbers are common.
+//! [`FixedVec`] can store signed integers. The underlying storage uses zig-zag encoding,
+//! which maps small negative and positive numbers to small unsigned integers.
 //!
 //! ```
 //! use compressed_intvec::fixed::{FixedVec, SFixedVec};
 //!
 //! // The values range from -2 to 1. Zig-zag encoding maps these to
-//! // unsigned values [3, 1, 0, 2], so the maximum value is 3, which
+//! // unsigned values, so the maximum value is 3, which
 //! // requires 2 bits.
 //! let data: &[i16] = &[-2, -1, 0, 1];
 //! let vec: SFixedVec<i16> = FixedVec::builder().build(data).unwrap();
@@ -96,12 +95,11 @@
 //!
 //! ## Padding
 //!
-//! To ensure safe and efficient memory access, `FixedVec` adds two padding
+//! To ensure safe and efficient memory access, [`FixedVec`] adds two padding
 //! words at the end of its storage buffer. This padding prevents out-of-bounds
-//! reads in methods like [`get_unchecked`](FixedVec::get_unchecked) and allows
-//! for unaligned access with
-//! [`get_unaligned_unchecked`](FixedVec::get_unaligned_unchecked). The builders
-//! handle this padding automatically. When creating a `FixedVec` from raw parts,
+//! reads in methods like [`get_unchecked`](FixedVec::get_unchecked) and is a
+//! prerequisite for unaligned access with [`get_unaligned_unchecked`](FixedVec::get_unaligned_unchecked).
+//! The builders handle this padding automatically. When creating a [`FixedVec`] from raw parts,
 //! it is the caller's responsibility to ensure this padding is present.
 
 // Declare and export submodules.
@@ -538,8 +536,7 @@ where
 
     /// Returns the element at `index` using unaligned memory access.
     ///
-    /// This method can be significantly faster for random access on architectures
-    /// that handle unaligned reads efficiently (e.g., x86-64). It performs a
+    /// This method can be significantly faster for random access. It performs a
     /// single, potentially unaligned read of a `Word` and extracts the value.
     ///
     /// # Safety
@@ -549,6 +546,10 @@ where
     /// least two `Word`s) to guarantee that the unaligned read does not go
     /// past the allocated buffer. This padding is guaranteed by the default
     /// builders.
+    /// 
+    /// # Implementation Notes
+    ///
+    /// For Big-Endian, this method falls back to the standard `get_unchecked` implementation.
     #[inline(always)]
     pub unsafe fn get_unaligned_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len);
@@ -588,10 +589,9 @@ where
     /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
     /// let mut iter = vec.iter();
     ///
-    /// assert_eq!(iter.next(), Some(10));
-    /// assert_eq!(iter.next(), Some(20));
-    /// assert_eq!(iter.next(), Some(30));
-    /// assert_eq!(iter.next(), None);
+    /// for (i, value) in iter.enumerate() {
+    ///     assert_eq!(Some(value), vec.get(i));
+    /// }
     /// ```
     pub fn iter(&self) -> iter::FixedVecIter<'_, T, W, E, B> {
         iter::FixedVecIter::new(self)
@@ -647,6 +647,8 @@ where
     /// # Panics
     ///
     /// Panics if `chunk_size` is 0.
+    /// 
+    /// [`FixedVecSlice`]: slice::FixedVecSlice
     pub fn chunks(&self, chunk_size: usize) -> iter::Chunks<'_, T, W, E, B> {
         iter::Chunks::new(self, chunk_size)
     }
@@ -1969,7 +1971,7 @@ where
         }
     }
 
-    /// Returns a mutable reference to the first element, or `None` if empty.
+    /// Returns the first element of the vector, or `None` if empty.
     pub fn first(&self) -> Option<T> {
         if self.is_empty() {
             None
@@ -1978,7 +1980,7 @@ where
         }
     }
 
-    /// Returns a mutable reference to the last element, or `None` if empty.
+    /// Returns the last element of the vector, or `None` if empty.
     pub fn last(&self) -> Option<T> {
         if self.is_empty() {
             None

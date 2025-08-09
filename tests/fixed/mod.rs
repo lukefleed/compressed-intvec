@@ -1,6 +1,7 @@
 mod test_backend;
 mod test_macros;
 mod test_search;
+#[cfg(feature = "serde")]
 mod test_serde;
 mod test_atomic;
 mod test_capacity;
