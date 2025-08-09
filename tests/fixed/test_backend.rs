@@ -114,3 +114,19 @@ fn test_slice_on_borrowed_backend() {
     assert_eq!(slice.get(29), Some(49));
     assert_eq!(slice, &data[20..50]);
 }
+
+#[test]
+fn test_backend_conversions() {
+    let data: Vec<u32> = (0..100).collect();
+    let vec_owned: UFixedVec<u32, Vec<usize>> = FixedVec::builder().build(&data).unwrap();
+
+    // Convert Vec -> Box<[]>
+    let vec_boxed: UFixedVec<u32, Box<[usize]>> = vec_owned.clone().into();
+    assert_eq!(vec_boxed.len(), vec_owned.len());
+    assert_eq!(vec_boxed, &data[..]);
+
+    // Convert Box<[]> -> Vec
+    let vec_re_owned: UFixedVec<u32, Vec<usize>> = vec_boxed.into();
+    assert_eq!(vec_re_owned.len(), vec_owned.len());
+    assert_eq!(vec_re_owned, &data[..]);
+}

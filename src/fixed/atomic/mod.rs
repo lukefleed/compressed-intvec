@@ -35,6 +35,7 @@
 //! use std::sync::Arc;
 //! use std::thread;
 //! use std::sync::atomic::Ordering;
+//! use crate::fixed::proxy;
 //!
 //! // Create from a slice using the builder.
 //! let initial_data: Vec<u32> = vec!;
@@ -257,7 +258,7 @@ where
     ///
     /// This is an ergonomic wrapper around `load` that uses `Ordering::SeqCst`
     /// for the strongest memory guarantees, which is a safe default.
-    #[inline]
+    #[inline(always)]
     pub fn get(&self, index: usize) -> Option<T> {
         if index >= self.len {
             return None;
@@ -379,6 +380,35 @@ where
         T: Ord,
     {
         self.atomic_rmw(index, val, order, |a, b| a.min(b))
+    }
+
+    /// Atomically modifies the value at `index` using a closure.
+    ///
+    /// Reads the value, applies the function `f`, and attempts to write the
+    /// new value back. If the value has been changed by another thread in the
+    /// meantime, the function is re-evaluated with the new current value.
+    ///
+    /// Returns the previous value if successful.
+    pub fn fetch_update<F>(
+        &self,
+        index: usize,
+        success: Ordering,
+        failure: Ordering,
+        mut f: F,
+    ) -> Result<T, T>
+    where
+        F: FnMut(T) -> Option<T>,
+    {
+        let mut current = self.load(index, Ordering::Relaxed);
+        loop {
+            match f(current) {
+                Some(new) => match self.compare_exchange(index, current, new, success, failure) {
+                    Ok(old) => return Ok(old),
+                    Err(actual) => current = actual,
+                },
+                None => return Err(current),
+            }
+        }
     }
 }
 

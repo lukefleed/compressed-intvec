@@ -726,31 +726,6 @@ where
         Err(low)
     }
 
-    /// Binary searches this vector with a custom comparator function.
-    ///
-    /// The comparator function `f` should return an `Ordering` indicating
-    /// the relation of a probe element to the value being searched for.
-    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
-    where
-        F: FnMut(T) -> std::cmp::Ordering,
-    {
-        let mut low = 0;
-        let mut high = self.len();
-
-        while low < high {
-            let mid = low + (high - low) / 2;
-            let mid_val = unsafe { self.get_unchecked(mid) };
-            let cmp = f(mid_val);
-
-            match cmp {
-                std::cmp::Ordering::Less => low = mid + 1,
-                std::cmp::Ordering::Equal => return Ok(mid),
-                std::cmp::Ordering::Greater => high = mid,
-            }
-        }
-        Err(low)
-    }
-
     /// Binary searches this vector with a key extraction function.
     ///
     /// This method is useful when searching for a value of a different type
@@ -760,7 +735,102 @@ where
     where
         F: FnMut(T) -> K,
     {
-        self.binary_search_by(|probe| f(probe).cmp(key))
+        self.binary_search_by(|probe| f(*probe).cmp(key))
+    }
+
+        /// Binary searches this vector with a custom comparison function.
+    ///
+    /// The comparator function `f` should return an `Ordering` indicating
+    /// the relation of a probe element to the value being searched for. If the
+    /// vector is sorted, this will find an element in O(log n) time.
+    ///
+    /// If `value` is found, `Ok(idx)` is returned, where `idx` is the index of
+    /// the matching element. If there are multiple matches, any one of the
+    /// matches may be returned. If `value` is not found, `Err(idx)` is returned,
+    /// where `idx` is the insertion point to maintain order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed_vec;
+    /// use std::cmp::Ordering;
+    ///
+    /// let vec = fixed_vec![0u32, 1, 1, 2, 3];
+    ///
+    /// // Search for a value by comparing it to the probe
+    /// let result = vec.binary_search_by(|probe| probe.cmp(&1));
+    /// assert!(matches!(result, Ok(1) | Ok(2)));
+    ///
+    /// let result_not_found = vec.binary_search_by(|probe| probe.cmp(&4));
+    /// assert_eq!(result_not_found, Err(5));
+    /// ```
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(&T) -> std::cmp::Ordering,
+    {
+        let mut low = 0;
+        let mut high = self.len();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            // SAFETY: The loop invariants ensure `mid` is always in bounds.
+            let mid_val = unsafe { self.get_unchecked(mid) };
+            
+            match f(&mid_val) {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Returns the index of the partition point of the vector.
+    ///
+    /// The vector is partitioned according to the predicate `pred`. This means
+    /// all elements for which `pred` returns `true` are on the left of the
+    /// partition point, and all elements for which `pred` returns `false` are
+    /// on the right.
+    ///
+    /// This method assumes that the vector is already partitioned. It finds the
+    /// partition point in O(log n) time.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed_vec;
+    ///
+    /// let vec = fixed_vec![0u32, 1, 2, 3, 4, 5];
+    ///
+    /// // Find the partition point for elements `< 3`
+    /// let partition_idx = vec.partition_point(|&x| x < 3);
+    /// assert_eq!(partition_idx, 3);
+    ///
+    /// // All elements are `< 10`
+    /// let all_true = vec.partition_point(|&x| x < 10);
+    /// assert_eq!(all_true, 6);
+    /// ```
+    pub fn partition_point<P>(&self, mut pred: P) -> usize
+    where
+        P: FnMut(&T) -> bool,
+    {
+        let mut len = self.len();
+        let mut left = 0;
+        
+        while len > 0 {
+            let half = len / 2;
+            let mid = left + half;
+            // SAFETY: The loop invariants ensure `mid` is always in bounds.
+            let value = unsafe { self.get_unchecked(mid) };
+
+            if pred(&value) {
+                left = mid + 1;
+                len -= half + 1;
+            } else {
+                len = half;
+            }
+        }
+        left
     }
 }
 
@@ -2140,6 +2210,42 @@ where
         self.reserve(lower_bound);
         for item in iter {
             self.push(item);
+        }
+    }
+}
+
+
+impl<T, W, E> From<FixedVec<T, W, E, Vec<W>>> for FixedVec<T, W, E, Box<[W]>>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+{
+    /// Converts a `Vec`-backed `FixedVec` into a `Box<[]>`-backed `FixedVec`.
+    ///
+    /// This is a cheap operation that does not involve reallocating memory for
+    /// the data buffer.
+    fn from(vec: FixedVec<T, W, E, Vec<W>>) -> Self {
+        unsafe {
+            Self::new_unchecked(vec.bits.into_boxed_slice(), vec.len, vec.bit_width)
+        }
+    }
+}
+
+impl<T, W, E> From<FixedVec<T, W, E, Box<[W]>>> for FixedVec<T, W, E, Vec<W>>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+{
+    /// Converts a `Box<[]>`-backed `FixedVec` into a `Vec`-backed `FixedVec`.
+    ///
+    
+    /// This is a cheap operation that does not involve reallocating memory for
+    /// the data buffer.
+    fn from(vec: FixedVec<T, W, E, Box<[W]>>) -> Self {
+        unsafe {
+            Self::new_unchecked(vec.bits.into_vec(), vec.len, vec.bit_width)
         }
     }
 }

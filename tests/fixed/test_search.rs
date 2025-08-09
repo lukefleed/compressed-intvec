@@ -1,6 +1,6 @@
 //! Integration tests for binary search functionality.
 
-use compressed_intvec::fixed::{FixedVec, SFixedVec, UFixedVec};
+use compressed_intvec::{fixed::{FixedVec, SFixedVec, UFixedVec}, fixed_vec};
 use dsi_bitstream::prelude::LE;
 
 #[test]
@@ -78,6 +78,18 @@ fn test_view_binary_search() {
 }
 
 #[test]
+fn test_binary_search_by() {
+    let vec: UFixedVec<u32> = fixed_vec![1, 2, 5, 10, 21];
+
+    assert_eq!(vec.binary_search_by(|p| p.cmp(&10)), Ok(3));
+    assert_eq!(vec.binary_search_by(|p| p.cmp(&9)), Err(3));
+    assert_eq!(
+        vec.binary_search_by(|p| (p * 2).cmp(&10)),
+        Ok(2) /* 5*2=10 */
+    );
+}
+
+#[test]
 fn test_binary_search_by_key() {
     type TestVec = FixedVec<u16, u32, LE>; // Use a non-default word size
     let data: Vec<u16> = vec![1, 2, 5, 10, 21];
@@ -92,4 +104,18 @@ fn test_binary_search_by_key() {
     // Find x where x*x = 9 (not found).
     // The keys are [1, 4, 25, 100, 441]. The insertion point for 9 is at index 2.
     assert_eq!(vec.binary_search_by_key(&9, |x| (x as u32).pow(2)), Err(2));
+}
+
+#[test]
+fn test_partition_point() {
+    let vec: UFixedVec<u32> = fixed_vec![0, 1, 1, 2, 3, 5, 8, 13];
+
+    // Partition point is the index of the first element that is false
+    assert_eq!(vec.partition_point(|&x| x < 5), 5); // Index of 5
+    assert_eq!(vec.partition_point(|&x| x <= 1), 3); // Index of 2
+    assert_eq!(vec.partition_point(|&x| x > 100), 0); // All are false
+    assert_eq!(vec.partition_point(|&x| x < 20), 8); // All are true
+
+    let empty_vec: UFixedVec<u32> = fixed_vec![];
+    assert_eq!(empty_vec.partition_point(|&x| x < 5), 0);
 }
