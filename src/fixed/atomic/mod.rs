@@ -253,6 +253,28 @@ where
         }
     }
 
+    /// Returns the element at `index`, or `None` if out of bounds.
+    ///
+    /// This is an ergonomic wrapper around `load` that uses `Ordering::SeqCst`
+    /// for the strongest memory guarantees, which is a safe default.
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<T> {
+        if index >= self.len {
+            return None;
+        }
+        Some(self.load(index, Ordering::SeqCst))
+    }
+
+    /// Returns an iterator over the elements of the vector.
+    ///
+    /// The iterator atomically loads each element using `Ordering::SeqCst`.
+    pub fn iter(&self) -> AtomicFixedVecIter<'_, T> {
+        AtomicFixedVecIter {
+            vec: self,
+            current_index: 0,
+        }
+    }
+
     /// Returns a parallel iterator that allows modifying elements of the vector in place.
     ///
     /// This method provides a safe way to apply a function to all elements of the
@@ -711,5 +733,61 @@ impl<T: Storable<u64>> MemDbgImpl for AtomicFixedVec<T> {
         self.storage
             ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, true, flags)?;
         Ok(())
+    }
+}
+
+/// An iterator over the elements of a borrowed [`AtomicFixedVec`].
+///
+/// This struct is created by the [`iter`](AtomicFixedVec::iter) method. It
+/// atomically loads each value on the fly.
+pub struct AtomicFixedVecIter<'a, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    vec: &'a AtomicFixedVec<T>,
+    current_index: usize,
+}
+
+impl<'a, T> Iterator for AtomicFixedVecIter<'a, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    type Item = T;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.vec.len() {
+            return None;
+        }
+        // Use the safe get method, which defaults to SeqCst ordering.
+        let value = self.vec.get(self.current_index).unwrap();
+        self.current_index += 1;
+        Some(value)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.vec.len().saturating_sub(self.current_index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl<T> ExactSizeIterator for AtomicFixedVecIter<'_, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    fn len(&self) -> usize {
+        self.vec.len().saturating_sub(self.current_index)
+    }
+}
+
+impl<'a, T> IntoIterator for &'a AtomicFixedVec<T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    type Item = T;
+    type IntoIter = AtomicFixedVecIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }

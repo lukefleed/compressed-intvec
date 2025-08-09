@@ -258,6 +258,33 @@ fn test_from_conversions() {
     assert_eq!(new_fixed_vec.get(50), Some(50));
 }
 
+#[test]
+fn test_ergonomic_read_apis() {
+    let data: Vec<u32> = (0..100).collect();
+    let vec = UAtomicFixedVec::<u32>::builder().build(&data).unwrap();
+
+    // Test get()
+    assert_eq!(vec.get(50), Some(50));
+    assert_eq!(vec.get(100), None);
+
+    // Test iter()
+    let collected: Vec<u32> = vec.iter().collect();
+    assert_eq!(collected, data);
+
+    // Test IntoIterator for a reference
+    let mut collected_ref = vec![];
+    for val in &vec {
+        collected_ref.push(val);
+    }
+    assert_eq!(collected_ref, data);
+
+    // Test on empty vector
+    let empty_vec: UAtomicFixedVec<u8> = atomic_fixed_vec![];
+    assert_eq!(empty_vec.get(0), None);
+    assert_eq!(empty_vec.iter().next(), None);
+}
+
+
 // --- Concurrency Tests (kept separate for clarity) ---
 
 #[test]
