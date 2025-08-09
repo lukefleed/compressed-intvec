@@ -67,9 +67,10 @@ pub mod builder;
 use crate::fixed::traits::Storable;
 use crate::fixed::{BitWidth, Error, FixedVec};
 use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
-use num_traits::{Bounded, ToPrimitive};
+use num_traits::{Bounded, ToPrimitive, WrappingAdd, WrappingSub};
 use parking_lot::Mutex;
 use std::marker::PhantomData;
+use std::ops::{BitAnd, BitOr, BitXor};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// A thread-safe `FixedVec` for unsigned integers.
@@ -188,42 +189,47 @@ where
 {
     /// Atomically adds to the value at `index`, returning the previous value.
     #[inline(always)]
-    pub fn fetch_add(&self, index: usize, val: T, order: Ordering) -> T {
-        self.atomic_rmw(index, val, order, |a, b| {
-            T::from_word(T::into_word(a).wrapping_add(T::into_word(b)))
-        })
+    pub fn fetch_add(&self, index: usize, val: T, order: Ordering) -> T
+    where
+        T: WrappingAdd,
+    {
+        self.atomic_rmw(index, val, order, |a, b| a.wrapping_add(&b))
     }
 
     /// Atomically subtracts from the value at `index`, returning the previous value.
     #[inline(always)]
-    pub fn fetch_sub(&self, index: usize, val: T, order: Ordering) -> T {
-        self.atomic_rmw(index, val, order, |a, b| {
-            T::from_word(T::into_word(a).wrapping_sub(T::into_word(b)))
-        })
+    pub fn fetch_sub(&self, index: usize, val: T, order: Ordering) -> T
+    where
+        T: WrappingSub,
+    {
+        self.atomic_rmw(index, val, order, |a, b| a.wrapping_sub(&b))
     }
 
     /// Atomically performs a bitwise AND on the value at `index`, returning the previous value.
     #[inline(always)]
-    pub fn fetch_and(&self, index: usize, val: T, order: Ordering) -> T {
-        self.atomic_rmw(index, val, order, |a, b| {
-            T::from_word(T::into_word(a) & T::into_word(b))
-        })
+    pub fn fetch_and(&self, index: usize, val: T, order: Ordering) -> T
+    where
+        T: BitAnd<Output = T>,
+    {
+        self.atomic_rmw(index, val, order, |a, b| a & b)
     }
 
     /// Atomically performs a bitwise OR on the value at `index`, returning the previous value.
     #[inline(always)]
-    pub fn fetch_or(&self, index: usize, val: T, order: Ordering) -> T {
-        self.atomic_rmw(index, val, order, |a, b| {
-            T::from_word(T::into_word(a) | T::into_word(b))
-        })
+    pub fn fetch_or(&self, index: usize, val: T, order: Ordering) -> T
+    where
+        T: BitOr<Output = T>,
+    {
+        self.atomic_rmw(index, val, order, |a, b| a | b)
     }
 
     /// Atomically performs a bitwise XOR on the value at `index`, returning the previous value.
     #[inline(always)]
-    pub fn fetch_xor(&self, index: usize, val: T, order: Ordering) -> T {
-        self.atomic_rmw(index, val, order, |a, b| {
-            T::from_word(T::into_word(a) ^ T::into_word(b))
-        })
+    pub fn fetch_xor(&self, index: usize, val: T, order: Ordering) -> T
+    where
+        T: BitXor<Output = T>,
+    {
+        self.atomic_rmw(index, val, order, |a, b| a ^ b)
     }
 
     /// Atomically computes the maximum of the value at `index` and `val`, returning the previous value.
@@ -520,7 +526,7 @@ where
         }
     }
 
-        /// Generic implementation for all Read-Modify-Write (RMW) operations.
+    /// Generic implementation for all Read-Modify-Write (RMW) operations.
     #[inline(always)]
     fn atomic_rmw(&self, index: usize, val: T, order: Ordering, op: impl Fn(T, T) -> T) -> T {
         assert!(index < self.len, "RMW index out of bounds");
@@ -576,7 +582,6 @@ where
             old_val_decoded
         }
     }
-
 }
 
 // --- Conversions between AtomicFixedVec and FixedVec ---
