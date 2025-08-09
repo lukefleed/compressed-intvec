@@ -5,9 +5,9 @@
 //! its effectiveness is highly dependent on the statistical properties of the
 //! data being compressed.
 //!
-//! [`IntVec`]: crate::variable::intvec::IntVec
+//! [`IntVec`]: crate::variable::IntVec
 
-use crate::variable::intvec::IntVecError;
+use super::IntVecError;
 use dsi_bitstream::dispatch::FuncCodeWriter;
 use dsi_bitstream::impls::{BufBitWriter, MemWordWriterVec};
 use dsi_bitstream::prelude::{Codes, CodesStats, BE};
@@ -18,7 +18,7 @@ use dsi_bitstream::prelude::{Codes, CodesStats, BE};
 /// like Rice and Zeta, or requesting that [`IntVec`] automatically selects
 /// suitable parameters based on the data distribution during construction.
 ///
-/// [`IntVec`]: crate::variable::intvec::IntVec
+/// [`IntVec`]: crate::variable::IntVec
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VariableCodecSpec {
     /// Use Elias γ-coding. This is the default codec spec.

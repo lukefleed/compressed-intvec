@@ -5,13 +5,13 @@
 //! [Rayon] library and are designed to leverage multi-core architectures to
 //! accelerate data decompression and access.
 //!
-//! [`IntVec`]: crate::variable::intvec::IntVec
-//! [`par_iter`]: crate::variable::intvec::IntVec::par_iter
-//! [`par_get_many`]: crate::variable::intvec::IntVec::par_get_many
+//! [`IntVec`]: crate::variable::IntVec
+//! [`par_iter`]: crate::variable::IntVec::par_iter
+//! [`par_get_many`]: crate::variable::IntVec::par_get_many
 
-use super::{IntVec, IntVecBitReader, IntVecError};
+use super::{traits::Storable, IntVec, IntVecBitReader, IntVecError};
 use dsi_bitstream::{
-    dispatch::{CodesRead, FuncCodeReader},
+    dispatch::{CodesRead, FuncCodeReader, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 use rayon::prelude::{
@@ -19,8 +19,9 @@ use rayon::prelude::{
 };
 
 #[cfg(feature = "parallel")]
-impl<E, B> IntVec<E, B>
+impl<T, E, B> IntVec<T, E, B>
 where
+    T: Storable + Send + Sync,
     E: Endianness + Send + Sync,
     B: AsRef<[u64]> + Send + Sync,
     for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
@@ -28,7 +29,7 @@ where
         + BitSeek<Error = core::convert::Infallible>
         + Send,
 {
-    /// Returns a parallel iterator over the decompressed `u64` values.
+    /// Returns a parallel iterator over the decompressed values.
     ///
     /// This method provides a way to decompress the entire vector in parallel,
     /// which can yield significant speedups on multi-core systems, especially
@@ -40,7 +41,7 @@ where
     /// decoding operation is very fast, the operation is often limited by memory
     /// bandwidth. In such cases, the sequential iterator's better use of CPU
     /// caches can outperform this parallel version.
-    pub fn par_iter(&self) -> impl ParallelIterator<Item = u64> + '_ {
+    pub fn par_iter(&self) -> impl ParallelIterator<Item = T> + '_ {
         let k = self.k;
         let num_samples = self.samples.len();
         let num_threads = rayon::current_num_threads();
@@ -60,13 +61,15 @@ where
                 let start_elem_index = sample_idx * k;
                 let end_elem_index = ((sample_idx + 1) * k).min(self.len);
 
-                bit_reader
-                    .set_bit_pos(self.samples.get(sample_idx).unwrap())
-                    .unwrap();
+                unsafe {
+                    bit_reader
+                        .set_bit_pos(self.samples.get_unchecked(sample_idx))
+                        .unwrap();
+                }
 
                 for _ in start_elem_index..end_elem_index {
-                    use dsi_bitstream::prelude::StaticCodeRead;
-                    values.push(code_reader.read(&mut bit_reader).unwrap());
+                    let word = code_reader.read(&mut bit_reader).unwrap();
+                    values.push(Storable::from_word(word));
                 }
             }
             values.into_par_iter()
@@ -79,7 +82,7 @@ where
     /// optimized for scenarios with a large number of lookups on multi-core systems.
     ///
     /// [`IntVecReader`]: super::IntVecReader
-    pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<u64>, IntVecError> {
+    pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<T>, IntVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
         }
@@ -100,7 +103,7 @@ where
     ///
     /// # Safety
     /// Calling this method with any out-of-bounds index is undefined behavior in release builds.
-    pub unsafe fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<u64> {
+    pub unsafe fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<T> {
         #[cfg(debug_assertions)]
         {
             for &index in indices {
@@ -117,7 +120,7 @@ where
             return Vec::new();
         }
 
-        let mut results = vec![0; indices.len()];
+        let mut results = vec![Storable::from_word(0); indices.len()];
 
         results.par_iter_mut().enumerate().for_each_init(
             || self.reader(), // Create a reader for each thread.

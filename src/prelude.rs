@@ -20,4 +20,4 @@ pub use crate::fixed::{
     UFixedVec,
 };
 
-// TODO: Add prelude exports for `variable` module once it's refactored.
+

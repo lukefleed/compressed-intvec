@@ -1,6 +1,6 @@
 //! Integration tests for the generic backend functionality of `IntVec`.
 
-use compressed_intvec::prelude::*;
+use compressed_intvec::{prelude::*, variable::{codec::VariableCodecSpec, BEIntVec, IntVec, LEIntVec}};
 use dsi_bitstream::prelude::{BE, LE};
 
 #[path = "../common/mod.rs"]
@@ -81,7 +81,7 @@ fn test_from_parts_validation() {
     );
     assert!(matches!(
         result,
-        Err(compressed_intvec::fixed::intvec::FixedVecError::InvalidParameters(_))
+        Err(FixedVecError::InvalidParameters(_))
     ));
 
     // Fail: Inconsistent number of samples
@@ -96,40 +96,39 @@ fn test_from_parts_validation() {
     );
     assert!(matches!(
         result,
-        Err(compressed_intvec::fixed::intvec::FixedVecError::InvalidParameters(_))
+        Err(FixedVecError::InvalidParameters(_))
     ));
 }
 
 #[test]
 fn test_sintvec_owned_to_borrowed_conversion() {
     let data = generate_random_signed_vec(1000, 10000);
-    let owned_svec = LESIntVec::builder(&data)
+    let owned_svec: IntVec<i64, LE> = IntVec::builder(&data)
         .k(16)
         .codec(VariableCodecSpec::Delta)
         .build()
         .unwrap();
 
-    // Get references to the internal data of the owned vector.
-    // These references live as long as `owned_svec`.
-    let inner_owned = owned_svec.inner_ref();
-    let data_limbs = inner_owned.as_limbs();
-    let samples_vec = inner_owned.samples_ref();
+    let data_limbs = owned_svec.as_limbs();
+    let samples_vec = owned_svec.samples_ref();
     let samples_limbs = samples_vec.as_limbs();
+    let samples_len = samples_vec.len();
+    let samples_num_bits = samples_vec.num_bits();
+    let k = owned_svec.get_sampling_rate();
+    let len = owned_svec.len();
+    let encoding = owned_svec.encoding();
 
-    // Create a borrowed SIntVec from these references.
-    let inner_borrowed = IntVec::<LE, &[u64]>::from_parts(
+    let borrowed_svec = IntVec::<i64, LE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
-        samples_vec.len(),
-        samples_vec.num_bits(),
-        inner_owned.get_sampling_rate(),
-        inner_owned.len(),
-        inner_owned.encoding(),
+        samples_len,
+        samples_num_bits,
+        k,
+        len,
+        encoding,
     )
     .unwrap();
-    let borrowed_svec = SIntVec::from_parts(inner_borrowed);
 
-    // Assert functional equality. `borrowed_svec` is valid here because `owned_svec` is still in scope.
     assert_eq!(borrowed_svec.len(), owned_svec.len());
     assert_eq!(
         borrowed_svec.iter().collect::<Vec<_>>(),

@@ -1,8 +1,8 @@
 //! # `IntVec` Stateful Reader
 //!
-//! This module provides [`IntVecReader`], a stateful, reusable reader for an
-//! [`IntVec`]. It is designed to optimize random access performance in scenarios
-//! where lookup indices are determined dynamically.
+//! This module provides [`IntVecReader`], a stateful, reusable reader for a
+//! generic [`IntVec`]. It is designed to optimize random access performance in
+//! scenarios where lookup indices are determined dynamically.
 //!
 //! A standard call to [`IntVec::get`] is convenient but inefficient for repeated
 //! lookups, as each call creates and discards an internal bitstream reader and
@@ -14,15 +14,16 @@
 //! the result of the previous one. For predefined batch lookups, [`IntVec::get_many`]
 //! and [`IntVec::par_get_many`] remain the preferred, more optimized alternatives.
 //!
-//! [`IntVec`]: super::IntVec
-//! [`IntVec::get`]: super::IntVec::get
-//! [`IntVec::get_many`]: super::IntVec::get_many
-//! [`IntVec::par_get_many`]: super::IntVec::par_get_many
+//! [`IntVec`]: crate::variable::IntVec
+//! [`IntVec::get`]: crate::variable::IntVec::get
+//! [`IntVec::get_many`]: crate::variable::IntVec::get_many
+//! [`IntVec::par_get_many`]: crate::variable::IntVec::par_get_many
 
 use super::{IntVec, IntVecBitReader, IntVecError};
+use super::traits::Storable;
 use dsi_bitstream::{
-    dispatch::{CodesRead, FuncCodeReader},
-    prelude::{BitRead, BitSeek, Endianness, StaticCodeRead},
+    dispatch::{CodesRead, FuncCodeReader, StaticCodeRead},
+    prelude::{BitRead, BitSeek, Endianness},
 };
 
 /// A stateful reader for an `IntVec` that provides fast random access.
@@ -34,26 +35,22 @@ use dsi_bitstream::{
 /// By reusing the same underlying components, it amortizes setup costs across
 /// many `get` operations, making it ideal for access patterns that are not known
 /// in advance (e.g., indices generated on-the-fly in a loop).
-pub struct IntVecReader<'a, E, B>
+pub struct IntVecReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
-    E: Endianness,
-    B: AsRef<[u64]>,
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// A reference to the parent `IntVec`.
-    pub(super) intvec: &'a IntVec<E, B>,
+    pub(super) intvec: &'a IntVec<T, E, B>,
     /// The stateful, reusable bitstream reader.
     pub(super) reader: IntVecBitReader<'a, E>,
     /// The pre-configured code reader, created once to avoid overhead.
     pub(super) code_reader: FuncCodeReader<E, IntVecBitReader<'a, E>>,
 }
 
-impl<'a, E, B> IntVecReader<'a, E, B>
+impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecReader<'a, T, E, B>
 where
-    E: Endianness,
-    B: AsRef<[u64]>,
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
@@ -61,7 +58,7 @@ where
     /// Creates a new `IntVecReader`.
     ///
     /// This is `pub(super)` and is called by [`IntVec::reader`].
-    pub(super) fn new(intvec: &'a IntVec<E, B>) -> Self {
+    pub(super) fn new(intvec: &'a IntVec<T, E, B>) -> Self {
         let bit_reader = IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
             intvec.data.as_ref(),
         ));
@@ -81,11 +78,11 @@ where
     /// sequentially from there.
     ///
     /// # Returns
-    /// - `Ok(Some(u64))` if the `index` is within bounds.
+    /// - `Ok(Some(T))` if the `index` is within bounds.
     /// - `Ok(None)` if the `index` is out of bounds.
     /// - `Err(IntVecError)` if a bitstream error occurs.
     #[inline]
-    pub fn get(&mut self, index: usize) -> Result<Option<u64>, IntVecError> {
+    pub fn get(&mut self, index: usize) -> Result<Option<T>, IntVecError> {
         if index >= self.intvec.len {
             return Ok(None);
         }
@@ -101,7 +98,7 @@ where
     /// Calling this method with an out-of-bounds index is undefined behavior.
     /// The caller must ensure that `index < self.intvec.len()`.
     #[inline]
-    pub unsafe fn get_unchecked(&mut self, index: usize) -> u64 {
+    pub unsafe fn get_unchecked(&mut self, index: usize) -> T {
         debug_assert!(
             index < self.intvec.len(),
             "Index out of bounds: index was {} but length was {}",
@@ -112,7 +109,7 @@ where
         let sample_index = index / k;
         // SAFETY: The caller guarantees that `index` is in bounds, which implies
         // that `sample_index` is also a valid index into the samples vector.
-        let start_bit = self.intvec.samples.get_unchecked(sample_index);
+        let start_bit = unsafe { self.intvec.samples.get_unchecked(sample_index) };
         let start_index = sample_index * k;
 
         // The underlying bitstream operations are infallible, so unwrap is safe.
@@ -121,6 +118,7 @@ where
         for _ in start_index..index {
             self.code_reader.read(&mut self.reader).unwrap();
         }
-        self.code_reader.read(&mut self.reader).unwrap()
+        let word = self.code_reader.read(&mut self.reader).unwrap();
+        Storable::from_word(word)
     }
 }

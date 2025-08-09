@@ -1,6 +1,7 @@
 //! Integration tests for the `int_vec!` and `sint_vec!` macros and other convenience APIs.
 
-use compressed_intvec::{int_vec, prelude::*, sint_vec};
+use compressed_intvec::variable::LEIntVec;
+
 
 #[test]
 fn test_int_vec_macro_empty() {
@@ -89,6 +90,5 @@ fn test_from_slice_method() {
     let data_i64: &[i64] = &[-10, 20, -300];
     let vec_i64 = LESIntVec::from_slice(data_i64).unwrap();
     assert_eq!(vec_i64.get_sampling_rate(), 16);
-    assert_eq!(vec_i64.encoding(), dsi_bitstream::prelude::Codes::Delta);
     assert_eq!(vec_i64, data_i64);
 }

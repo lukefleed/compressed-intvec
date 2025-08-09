@@ -1,6 +1,6 @@
-//! Macros for creating `IntVec` and `SIntVec` instances with a `vec!`-like syntax.
+//! Macros for creating integer vectors with a `vec!`-like syntax.
 
-/// Creates a [`LEIntVec`] containing the given elements.
+/// Creates a [`LEIntVec`] (a vector of `u64`s) containing the given elements.
 ///
 /// `int_vec!` allows for concise initialization of a `LEIntVec`. It uses a
 /// set of reasonable defaults for its build parameters:
@@ -68,16 +68,16 @@ macro_rules! int_vec {
     };
 }
 
-/// Creates a [`LESIntVec`] containing the given elements.
+/// Creates a [`LESIntVec`] (a vector of `i64`s) containing the given elements.
 ///
 /// `sint_vec!` allows for concise initialization of a `LESIntVec`. It uses a
 /// set of reasonable defaults for its build parameters:
-/// - **Codec**: `VariableCodecSpec::Delta` is used as a safe, parameter-free default.
-///   `SIntVec` does not support automatic codec selection.
+/// - **Codec**: `VariableCodecSpec::Auto` is used to automatically select the
+///   most space-efficient codec for the provided data.
 /// - **Sampling Rate (`k`)**: A default value of `32` is used.
 ///
 /// For fine-grained control over these parameters, please use the
-/// [`SIntVec::builder`].
+/// [`IntVec::builder`].
 ///
 /// # Syntax
 ///
@@ -114,8 +114,8 @@ macro_rules! sint_vec {
     ($($elem:expr),* $(,)?) => {
         // Ensure literals are treated as i64
         $crate::prelude::LESIntVec::builder(&[$($elem as i64),*])
-            // Use reasonable defaults. Auto is not supported for SIntVec.
-            .codec($crate::prelude::VariableCodecSpec::Delta)
+            // Use reasonable defaults. Auto is now supported.
+            .codec($crate::prelude::VariableCodecSpec::Auto)
             .k(32)
             .build()
             .unwrap()
@@ -126,7 +126,7 @@ macro_rules! sint_vec {
             // Ensure the element is i64
             v.resize($len, $elem as i64);
             $crate::prelude::LESIntVec::builder(&v)
-                .codec($crate::prelude::VariableCodecSpec::Delta)
+                .codec($crate::prelude::VariableCodecSpec::Auto)
                 .k(32)
                 .build()
                 .unwrap()

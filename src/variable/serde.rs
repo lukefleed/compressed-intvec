@@ -6,8 +6,8 @@
 
 #![cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 
-use super::{Endianness, IntVec};
-use crate::fixed::intvec::{FixedVec, LEFixedVec};
+use super::{traits::Storable, Endianness, IntVec};
+use crate::fixed::{FixedVec, LEFixedVec};
 use dsi_bitstream::prelude::{Codes, LE};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -74,7 +74,7 @@ struct IntVecSerde {
     encoding: CodesSerde,
 }
 
-impl<E: Endianness, B: AsRef<[u64]>> Serialize for IntVec<E, B> {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Serialize for IntVec<T, E, B> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -82,7 +82,7 @@ impl<E: Endianness, B: AsRef<[u64]>> Serialize for IntVec<E, B> {
         // To serialize, we create an owned version of the samples.
         // This is necessary because `serde` cannot generically serialize borrowed data like `&[u64]`.
         let owned_samples =
-            FixedVec::<LE>::from_slice(&self.samples.iter().collect::<Vec<_>>()).unwrap();
+            FixedVec::<u64, u64, LE>::builder().build(&self.samples.iter().collect::<Vec<_>>()).unwrap();
 
         let helper = IntVecSerde {
             data: self.data.as_ref().to_vec(),
@@ -95,7 +95,7 @@ impl<E: Endianness, B: AsRef<[u64]>> Serialize for IntVec<E, B> {
     }
 }
 
-impl<'de, E: Endianness> Deserialize<'de> for IntVec<E, Vec<u64>> {
+impl<'de, T: Storable, E: Endianness> Deserialize<'de> for IntVec<T, E, Vec<u64>> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
