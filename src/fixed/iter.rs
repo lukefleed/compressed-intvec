@@ -486,3 +486,59 @@ where
         Some(slice)
     }
 }
+
+/// An iterator over overlapping sub-slices of a [`FixedVec`].
+///
+/// This struct is created by the [`windows`](super::FixedVec::windows) method.
+pub struct Windows<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    vec: &'a FixedVec<T, W, E, B>,
+    size: usize,
+    current_pos: usize,
+}
+
+impl<'a, T, W, E, B> Windows<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    /// Creates a new `Windows` iterator.
+    pub(super) fn new(vec: &'a FixedVec<T, W, E, B>, size: usize) -> Self {
+        Self {
+            vec,
+            size,
+            current_pos: 0,
+        }
+    }
+}
+
+impl<'a, T, W, E, B> Iterator for Windows<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    type Item = FixedVecSlice<&'a FixedVec<T, W, E, B>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_pos + self.size > self.vec.len() {
+            return None;
+        }
+
+        let slice = FixedVecSlice::new(
+            self.vec,
+            self.current_pos..self.current_pos + self.size,
+        );
+        self.current_pos += 1;
+
+        Some(slice)
+    }
+}

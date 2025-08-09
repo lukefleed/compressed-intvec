@@ -1,4 +1,4 @@
-//! Integration tests for the `map_in_place` method.
+//! Integration tests for the `map_in_place` method and other in-place operations.
 
 use compressed_intvec::fixed::{
     traits::{Storable, Word},
@@ -122,4 +122,67 @@ fn test_map_in_place_edge_cases() {
         .unwrap();
     single_vec.map_in_place(|x| x * 10);
     assert_eq!(single_vec.get(0), Some(-100));
+}
+
+#[test]
+fn test_split_at_mut() {
+    let mut vec: UFixedVec<u32> = (10..=50).step_by(10).collect();
+    let (mut left, mut right) = vec.split_at_mut(3);
+
+    assert_eq!(left.len(), 3);
+    assert_eq!(right.len(), 2);
+    assert_eq!(left.get(0), Some(10));
+    assert_eq!(right.get(0), Some(40));
+
+    *left.at_mut(0).unwrap() = 11;
+    *right.at_mut(1).unwrap() = 55;
+
+    // The original vec is not directly accessible due to borrowing rules,
+    // which is correct. We can re-borrow `vec` after `left` and `right` go out of scope.
+    drop(left);
+    drop(right);
+
+    let expected_data: Vec<u32> = vec![11, 20, 30, 40, 55];
+    let expected_vec: UFixedVec<u32> = expected_data.into_iter().collect();
+    assert_eq!(vec, expected_vec);
+}
+
+#[test]
+fn test_rotate() {
+    let mut vec: UFixedVec<u32> = (0..5).collect();
+    vec.rotate_left(2);
+    let expected_left: Vec<u32> = vec![2, 3, 4, 0, 1];
+    assert_eq!(vec, &expected_left[..]);
+
+    let mut vec2: UFixedVec<u32> = (0..5).collect();
+    vec2.rotate_right(2);
+    let expected_right: Vec<u32> = vec![3, 4, 0, 1, 2];
+    assert_eq!(vec2, &expected_right[..]);
+}
+
+#[test]
+fn test_fill_and_fill_with() {
+    // Test fill
+    let mut vec: UFixedVec<u32> = FixedVec::with_capacity(8, 5).unwrap();
+    vec.resize(5, 0); // Initialize with some value
+    vec.fill(42);
+    let expected_fill: Vec<u32> = vec![42; 5];
+    assert_eq!(vec, &expected_fill[..]);
+
+    // Test fill_with
+    let mut counter = 0;
+    vec.fill_with(|| {
+        counter += 1;
+        counter * 10
+    });
+    let expected_fill_with: Vec<u32> = vec![10, 20, 30, 40, 50];
+    assert_eq!(vec, &expected_fill_with[..]);
+}
+
+#[test]
+#[should_panic]
+fn test_fill_with_panic() {
+    let mut vec: UFixedVec<u32> = FixedVec::with_capacity(4, 5).unwrap();
+    vec.resize(5, 0);
+    vec.fill(16); // 16 does not fit in 4 bits
 }

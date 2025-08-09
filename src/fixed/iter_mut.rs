@@ -35,9 +35,7 @@
 //! ```
 
 use crate::fixed::{
-    slice::FixedVecSlice,
-    traits::{Storable, Word},
-    FixedVec,
+    proxy::MutProxy, slice::FixedVecSlice, traits::{Storable, Word}, FixedVec
 };
 use dsi_bitstream::prelude::Endianness;
 use std::{cmp::min, marker::PhantomData};
@@ -122,5 +120,67 @@ where
         // of the inner mutable reference is correctly inferred to be 'a.
         // No transmute is necessary with the correct struct definition.
         Some(slice)
+    }
+}
+
+/// A mutable iterator over the elements of a [`FixedVec`].
+///
+/// This struct is created by the [`iter_mut`](super::FixedVec::iter_mut)
+/// method. It yields a [`MutProxy`] for each element.
+pub struct IterMut<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    // A raw pointer is used to allow creating proxies without consuming the iterator.
+    vec_ptr: *mut FixedVec<T, W, E, B>,
+    current_index: usize,
+    end_index: usize,
+    _phantom: PhantomData<&'a mut FixedVec<T, W, E, B>>,
+}
+
+impl<'a, T, W, E, B> IterMut<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    /// Creates a new `IterMut` iterator.
+    pub(super) fn new(vec: &'a mut FixedVec<T, W, E, B>) -> Self {
+        let len = vec.len();
+        Self {
+            vec_ptr: vec as *mut _,
+            current_index: 0,
+            end_index: len,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, T, W, E, B> Iterator for IterMut<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    type Item = MutProxy<'a, T, W, E, B>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.end_index {
+            return None;
+        }
+
+        // SAFETY: The iterator's lifetime `'a` and bounds checking ensure
+        // that the pointer is valid and that we are creating non-overlapping
+        // mutable access proxies one at a time.
+        let proxy =
+            unsafe { MutProxy::new(&mut *self.vec_ptr, self.current_index) };
+        self.current_index += 1;
+
+        Some(proxy)
     }
 }

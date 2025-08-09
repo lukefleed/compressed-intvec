@@ -584,6 +584,35 @@ where
         iter::Chunks::new(self, chunk_size)
     }
 
+    /// Returns an iterator over all contiguous windows of length `size`.
+    ///
+    /// The windows overlap. If the vector is shorter than `size`, the iterator
+    /// returns no values.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `size` is 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed_vec;
+    ///
+    /// let vec = fixed_vec![1u32, 2, 3, 4, 5];
+    /// let mut windows = vec.windows(3);
+    /// let slice1 = vec.slice(0, 3).unwrap();
+    /// let slice2 = vec.slice(1, 3).unwrap();
+    /// let slice3 = vec.slice(2, 3).unwrap();
+    /// assert_eq!(windows.next().unwrap(), slice1);
+    /// assert_eq!(windows.next().unwrap(), slice2);
+    /// assert_eq!(windows.next().unwrap(), slice3);
+    /// assert!(windows.next().is_none());
+    /// ```
+    pub fn windows(&self, size: usize) -> iter::Windows<'_, T, W, E, B> {
+        assert!(size != 0, "window size cannot be zero");
+        iter::Windows::new(self, size)
+    }
+
     /// Returns a raw pointer to the storage word containing the start of an element.
     ///
     /// This method returns a pointer to the `Word` in the backing buffer where
@@ -1747,6 +1776,154 @@ where
         }
     }
 
+    /// Returns a mutable proxy to the first element, or `None` if empty.
+    pub fn first_mut(&mut self) -> Option<MutProxy<'_, T, W, E, B>> {
+        if self.is_empty() {
+            None
+        } else {
+            self.at_mut(0)
+        }
+    }
+
+    /// Returns a mutable proxy to the last element, or `None` if empty.
+    pub fn last_mut(&mut self) -> Option<MutProxy<'_, T, W, E, B>> {
+        if self.is_empty() {
+            None
+        } else {
+            let len = self.len();
+            self.at_mut(len - 1)
+        }
+    }
+
+    /// Returns a mutable reference to the first element, or `None` if empty.
+    pub fn first(&self) -> Option<T> {
+        if self.is_empty() {
+            None
+        } else {
+            Some(unsafe { self.get_unchecked(0) })
+        }
+    }
+
+    /// Returns a mutable reference to the last element, or `None` if empty.
+    pub fn last(&self) -> Option<T> {
+        if self.is_empty() {
+            None
+        } else {
+            let len = self.len();
+            Some(unsafe { self.get_unchecked(len - 1) })
+        }
+    }
+
+    /// Splits the vector into two mutable slices at `mid`.
+    ///
+    /// The first slice contains elements `[0, mid)`, and the second contains
+    /// elements `[mid, len)`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mid > len`.
+    pub fn split_at_mut(
+        &mut self,
+        mid: usize,
+    ) -> (
+        slice::FixedVecSlice<&mut Self>,
+        slice::FixedVecSlice<&mut Self>,
+    ) {
+        assert!(mid <= self.len, "mid > len in split_at_mut");
+        // SAFETY: The two slices are guaranteed not to overlap.
+        unsafe {
+            let ptr = self as *mut Self;
+            let left = slice::FixedVecSlice::new(&mut *ptr, 0..mid);
+            let right = slice::FixedVecSlice::new(&mut *ptr, mid..self.len());
+            (left, right)
+        }
+    }
+
+    /// Returns a mutable iterator over the elements of the vector.
+    pub fn iter_mut(&mut self) -> iter_mut::IterMut<'_, T, W, E, B> {
+        iter_mut::IterMut::new(self)
+    }
+
+    /// Rotates the elements of the vector in-place such that the element at `mid`
+    /// becomes the first element.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `mid > len`.
+    pub fn rotate_left(&mut self, mid: usize) {
+        assert!(mid <= self.len, "mid > len in rotate_left");
+        if self.is_empty() || mid == 0 || mid == self.len {
+            return;
+        }
+        // A simple, correct implementation. Can be optimized later.
+        let mut temp = Vec::with_capacity(mid);
+        for i in 0..mid {
+            temp.push(unsafe { self.get_unchecked(i) });
+        }
+        for i in mid..self.len {
+            let val = unsafe { self.get_unchecked(i) };
+            unsafe { self.set_unchecked(i - mid, <T as Storable<W>>::into_word(val)) };
+        }
+        for (i, val) in temp.into_iter().enumerate() {
+            unsafe { self.set_unchecked(self.len - mid + i, <T as Storable<W>>::into_word(val)) };
+        }
+    }
+
+    /// Rotates the elements of the vector in-place such that the element at
+    /// `len - k` becomes the first element.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `k > len`.
+    pub fn rotate_right(&mut self, k: usize) {
+        assert!(k <= self.len, "k > len in rotate_right");
+        if self.is_empty() || k == 0 || k == self.len {
+            return;
+        }
+        self.rotate_left(self.len - k);
+    }
+
+    /// Fills the vector with the given value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` does not fit in the configured `bit_width`.
+    pub fn fill(&mut self, value: T) {
+        let value_w = <T as Storable<W>>::into_word(value);
+        let bits_per_word = <W as traits::Word>::BITS;
+        let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+        if self.bit_width < bits_per_word && value_w >= limit {
+            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+        }
+
+        for i in 0..self.len() {
+            unsafe { self.set_unchecked(i, value_w) };
+        }
+    }
+
+    /// Fills the vector with values returned by a closure.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the closure returns a value that does not fit in the configured
+    /// `bit_width`.
+    pub fn fill_with<F>(&mut self, mut f: F)
+    where
+        F: FnMut() -> T,
+    {
+        let bits_per_word = <W as traits::Word>::BITS;
+        let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+
+        for i in 0..self.len() {
+            let value = f();
+            let value_w = <T as Storable<W>>::into_word(value);
+             if self.bit_width < bits_per_word && value_w >= limit {
+                panic!("Value {:?} returned by closure does not fit in the configured bit_width of {}", value_w, self.bit_width);
+            }
+            unsafe { self.set_unchecked(i, value_w) };
+        }
+    }
+
 
 }
 
@@ -1786,5 +1963,27 @@ where
             return false;
         }
         self.iter().zip(other.iter()).all(|(a, b)| a == *b)
+    }
+}
+
+impl<T, W, E> Extend<T> for FixedVec<T, W, E, Vec<W>>
+where
+    T: Storable<W> + ToPrimitive,
+    W: Word,
+    E: Endianness,
+{
+    /// Extends the vector with the contents of an iterator.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any value from the iterator does not fit within the
+    /// configured `bit_width`.
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let iter = iter.into_iter();
+        let (lower_bound, _) = iter.size_hint();
+        self.reserve(lower_bound);
+        for item in iter {
+            self.push(item);
+        }
     }
 }

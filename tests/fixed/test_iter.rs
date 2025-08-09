@@ -3,7 +3,7 @@
 
 use compressed_intvec::fixed::{
     traits::{Storable, Word},
-    FixedVec,
+    FixedVec, UFixedVec,
 };
 use dsi_bitstream::{
     prelude::{BE, LE},
@@ -36,42 +36,82 @@ where
 
     // 1.1. Forward safe iteration
     let collected_forward: Vec<T> = vec.iter().collect();
-    assert_eq!(collected_forward, data, "Forward iter failed. Context: {}", context);
+    assert_eq!(
+        collected_forward, data,
+        "Forward iter failed. Context: {}",
+        context
+    );
 
     // 1.2. Reverse safe iteration (`DoubleEndedIterator`)
     let mut expected_rev = data.clone();
     expected_rev.reverse();
     let collected_rev: Vec<T> = vec.iter().rev().collect();
-    assert_eq!(collected_rev, expected_rev, "Reverse iter failed. Context: {}", context);
+    assert_eq!(
+        collected_rev, expected_rev,
+        "Reverse iter failed. Context: {}",
+        context
+    );
 
     // 1.3. Mixed forward and reverse safe iteration
     let mut mixed_iter = vec.iter();
     assert_eq!(mixed_iter.next(), Some(T::from(0)), "Context: {}", context);
-    assert_eq!(mixed_iter.next_back(), Some(T::from(99)), "Context: {}", context);
+    assert_eq!(
+        mixed_iter.next_back(),
+        Some(T::from(99)),
+        "Context: {}",
+        context
+    );
     assert_eq!(mixed_iter.next(), Some(T::from(1)), "Context: {}", context);
-    assert_eq!(mixed_iter.next_back(), Some(T::from(98)), "Context: {}", context);
+    assert_eq!(
+        mixed_iter.next_back(),
+        Some(T::from(98)),
+        "Context: {}",
+        context
+    );
     assert_eq!(mixed_iter.len(), 96, "Context: {}", context);
 
     // --- Test Case 2: Empty vector ---
     let empty_vec: FixedVec<T, W, E> = FixedVec::new(8).unwrap();
 
-    assert!(empty_vec.iter().next().is_none(), "Empty iter().next() should be None. Context: {}", context);
-    assert!(empty_vec.iter().next_back().is_none(), "Empty iter().next_back() should be None. Context: {}", context);
-
+    assert!(
+        empty_vec.iter().next().is_none(),
+        "Empty iter().next() should be None. Context: {}",
+        context
+    );
+    assert!(
+        empty_vec.iter().next_back().is_none(),
+        "Empty iter().next_back() should be None. Context: {}",
+        context
+    );
 
     // --- Test Case 3: Single element vector ---
     let single_data: Vec<T> = vec![T::from(42)];
     let single_vec: FixedVec<T, W, E> = single_data.iter().copied().collect();
 
-    assert_eq!(single_vec.iter().collect::<Vec<_>>(), single_data, "Single element iter failed. Context: {}", context);
-    assert_eq!(single_vec.iter().rev().collect::<Vec<_>>(), single_data, "Single element iter().rev() failed. Context: {}", context);
-    
+    assert_eq!(
+        single_vec.iter().collect::<Vec<_>>(),
+        single_data,
+        "Single element iter failed. Context: {}",
+        context
+    );
+    assert_eq!(
+        single_vec.iter().rev().collect::<Vec<_>>(),
+        single_data,
+        "Single element iter().rev() failed. Context: {}",
+        context
+    );
+
     let mut single_iter = single_vec.iter();
     assert_eq!(single_iter.next(), Some(T::from(42)), "Context: {}", context);
     assert_eq!(single_iter.next_back(), None, "Context: {}", context);
-    
+
     let mut single_iter_rev = single_vec.iter();
-    assert_eq!(single_iter_rev.next_back(), Some(T::from(42)), "Context: {}", context);
+    assert_eq!(
+        single_iter_rev.next_back(),
+        Some(T::from(42)),
+        "Context: {}",
+        context
+    );
     assert_eq!(single_iter_rev.next(), None, "Context: {}", context);
 }
 
@@ -90,3 +130,37 @@ test_iterators!(iterators_u32_usize_le, u32, usize, LE);
 test_iterators!(iterators_u64_u64_be, u64, u64, BE);
 test_iterators!(iterators_i16_u32_le, i16, u32, LE);
 test_iterators!(iterators_u8_u16_be, u8, u16, BE);
+
+#[test]
+fn test_iter_mut() {
+    // Max value will be 4 + 4*10 = 44, which needs 6 bits.
+    let mut vec: UFixedVec<u32> = FixedVec::with_capacity(6, 5).unwrap();
+    vec.extend(0..5);
+
+    for (i, mut proxy) in vec.iter_mut().enumerate() {
+        *proxy += i as u32 * 10;
+    }
+
+    let expected_data: Vec<u32> = vec![0, 11, 22, 33, 44];
+    assert_eq!(vec, &expected_data[..]);
+}
+
+#[test]
+fn test_windows() {
+    let vec: UFixedVec<u32> = (1..=5).collect();
+    let mut windows_iter = vec.windows(3);
+
+    let expected1: Vec<u32> = (1..=3).collect();
+    assert_eq!(windows_iter.next().unwrap(), &expected1[..]);
+
+    let expected2: Vec<u32> = (2..=4).collect();
+    assert_eq!(windows_iter.next().unwrap(), &expected2[..]);
+
+    let expected3: Vec<u32> = (3..=5).collect();
+    assert_eq!(windows_iter.next().unwrap(), &expected3[..]);
+
+    assert!(windows_iter.next().is_none());
+
+    // Test window size larger than vec
+    assert!(vec.windows(6).next().is_none());
+}
