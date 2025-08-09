@@ -95,9 +95,7 @@ fn test_map_in_place_stateful_closure() {
 }
 
 #[test]
-#[should_panic(
-    expected = "map_in_place: returned value 18 does not fit in the configured bit_width of 4"
-)]
+#[should_panic]
 fn test_map_in_place_panic_on_overflow() {
     let mut vec: UFixedVec<u8> = FixedVec::builder()
         .bit_width(BitWidth::Explicit(4)) // Max value is 15

@@ -1,8 +1,30 @@
 //! # Serde Serialization and Deserialization
 //!
 //! This module provides `serde` implementations for `FixedVec` and `AtomicFixedVec`,
-//! enabled by the `serde` feature flag. It uses the "proxy struct" pattern to
+//! enabled by the `serde` feature flag. It uses a "proxy struct" pattern to
 //! ensure that the public API remains clean and to handle the specific needs
+//! of serialization and deserialization.
+//!
+//! # Examples
+//!
+//! ## Serializing and deserializing a `FixedVec`
+//!
+//! ```
+//! # #[cfg(feature = "serde")]
+//! # {
+//! use compressed_intvec::fixed::{FixedVec, UFixedVec};
+//!
+//! let vec: UFixedVec<u32> = (0..10).collect();
+//!
+//! // Serialize the vector to a JSON string.
+//! let serialized = serde_json::to_string(&vec).unwrap();
+//!
+//! // Deserialize it back.
+//! let deserialized: UFixedVec<u32> = serde_json::from_str(&serialized).unwrap();
+//!
+//! assert_eq!(vec, deserialized);
+//! # }
+//! ```
 
 use super::{
     atomic::AtomicFixedVec,
@@ -10,6 +32,7 @@ use super::{
     FixedVec,
 };
 use dsi_bitstream::prelude::Endianness;
+use num_traits::ToPrimitive;
 use serde::{
     de,
     ser::{Serializer},
@@ -23,8 +46,7 @@ use std::sync::atomic::Ordering;
 ///
 /// This struct holds the essential data needed to reconstruct a `FixedVec`.
 /// It is used to decouple the `serde` implementation from the main struct's
-/// internal details and type parameters. The `B` parameter is expected to be
-/// `Vec<W>` during deserialization.
+/// internal details and type parameters.
 #[derive(Deserialize)]
 #[serde(bound(deserialize = "B: Deserialize<'de>"))]
 struct FixedVecProxy<B> {
@@ -39,7 +61,7 @@ where
     W: Word,
     E: Endianness,
     B: AsRef<[W]>,
-    W: Serialize, // Add bound on W for the slice to be serializable
+    W: Serialize,
 {
     /// Serializes a `FixedVec` by creating and serializing a temporary proxy struct.
     /// This pattern correctly handles lifetimes when serializing slice-backed data.
@@ -66,7 +88,7 @@ where
 impl<'de, T, W, E> Deserialize<'de> for FixedVec<T, W, E, Vec<W>>
 where
     T: Storable<W>,
-    W: Word + Deserialize<'de>, // Add bound on W for Vec<W> to be deserializable
+    W: Word + Deserialize<'de>,
     E: Endianness,
 {
     /// Deserializes data into an owned `FixedVec`.
@@ -120,7 +142,7 @@ struct AtomicFixedVecProxy {
 
 impl<T> Serialize for AtomicFixedVec<T>
 where
-    T: Storable<u64>,
+    T: Storable<u64> + Copy + ToPrimitive,
 {
     /// Serializes an `AtomicFixedVec`.
     ///
@@ -150,7 +172,7 @@ where
 
 impl<'de, T> Deserialize<'de> for AtomicFixedVec<T>
 where
-    T: Storable<u64>,
+    T: Storable<u64> + Copy + ToPrimitive,
 {
     /// Deserializes data into an `AtomicFixedVec`.
     ///

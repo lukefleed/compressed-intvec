@@ -1,4 +1,4 @@
-//! # Zero-copy Slices
+//! # Zero-Copy Slices
 //!
 //! This module provides [`FixedVecSlice`], a zero-copy view into a portion of a
 //! [`FixedVec`]. Slices can be created from both immutable and mutable vectors
@@ -8,7 +8,7 @@
 //!
 //! ## Creating and using an immutable slice
 //!
-//! ```rust
+//! ```
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec};
 //!
 //! let data: Vec<u32> = (0..10).collect();
@@ -24,6 +24,25 @@
 //! // The slice can be iterated over.
 //! let sum: u32 = slice.iter().sum();
 //! assert_eq!(sum, 2 + 3 + 4 + 5 + 6);
+//! ```
+//!
+//! ## Creating and using a mutable slice
+//!
+//! ```
+//! use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
+//!
+//! let data: Vec<u32> = (0..10).collect();
+//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(&data).unwrap();
+//!
+//! // `split_at_mut` is one way to get mutable slices.
+//! let (_, mut slice2) = vec.split_at_mut(5);
+//!
+//! // Mutate an element within the second slice.
+//! if let Some(mut proxy) = slice2.at_mut(0) { // index 0 of slice2 is index 5 of vec
+//!     *proxy = 99;
+//! }
+//!
+//! assert_eq!(vec.get(5), Some(99));
 //! ```
 
 use crate::fixed::{
@@ -61,6 +80,7 @@ where
 {
     /// Creates a new `FixedVecSlice`.
     pub(super) fn new(parent: V, range: Range<usize>) -> Self {
+        // The range is asserted to be within the parent's bounds upon creation.
         debug_assert!(range.end <= parent.len());
         Self { parent, range }
     }
@@ -77,23 +97,30 @@ where
         self.range.is_empty()
     }
 
-    /// Returns the element at `index`, or `None` if the index is out of bounds.
+    /// Returns the element at `index` relative to the start of the slice.
+    ///
+    /// Returns `None` if `index` is out of bounds of the slice.
     #[inline]
     pub fn get(&self, index: usize) -> Option<T> {
         if index >= self.len() {
             return None;
         }
+        // SAFETY: The bounds check above ensures `index` is valid.
         Some(unsafe { self.get_unchecked(index) })
     }
 
     /// Returns the element at `index` without bounds checking.
     ///
+    /// The index is relative to the start of the slice.
+    ///
     /// # Safety
     ///
-    /// Calling this method with an out-of-bounds index is undefined behavior.
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len());
+        // The index is relative to the slice, so we add the slice's start offset
+        // to get the correct index in the parent vector.
         self.parent.get_unchecked(self.range.start + index)
     }
 
@@ -105,8 +132,9 @@ where
     /// Binary searches this slice for a given element.
     ///
     /// If the value is found, returns `Ok(usize)` with the index of the
-    /// matching element. If the value is not found, returns `Err(usize)` with
-    /// the index where the value could be inserted to maintain order.
+    /// matching element within the slice. If the value is not found, returns
+    /// `Err(usize)` with the index where the value could be inserted to
+    /// maintain order.
     pub fn binary_search(&self, value: &T) -> Result<usize, usize>
     where
         T: Ord,
@@ -142,18 +170,18 @@ where
     ///
     /// This allows for syntax like `*slice.at_mut(i).unwrap() = new_value;`.
     ///
-    /// Returns `None` if the index is out of bounds.
+    /// Returns `None` if the index is out of bounds of the slice.
     pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<'_, T, W, E, B>> {
         if index >= self.len() {
             return None;
         }
+        // The index is translated to the parent vector's coordinate space.
         Some(MutProxy::new(&mut self.parent, self.range.start + index))
     }
 }
 
 // --- PartialEq Implementations ---
 
-// FixedVecSlice == FixedVecSlice
 impl<T, W, E, B, V1, V2> PartialEq<FixedVecSlice<V2>> for FixedVecSlice<V1>
 where
     T: Storable<W> + PartialEq,
@@ -181,7 +209,6 @@ where
 {
 }
 
-// FixedVecSlice == FixedVec
 impl<T, W, E, B, B2, V> PartialEq<FixedVec<T, W, E, B2>> for FixedVecSlice<V>
 where
     T: Storable<W> + PartialEq,
@@ -199,7 +226,6 @@ where
     }
 }
 
-// FixedVec == FixedVecSlice
 impl<T, W, E, B, B2, V> PartialEq<FixedVecSlice<V>> for FixedVec<T, W, E, B>
 where
     T: Storable<W> + PartialEq,
@@ -217,7 +243,6 @@ where
     }
 }
 
-/// Implements `PartialEq` for comparing a `FixedVecSlice` with a standard slice.
 impl<T, W, E, B, T2, V> PartialEq<&[T2]> for FixedVecSlice<V>
 where
     T: Storable<W> + PartialEq<T2>,
@@ -235,7 +260,6 @@ where
     }
 }
 
-// FixedVecSlice == &FixedVec
 impl<T, W, E, B, B2, V> PartialEq<&FixedVec<T, W, E, B2>> for FixedVecSlice<V>
 where
     T: Storable<W> + PartialEq,

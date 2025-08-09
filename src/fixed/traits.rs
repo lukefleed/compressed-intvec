@@ -1,8 +1,9 @@
-//! # Foundational Traits for Generic Fixed-Width Vectors
+//! # Core Traits for `FixedVec`
 //!
 //! This module defines the core traits that enable the generic and unified
 //! `FixedVec` architecture. These traits abstract away the details of the
-//! underlying storage words and the conversion logic for different element types.
+//! underlying storage words and the conversion logic for different element types,
+//! allowing `FixedVec` to be highly configurable.
 
 use common_traits::{IntoAtomic, SignedInt, UnsignedInt};
 use dsi_bitstream::{
@@ -13,11 +14,11 @@ use num_traits::{Bounded, NumCast, ToPrimitive};
 use std::fmt::Debug;
 
 /// A trait that abstracts over the primitive unsigned integer types that can
-/// serve as the storage words in the underlying bit buffer of a `FixedVec`.
+/// serve as the storage words in a [`FixedVec`].
 ///
 /// This trait establishes a contract for what constitutes a "machine word"
-/// for storage, providing access to its size in bits. It also requires the
-/// necessary traits for integration with the `dsi-bitstream` library.
+/// for storage, providing access to its size in bits and requiring the
+/// necessary traits for bit-level operations.
 pub trait Word:
     UnsignedInt
     + Bounded
@@ -42,19 +43,30 @@ macro_rules! impl_word_for {
     )*};
 }
 
-// Implement `Word` for all standard unsigned integer types that dsi-bitstream supports.
+// Implement `Word` for all standard unsigned integer types.
 impl_word_for!(u8, u16, u32, u64, usize);
 
 /// A trait that defines a bidirectional, lossless conversion between a user-facing
-/// element type `T` and its storage representation of type `W`.
+/// element type `T` and its storage representation `W`.
+///
+/// This trait is central to `FixedVec`'s ability to store various integer types
+/// in a generic bit buffer.
 pub trait Storable<W: Word>: Sized + Copy {
     /// Converts the element into its storage word representation.
+    ///
+    /// For signed integers, this conversion uses ZigZag encoding to map negative
+    /// and positive values to a compact unsigned representation.
     fn into_word(self) -> W;
     /// Converts a storage word representation back into an element.
+    ///
+    /// For signed integers, this reverses the ZigZag encoding.
     fn from_word(word: W) -> Self;
 }
 
 /// Macro to implement `Storable` for unsigned integer types.
+///
+/// This implementation is a direct, lossless cast between the unsigned
+/// element type and the storage word type `W`.
 macro_rules! impl_storable_for_unsigned {
     ($($T:ty),*) => {$(
         impl<W> Storable<W> for $T
@@ -78,6 +90,10 @@ macro_rules! impl_storable_for_unsigned {
 }
 
 /// Macro to implement `Storable` for signed integer types using ZigZag encoding.
+///
+/// ZigZag encoding maps signed integers to unsigned integers in a way that is
+/// efficient for variable-length encoding but is also used here to ensure that
+/// small signed values (positive or negative) map to small unsigned values.
 macro_rules! impl_storable_for_signed {
     ($($T:ty),*) => {$(
         impl<W> Storable<W> for $T
@@ -106,8 +122,11 @@ macro_rules! impl_storable_for_signed {
 impl_storable_for_unsigned!(u8, u16, u32, u64, u128, usize);
 impl_storable_for_signed!(i8, i16, i32, i64, i128, isize);
 
-/// A sealed trait to associate an element type `T` with its default optimal
-/// storage word `W` and `Endianness` `E`.
+/// A sealed trait to associate an element type `T` with its default storage
+/// word `W` and `Endianness` `E`.
+///
+/// This allows for the creation of convenient type aliases like `UFixedVec<T>`
+/// that do not require specifying all generic parameters.
 pub trait DefaultParams: Sized {
     /// The default word type for storage (usually `usize`).
     type W: Word;
@@ -115,7 +134,7 @@ pub trait DefaultParams: Sized {
     type E: Endianness;
 }
 
-// Implement for all unsigned types
+/// Macro to implement `DefaultParams` for unsigned integer types.
 macro_rules! impl_default_params_unsigned {
     ($($T:ty),*) => {$(
         impl DefaultParams for $T {
@@ -125,7 +144,7 @@ macro_rules! impl_default_params_unsigned {
     )*};
 }
 
-// Implement for all signed types
+/// Macro to implement `DefaultParams` for signed integer types.
 macro_rules! impl_default_params_signed {
     ($($T:ty),*) => {$(
         impl DefaultParams for $T {

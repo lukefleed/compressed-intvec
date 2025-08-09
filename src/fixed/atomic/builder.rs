@@ -11,8 +11,9 @@
 //!
 //! ```
 //! use compressed_intvec::prelude::*;
+//! use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
 //!
-//! let data: &[u32] = &;
+//! let data: &[u32] = &[10, 20, 30, 40, 50];
 //!
 //! // The builder can infer the minimal bit width (6 bits for 50).
 //! let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
@@ -39,7 +40,7 @@ use std::sync::atomic::AtomicU64;
 
 /// A builder for creating an [`AtomicFixedVec`] from a slice of integers.
 ///
-/// This builder analyzes a slice to determine the optimal `bit_width` based on
+/// This builder analyzes a slice to determine the `bit_width` based on
 /// the selected [`BitWidth`] strategy and then constructs the thread-safe vector.
 #[derive(Debug, Clone)]
 pub struct AtomicFixedVecBuilder<T: Storable<u64>> {
@@ -77,8 +78,8 @@ where
     /// Builds the [`AtomicFixedVec`] from a slice of data.
     ///
     /// This method consumes the builder and returns a new [`AtomicFixedVec`].
-    /// The initial data is populated using non-atomic writes for maximum performance,
-    /// as the vector is not yet shared during construction.
+    /// The initial data is populated using non-atomic writes, as the vector
+    /// is not yet shared during construction.
     ///
     /// # Errors
     ///
@@ -140,7 +141,8 @@ where
                     bit_width: final_bit_width,
                 });
             }
-            // SAFETY: We are writing within the allocated bounds.
+            // SAFETY: We are writing within the allocated bounds. The vector is
+            // not shared at this point, so non-atomic writes are safe and correct.
             unsafe {
                 set_unchecked_non_atomic(
                     &mut atomic_vec.storage,
@@ -157,6 +159,7 @@ where
 }
 
 /// A non-atomic, unsafe helper to set a value in a slice of `AtomicU64`.
+/// This is only used during the initial construction of the vector.
 ///
 /// # Safety
 /// The caller must ensure that `index` is within bounds and that `value_w`
@@ -173,12 +176,14 @@ unsafe fn set_unchecked_non_atomic(
     let word_index = bit_pos / bits_per_word;
     let bit_offset = bit_pos % bits_per_word;
 
+    // Use `get_mut()` to get a mutable reference to the underlying `u64`.
+    // This is safe because we have exclusive access to the vector during building.
     if bit_offset + bit_width <= bits_per_word {
         let word = limbs.get_unchecked_mut(word_index).get_mut();
         *word &= !(mask << bit_offset);
         *word |= value << bit_offset;
     } else {
-        // Spanning case
+        // The value spans two words.
         let low_word_ptr = limbs.as_mut_ptr().add(word_index);
         let high_word_ptr = limbs.as_mut_ptr().add(word_index + 1);
 

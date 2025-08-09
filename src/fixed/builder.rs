@@ -13,8 +13,8 @@
 //! ## Building from a slice
 //!
 //! ```
-//! use compressed_intvec::fixed::builder::FixedVecBuilder;
 //! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
+//! use compressed_intvec::fixed::builder::FixedVecBuilder;
 //!
 //! let data: &[u32] = &[10, 20, 30, 40, 50];
 //!
@@ -44,7 +44,7 @@ use std::marker::PhantomData;
 
 /// A builder for creating a [`FixedVec`] from a slice of integers.
 ///
-/// This builder analyzes a slice to determine the optimal `bit_width` based on
+/// This builder analyzes a slice to determine the `bit_width` based on
 /// the selected [`BitWidth`] strategy and then constructs the compressed vector.
 #[derive(Debug, Clone)]
 pub struct FixedVecBuilder<T: Storable<W>, W: Word, E: Endianness> {
@@ -99,7 +99,7 @@ where
         let final_bit_width = match self.bit_width_strategy {
             // If the user specified an exact bit width, use it.
             BitWidth::Explicit(n) => n,
-            // Otherwise, we need to analyze the data to find the maximum value.
+            // Otherwise, analyze the data to find the maximum value.
             _ => {
                 let max_val: W = input
                     .iter()
@@ -107,20 +107,14 @@ where
                     .max()
                     .unwrap_or(W::ZERO);
 
-                // Calculate the minimum number of bits required to store the max value.
-                let min_bits = if max_val == W::ZERO {
-                    1 // Handle the edge case of all zeros.
-                } else {
-                    // This is a common trick to find the number of bits in a number.
-                    bits_per_word - max_val.leading_zeros() as usize
-                };
+                // Calculate the minimum number of bits required.
+                let min_bits = (bits_per_word - max_val.leading_zeros() as usize).max(1);
 
                 // Apply the selected strategy.
                 match self.bit_width_strategy {
                     BitWidth::Minimal => min_bits,
                     BitWidth::PowerOfTwo => min_bits.next_power_of_two().min(bits_per_word),
-                    // This case is unreachable because we handled it above.
-                    BitWidth::Explicit(_) => unreachable!(),
+                    BitWidth::Explicit(_) => unreachable!(), // Handled above.
                 }
             }
         };
@@ -133,29 +127,33 @@ where
 
         if final_bit_width > bits_per_word {
             return Err(Error::InvalidParameters(format!(
-                "bit_width ({}) cannot be greater than the word size ({})",
-                final_bit_width, bits_per_word
+                "bit_width ({final_bit_width}) cannot be greater than the word size ({bits_per_word})",
             )));
         }
 
+        // Handle the empty case separately.
         if input.is_empty() {
             return Ok(unsafe { FixedVec::new_unchecked(Vec::new(), 0, final_bit_width) });
         }
 
+        // Allocate the buffer for the bit-packed data.
         let total_bits = input.len() * final_bit_width;
         let num_words = total_bits.div_ceil(bits_per_word);
-        let buffer = vec![W::ZERO; num_words + 2]; // Use 2 words of padding for safe unaligned reads
+        let buffer = vec![W::ZERO; num_words + 2]; // +2 for padding.
 
         let mut writer = BufBitWriter::new(MemWordWriterVec::new(buffer));
 
+        // Define the upper bound for values to check against.
         let limit = if final_bit_width < bits_per_word {
             W::ONE << final_bit_width
         } else {
             W::max_value()
         };
 
+        // Write each value to the bitstream.
         for (i, &value_t) in input.iter().enumerate() {
             let value_w = <T as Storable<W>>::into_word(value_t);
+            // Ensure the value fits within the calculated bit width.
             if final_bit_width < bits_per_word && value_w >= limit {
                 return Err(Error::ValueTooLarge {
                     value: value_w.to_u128().unwrap(),
@@ -163,7 +161,6 @@ where
                     bit_width: final_bit_width,
                 });
             }
-            // Convert W to u64 before writing, as required by the BitWrite trait.
             writer
                 .write_bits(value_w.to_u64().unwrap(), final_bit_width)
                 .unwrap();
@@ -234,6 +231,7 @@ where
             W::max_value()
         };
 
+        // Write each value from the iterator to the bitstream.
         for (i, value_t) in self.iter.into_iter().enumerate() {
             let value_w = <T as Storable<W>>::into_word(value_t);
             if self.bit_width < bits_per_word && value_w >= limit {
@@ -243,7 +241,6 @@ where
                     bit_width: self.bit_width,
                 });
             }
-            // Convert W to u64 before writing.
             writer
                 .write_bits(value_w.to_u64().unwrap(), self.bit_width)
                 .unwrap();
@@ -252,9 +249,11 @@ where
 
         writer.flush().unwrap();
         let mut data = writer.into_inner().unwrap().into_inner();
+        
+        // Add padding words to the end of the buffer.
         if len > 0 {
             data.push(W::ZERO);
-            data.push(W::ZERO); // Padding for safe unaligned reads
+            data.push(W::ZERO);
         }
         data.shrink_to_fit();
 

@@ -1,8 +1,25 @@
-//! # `FixedVec` Parallel Implementations
+//! # `FixedVec` Parallel Operations
 //!
 //! This module provides parallel implementations for [`FixedVec`] operations,
 //! enabled by the `parallel` feature flag. These methods leverage the [Rayon]
 //! library to accelerate data decompression and access.
+//!
+//! # Examples
+//!
+//! ```
+//! # #[cfg(feature = "parallel")]
+//! # {
+//! use compressed_intvec::fixed::{FixedVec, UFixedVec};
+//! use rayon::prelude::*;
+//!
+//! let data: Vec<u32> = (0..1000).collect();
+//! let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+//!
+//! // Sum the elements in parallel.
+//! let sum: u32 = vec.par_iter().sum();
+//! assert_eq!(sum, (0..1000).sum());
+//! # }
+//! ```
 //!
 //! [Rayon]: https://docs.rs/rayon/latest/rayon/
 
@@ -24,9 +41,24 @@ where
 {
     /// Returns a parallel iterator over the decompressed values.
     ///
-    /// This operation is "embarrassingly parallel" for `FixedVec` because each
-    /// element can be decompressed independently. It scales effectively with
-    /// the number of available CPU cores.
+    /// This operation is highly parallelizable because each element can be
+    /// decompressed independently from the others.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "parallel")]
+    /// # {
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    /// use rayon::prelude::*;
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+    ///
+    /// let count = vec.par_iter().filter(|&x| x % 2 == 0).count();
+    /// assert_eq!(count, 50);
+    /// # }
+    /// ```
     pub fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + '_ {
         (0..self.len())
             .into_par_iter()
@@ -35,13 +67,34 @@ where
 
     /// Retrieves multiple elements in parallel.
     ///
-    /// This method is designed for maximum throughput on large batches of
-    /// randomly distributed indices on multi-core systems.
+    /// This method is designed for random access on multi-core systems,
+    /// making it suitable for large batches of indices.
     ///
     /// # Errors
+    ///
     /// Returns an error if any index is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "parallel")]
+    /// # {
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+    ///
+    /// let indices = vec![10, 50, 99];
+    /// let values = vec.par_get_many(&indices).unwrap();
+    /// assert_eq!(values, vec![10, 50, 99]);
+    ///
+    /// // An out-of-bounds index will result in an error.
+    /// let invalid_indices = vec![10, 100];
+    /// assert!(vec.par_get_many(&invalid_indices).is_err());
+    /// # }
+    /// ```
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<T>, FixedVecError> {
-        // Perform a single bounds check sequentially first.
+        // Perform a single bounds check sequentially first for early failure.
         if let Some(&index) = indices.iter().find(|&&idx| idx >= self.len()) {
             return Err(FixedVecError::InvalidParameters(format!(
                 "Index {} out of bounds for vector of length {}",
@@ -54,18 +107,17 @@ where
 
     /// Retrieves multiple elements in parallel without bounds checking.
     ///
-    /// This method uses a simple and effective "embarrassingly parallel" strategy:
-    /// the input `indices` slice is processed in parallel, and each thread performs
-    /// lookups for its assigned partition independently.
-    ///
     /// # Safety
+    ///
     /// Calling this method with any out-of-bounds index is Undefined Behavior.
+    /// All indices must be less than `self.len()`.
     pub unsafe fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<T> {
         if indices.is_empty() {
             return Vec::new();
         }
 
-        // Use MaybeUninit to avoid creating uninitialized values
+        // Allocate an uninitialized buffer to hold the results. This avoids
+        // the need for `T: Default` and prevents zero-initializing the memory.
         let mut results: Vec<std::mem::MaybeUninit<T>> = Vec::with_capacity(indices.len());
         results.resize_with(indices.len(), std::mem::MaybeUninit::uninit);
 
@@ -78,7 +130,9 @@ where
                 res_val.write(self.get_unchecked(index));
             });
 
-        // SAFETY: We have initialized all elements in the vector above
+        // SAFETY: The parallel iteration guarantees that all elements in the
+        // `results` vector have been initialized. We can therefore safely
+        // transmute the `Vec<MaybeUninit<T>>` to a `Vec<T>`.
         std::mem::transmute(results)
     }
 }

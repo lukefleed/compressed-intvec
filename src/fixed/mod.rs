@@ -1,4 +1,4 @@
-//! # A generic, compressed, and randomly accessible vector with fixed-width encoding.
+//! A generic, compressed, and randomly accessible vector with fixed-width encoding.
 //!
 //! This module provides [`FixedVec`], a data structure for storing sequences of
 //! integers where each element is encoded using the same number of bits. This
@@ -12,19 +12,32 @@
 //!
 //! The data structure is highly generic and can be adapted to different integer
 //! types, storage backends, and endianness, providing flexibility for various
+
 //! performance and memory requirements.
+//!
+//! # Main Components
+//!
+//! - [`FixedVec`]: The core data structure for the compressed integer vector.
+//! - [`BitWidth`]: An enum to control the bit-width selection strategy.
+//! - **Builders**: [`FixedVec::builder`] and [`FixedVec::from_iter_builder`] for
+//!   flexible and efficient vector construction.
+//! - **Slices**: [`slice::FixedVecSlice`] for creating immutable or mutable
+//!   views over a portion of the vector.
 //!
 //! # Examples
 //!
 //! ## Basic Usage
 //!
+//! You can create a [`FixedVec`] from a slice of data. The builder will
+//! automatically determine the minimal number of bits required.
+//!
 //! ```
-//! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
+//! use compressed_intvec::fixed::{FixedVec, UFixedVec};
 //!
 //! // The numbers 0-7 can all be represented in 3 bits.
 //! let data: Vec<u32> = (0..8).collect();
 //!
-//! // Build the vector. The builder will infer that `bit_width` should be 3.
+//! // The builder infers that `bit_width` should be 3.
 //! let vec: UFixedVec<u32> = FixedVec::builder()
 //!     .build(&data)
 //!     .unwrap();
@@ -35,7 +48,7 @@
 //!
 //! // The underlying storage is compact.
 //! // 8 elements * 3 bits/element = 24 bits.
-//! // The builder adds 2 padding words, so the total size is ceil(24/64) + 2 = 3 words.
+//! // The storage requires ceil(24/64) = 1 word, plus 2 padding words.
 //! assert_eq!(vec.as_limbs().len(), 3);
 //! ```
 //!
@@ -44,9 +57,10 @@
 //! For performance-critical applications, you can specify the bit width strategy.
 //! Using a power of two can lead to faster access times.
 //!
-//! ```//! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
+//! ```
+//! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
 //!
-//! let data: &[u32] = &;
+//! let data: &[u32] = &[10, 20, 30, 40, 50];
 //!
 //! // The values require 6 bits, but we can force it to use 8 (a power of two).
 //! let vec: UFixedVec<u32> = FixedVec::builder()
@@ -57,8 +71,40 @@
 //! assert_eq!(vec.bit_width(), 8);
 //! assert_eq!(vec.get(2), Some(30));
 //! ```
+//!
+//! ## Storing Signed Integers
+//!
+//! `FixedVec` can store signed integers (e.g., `i8`, `i16`, `i32`, `i64`).
+//! The underlying storage uses zig-zag encoding, which is efficient for storing
+//! values where small negative and positive numbers are common.
+//!
+//! ```
+//! use compressed_intvec::fixed::{FixedVec, SFixedVec};
+//!
+//! // The values range from -2 to 1. Zig-zag encoding maps these to
+//! // unsigned values [3, 1, 0, 2], so the maximum value is 3, which
+//! // requires 2 bits.
+//! let data: &[i16] = &[-2, -1, 0, 1];
+//! let vec: SFixedVec<i16> = FixedVec::builder().build(data).unwrap();
+//!
+//! assert_eq!(vec.bit_width(), 2);
+//! assert_eq!(vec.get(0), Some(-2));
+//! assert_eq!(vec.get(3), Some(1));
+//! ```
+//!
+//! # Implementation Notes
+//!
+//! ## Padding
+//!
+//! To ensure safe and efficient memory access, `FixedVec` adds two padding
+//! words at the end of its storage buffer. This padding prevents out-of-bounds
+//! reads in methods like [`get_unchecked`](FixedVec::get_unchecked) and allows
+//! for unaligned access with
+//! [`get_unaligned_unchecked`](FixedVec::get_unaligned_unchecked). The builders
+//! handle this padding automatically. When creating a `FixedVec` from raw parts,
+//! it is the caller's responsibility to ensure this padding is present.
 
-// Declare and export submodules that will be created in subsequent steps.
+// Declare and export submodules.
 #[macro_use]
 pub mod macros;
 pub mod builder;
@@ -86,7 +132,7 @@ use traits::{Storable, Word};
 
 use crate::fixed::proxy::MutProxy;
 
-// Re-export atomic aliases for convenience
+// Re-export atomic aliases for convenience.
 pub use atomic::{AtomicFixedVec, SAtomicFixedVec, UAtomicFixedVec};
 
 // Type aliases for common `FixedVec` configurations.
@@ -175,10 +221,9 @@ impl fmt::Display for Error {
                 bit_width,
             } => write!(
                 f,
-                "value {} at index {} does not fit in {} bits",
-                value, index, bit_width
+                "value {value} at index {index} does not fit in {bit_width} bits"
             ),
-            Error::InvalidParameters(s) => write!(f, "Invalid parameters: {}", s),
+            Error::InvalidParameters(s) => write!(f, "Invalid parameters: {s}"),
         }
     }
 }
@@ -238,13 +283,13 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
     ///
-    /// let data: &[u32] = &;
+    /// let data: &[u32] = &[10, 20, 30, 40, 50];
     /// let vec: UFixedVec<u32> = FixedVec::builder()
     ///     .bit_width(BitWidth::Minimal)
     ///     .build(data)
     ///     .unwrap();
     ///
-    /// assert_eq!(vec.get(1), Some(200));
+    /// assert_eq!(vec.get(1), Some(20));
     /// ```
     pub fn builder() -> builder::FixedVecBuilder<T, W, E> {
         builder::FixedVecBuilder::new()
@@ -294,20 +339,38 @@ where
     /// Creates a [`FixedVec`] from its raw components.
     ///
     /// This constructor allows for the creation of a zero-copy view over an
-    /// existing buffer. It performs checks to ensure that the provided
-    /// parameters are consistent and that the buffer is large enough.
-    ///
-    /// # Arguments
-    ///
-    /// * `bits`: The buffer containing the bit-packed data.
-    /// * `len`: The number of elements in the vector.
-    /// * `bit_width`: The number of bits used for each element.
+    /// existing buffer.
     ///
     /// # Errors
     ///
     /// Returns an [`Error::InvalidParameters`] if `bit_width` is larger than
     /// the word size or if the `bits` buffer is too small to hold the specified
-    /// number of elements.
+    /// number of elements and the required padding.
+    ///
+    /// # Implementation Notes
+    ///
+    /// The provided `bits` buffer must contain at least two extra "padding"
+    /// words at the end. This padding is essential to prevent out-of-bounds
+    /// memory access in methods like `get_unchecked`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    ///
+    /// // 3 elements * 5 bits = 15 bits. This requires 1 data word.
+    /// // We need 2 extra words for padding.
+    /// let mut buffer = vec![0_usize; 3];
+    ///
+    /// // Manually encode data into the first word.
+    /// // 10 (01010), 20 (10100), 30 (11110)
+    /// buffer[0] = 0b11110_10100_01010;
+    ///
+    /// let vec = UFixedVec::<u32, _>::from_parts(&buffer, 3, 5).unwrap();
+    /// assert_eq!(vec.get(0), Some(10));
+    /// assert_eq!(vec.get(1), Some(20));
+    /// assert_eq!(vec.get(2), Some(30));
+    /// ```
     pub fn from_parts(bits: B, len: usize, bit_width: usize) -> Result<Self, Error> {
         if bit_width > <W as traits::Word>::BITS {
             return Err(Error::InvalidParameters(format!(
@@ -404,7 +467,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let data: &[u32] = &;
+    /// let data: &[u32] = &[10, 20, 30];
     /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
     ///
     /// assert_eq!(vec.get(1), Some(20));
@@ -420,28 +483,26 @@ where
 
     /// Returns the element at the specified index without bounds checking.
     ///
-    /// This method does not perform bounds checking and is therefore faster
-    /// than [`get`].
-    ///
     /// # Safety
     ///
     /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    /// The `index` must be less than the vector's `len`.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len);
 
         let bits_per_word = <W as traits::Word>::BITS;
+        // Optimization: if bit_width matches word size, access is trivial.
         if self.bit_width == bits_per_word {
             let val = *self.as_limbs().get_unchecked(index);
+            // Apply endianness correction if needed.
             let final_val = if E::IS_BIG { val.to_be() } else { val };
             return <T as Storable<W>>::from_word(final_val);
         }
 
-        // Calculate the starting bit position of the element.
+        // Calculate the bit position and word index for the element.
         let bit_pos = index * self.bit_width;
-        // Determine the word that contains the start of the element.
         let word_index = bit_pos / bits_per_word;
-        // Find the bit offset within that word.
         let bit_offset = bit_pos % bits_per_word;
 
         let limbs = self.as_limbs();
@@ -460,6 +521,7 @@ where
                 final_word = (low | high) & self.mask;
             }
         } else {
+            // Big-Endian logic requires byte-swapping the words before extraction.
             let word_hi = (*limbs.get_unchecked(word_index)).to_be();
             if bit_offset + self.bit_width <= bits_per_word {
                 final_word = (word_hi << bit_offset) >> (bits_per_word - self.bit_width);
@@ -476,20 +538,15 @@ where
 
     /// Returns the element at `index` using unaligned memory access.
     ///
-    /// This method provides a high-performance alternative to [`get_unchecked`].
-    /// For elements that span word boundaries, `get_unchecked` may perform two
-    /// memory reads. This method performs a single, potentially unaligned read
-    /// of a `Word` and extracts the value with bit shifts.
-    ///
-    /// On architectures that handle unaligned reads efficiently (e.g., x86-64),
-    /// this can be significantly faster for random access patterns. On other
-    /// architectures, it may fall back to the standard `get_unchecked`.
+    /// This method can be significantly faster for random access on architectures
+    /// that handle unaligned reads efficiently (e.g., x86-64). It performs a
+    /// single, potentially unaligned read of a `Word` and extracts the value.
     ///
     /// # Safety
     ///
     /// Calling this method with an out-of-bounds `index` is undefined behavior.
-    /// The `FixedVec` must also have been constructed with sufficient padding
-    /// (at least two `Word`s) to guarantee that the unaligned read does not go
+    /// The `FixedVec` must have been constructed with sufficient padding (at
+    /// least two `Word`s) to guarantee that the unaligned read does not go
     /// past the allocated buffer. This padding is guaranteed by the default
     /// builders.
     #[inline(always)]
@@ -508,15 +565,14 @@ where
 
             let limbs_ptr = self.as_limbs().as_ptr() as *const u8;
 
+            // Perform an unaligned read from the calculated byte position.
             let word: W = (limbs_ptr.add(byte_pos) as *const W).read_unaligned();
             let extracted_word = word >> bit_rem;
 
             <T as Storable<W>>::from_word(extracted_word & self.mask)
         } else {
-            // For Big-Endian, the logic for unaligned reads is highly complex
-            // and architecture-dependent. The standard `get_unchecked` is already
-            // heavily optimized for this case. We fall back to it for correctness
-            // and robust performance.
+            // For Big-Endian, the logic for unaligned reads is complex and
+            // architecture-dependent. Fall back to the standard `get_unchecked`.
             self.get_unchecked(index)
         }
     }
@@ -528,7 +584,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let data: &[u32] = &;
+    /// let data: &[u32] = &[10, 20, 30];
     /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
     /// let mut iter = vec.iter();
     ///
@@ -611,9 +667,11 @@ where
     ///
     /// let vec = fixed_vec![1u32, 2, 3, 4, 5];
     /// let mut windows = vec.windows(3);
+    ///
     /// let slice1 = vec.slice(0, 3).unwrap();
     /// let slice2 = vec.slice(1, 3).unwrap();
     /// let slice3 = vec.slice(2, 3).unwrap();
+    ///
     /// assert_eq!(windows.next().unwrap(), slice1);
     /// assert_eq!(windows.next().unwrap(), slice2);
     /// assert_eq!(windows.next().unwrap(), slice3);
@@ -627,9 +685,7 @@ where
     /// Returns a raw pointer to the storage word containing the start of an element.
     ///
     /// This method returns a pointer to the `Word` in the backing buffer where
-    /// the data for the element at `index` begins. The bit offset of the
-    /// element's first bit *within* that word can be calculated as
-    /// `(index * self.bit_width()) % W::BITS`.
+    /// the data for the element at `index` begins.
     ///
     /// Returns `None` if `index` is out of bounds.
     ///
@@ -637,8 +693,7 @@ where
     ///
     /// This method is safe as it only returns a raw pointer. Dereferencing the
     /// pointer is `unsafe`. The caller must ensure that the pointer is not used
-    /// after the `FixedVec` is dropped or modified. The pointer is not
-    /// guaranteed to be aligned if the backing buffer is not.
+    /// after the `FixedVec` is dropped or modified.
     pub fn addr_of(&self, index: usize) -> Option<*const W> {
         if index >= self.len {
             return None;
@@ -657,18 +712,14 @@ where
 
     /// Hints to the CPU to prefetch the data for the element at `index` into cache.
     ///
-    // This method uses the `_mm_prefetch` intrinsic to reduce memory latency
-    /// for predictable access patterns (e.g., sequential or strided access).
-    ///
-    /// It only has an effect on architectures that support it (e.g., x86, x86-64)
-    /// and compiles to a no-op on other platforms. If `index` is out of bounds,
-    /// this method does nothing.
+    /// This method uses an intrinsic to reduce memory latency for predictable
+    /// access patterns. It only has an effect on architectures that support it
+    /// (e.g., x86, x86-64) and compiles to a no-op on other platforms.
     pub fn prefetch(&self, index: usize) {
         if index >= self.len {
             return;
         }
 
-        // Target only x86 and x86-64 architectures where this intrinsic is available.
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
             use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
@@ -678,12 +729,10 @@ where
 
             let limbs_ptr = self.as_limbs().as_ptr() as *const i8;
 
-            // SAFETY: We have already performed the bounds check on `index`, which
-            // ensures that the calculated `byte_pos` will be within the allocated
-            // buffer (including padding). The pointer is valid.
+            // SAFETY: Bounds check on `index` ensures `byte_pos` is within the
+            // allocated buffer (including padding). The pointer is valid.
             unsafe {
-                // We use _MM_HINT_T0 to indicate a prefetch into all levels of
-                // the cache, which is a good general-purpose default.
+                // Prefetch into all cache levels (a good general-purpose default).
                 _mm_prefetch(limbs_ptr.add(byte_pos), _MM_HINT_T0);
             }
         }
@@ -700,7 +749,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let data: &[u32] = &;
+    /// let data: &[u32] = &[10, 20, 30, 40, 50];
     /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
     ///
     /// assert_eq!(vec.binary_search(&30), Ok(2));
@@ -738,16 +787,10 @@ where
         self.binary_search_by(|probe| f(*probe).cmp(key))
     }
 
-        /// Binary searches this vector with a custom comparison function.
+    /// Binary searches this vector with a custom comparison function.
     ///
     /// The comparator function `f` should return an `Ordering` indicating
-    /// the relation of a probe element to the value being searched for. If the
-    /// vector is sorted, this will find an element in O(log n) time.
-    ///
-    /// If `value` is found, `Ok(idx)` is returned, where `idx` is the index of
-    /// the matching element. If there are multiple matches, any one of the
-    /// matches may be returned. If `value` is not found, `Err(idx)` is returned,
-    /// where `idx` is the insertion point to maintain order.
+    /// the relation of a probe element to the value being searched for.
     ///
     /// # Examples
     ///
@@ -757,7 +800,7 @@ where
     ///
     /// let vec = fixed_vec![0u32, 1, 1, 2, 3];
     ///
-    /// // Search for a value by comparing it to the probe
+    /// // Search for a value by comparing it to the probe.
     /// let result = vec.binary_search_by(|probe| probe.cmp(&1));
     /// assert!(matches!(result, Ok(1) | Ok(2)));
     ///
@@ -792,9 +835,6 @@ where
     /// partition point, and all elements for which `pred` returns `false` are
     /// on the right.
     ///
-    /// This method assumes that the vector is already partitioned. It finds the
-    /// partition point in O(log n) time.
-    ///
     /// # Examples
     ///
     /// ```
@@ -802,13 +842,9 @@ where
     ///
     /// let vec = fixed_vec![0u32, 1, 2, 3, 4, 5];
     ///
-    /// // Find the partition point for elements `< 3`
+    /// // Find the partition point for elements `< 3`.
     /// let partition_idx = vec.partition_point(|&x| x < 3);
     /// assert_eq!(partition_idx, 3);
-    ///
-    /// // All elements are `< 10`
-    /// let all_true = vec.partition_point(|&x| x < 10);
-    /// assert_eq!(all_true, 6);
     /// ```
     pub fn partition_point<P>(&self, mut pred: P) -> usize
     where
@@ -861,9 +897,6 @@ where
     type IntoIter = iter::FixedVecIntoIter<'static, T, W, E>;
 
     /// Consumes the vector and returns an iterator over its elements.
-    ///
-    /// This implementation is "lazy" and decodes values on the fly without
-    /// allocating an intermediate `Vec<T>`.
     fn into_iter(self) -> Self::IntoIter {
         iter::FixedVecIntoIter::new(self)
     }
@@ -880,8 +913,8 @@ where
     /// Creates a `FixedVec` by collecting elements from an iterator.
     ///
     /// The bit width is determined automatically using the [`BitWidth::Minimal`]
-    /// strategy for optimal space usage. This requires collecting the iterator
-    /// into a temporary `Vec<T>` to analyze its contents before compression.
+    /// strategy. This requires collecting the iterator into a temporary `Vec<T>`
+    /// to analyze its contents before compression.
     ///
     /// # Examples
     ///
@@ -896,9 +929,6 @@ where
     /// ```
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let data: Vec<T> = iter.into_iter().collect();
-        // The builder defaults to BitWidth::Minimal, which is appropriate for
-        // FromIterator as it adapts to the collected data. This build call
-        // should not fail unless there's an internal logic error.
         Self::builder().build(&data).unwrap()
     }
 }
@@ -910,9 +940,6 @@ where
     E: Endianness,
 {
     /// Creates an empty [`FixedVec`] with a default `bit_width` of 1.
-    ///
-    /// A `bit_width` of 1 is chosen as a safe default that can represent
-    /// the value 0.
     fn default() -> Self {
         // SAFETY: An empty vector with a valid bit_width is always safe.
         unsafe { Self::new_unchecked(Vec::new(), 0, 1) }
@@ -928,14 +955,20 @@ where
 {
     /// Creates a new, empty [`FixedVec`] with a specified bit width.
     ///
-    /// # Arguments
-    ///
-    /// * `bit_width`: The number of bits to allocate for each element.
-    ///
     /// # Errors
     ///
     /// Returns an [`Error::InvalidParameters`] if `bit_width` is greater than
     /// the number of bits in the storage word `W`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    ///
+    /// let vec: UFixedVec<u32> = FixedVec::new(8).unwrap();
+    /// assert!(vec.is_empty());
+    /// assert_eq!(vec.bit_width(), 8);
+    /// ```
     pub fn new(bit_width: usize) -> Result<Self, Error> {
         if bit_width > <W as traits::Word>::BITS {
             return Err(Error::InvalidParameters(format!(
@@ -972,6 +1005,7 @@ where
     pub fn push(&mut self, value: T) {
         let value_w = <T as Storable<W>>::into_word(value);
 
+        // Check if the value fits within the configured bit width.
         if (value_w & !self.mask) != W::ZERO {
             panic!(
                 "Value {:?} does not fit in the configured bit_width of {}",
@@ -980,10 +1014,12 @@ where
         }
 
         let bits_per_word = <W as traits::Word>::BITS;
+        // Grow the underlying buffer if the new element would exceed its bit capacity.
         if (self.len + 1) * self.bit_width > self.bits.len() * bits_per_word {
             self.bits.push(W::ZERO);
         }
 
+        // SAFETY: We have ensured the value fits and the buffer has capacity.
         unsafe {
             self.set_unchecked(self.len, value_w);
         }
@@ -994,6 +1030,16 @@ where
     /// Removes the last element from the vector and returns it.
     ///
     /// Returns `None` if the vector is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed_vec;
+    ///
+    /// let mut vec = fixed_vec![1u32, 2, 3];
+    /// assert_eq!(vec.pop(), Some(3));
+    /// assert_eq!(vec.len(), 2);
+    /// ```
     pub fn pop(&mut self) -> Option<T> {
         if self.is_empty() {
             return None;
@@ -1003,9 +1049,7 @@ where
         Some(value)
     }
 
-    /// Removes all elements from the vector.
-    ///
-    /// After this call, `len()` will be 0.
+    /// Removes all elements from the vector, leaving the capacity unchanged.
     pub fn clear(&mut self) {
         self.len = 0;
     }
@@ -1013,12 +1057,21 @@ where
     /// Creates a new, empty [`FixedVec`] with a specified bit width and capacity.
     ///
     /// The vector will be able to hold at least `capacity` elements without
-    /// reallocating. If `capacity` is 0, the vector will not allocate.
+    /// reallocating.
     ///
     /// # Errors
     ///
     /// Returns an [`Error::InvalidParameters`] if `bit_width` is greater than
     /// the number of bits in the storage word `W`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    ///
+    /// let vec: UFixedVec<u32> = FixedVec::with_capacity(5, 1000).unwrap();
+    /// assert!(vec.capacity() >= 1000);
+    /// ```
     pub fn with_capacity(bit_width: usize, capacity: usize) -> Result<Self, Error> {
         if bit_width > <W as traits::Word>::BITS {
             return Err(Error::InvalidParameters(format!(
@@ -1047,8 +1100,7 @@ where
         }
         let word_capacity = self.bits.capacity();
         if word_capacity <= 2 {
-            // Not enough for data + padding
-            return 0;
+            return 0; // Not enough for data + padding.
         }
         // Subtract padding words before calculating element capacity.
         ((word_capacity - 2) * <W as traits::Word>::BITS) / self.bit_width
@@ -1061,8 +1113,19 @@ where
 
     /// Reserves capacity for at least `additional` more elements to be inserted.
     ///
-    /// After calling `reserve`, capacity will be greater than or equal to
-    /// `self.len() + additional`. Does nothing if capacity is already sufficient.
+    /// # Panics
+    ///
+    /// Panics if the new capacity overflows `usize`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    ///
+    /// let mut vec: UFixedVec<u32> = FixedVec::new(4).unwrap();
+    /// vec.reserve(100);
+    /// assert!(vec.capacity() >= 100);
+    /// ```
     pub fn reserve(&mut self, additional: usize) {
         let target_element_capacity = self.len.saturating_add(additional);
         if self.capacity() >= target_element_capacity {
@@ -1082,13 +1145,31 @@ where
     /// Resizes the vector so that its length is equal to `new_len`.
     ///
     /// If `new_len` is greater than the current length, the vector is extended
-    /// with elements created by cloning `value`. If `new_len` is less than the
-    /// current length, the vector is truncated.
+    /// by appending `value`. If `new_len` is less than the current length, the
+    /// vector is truncated.
     ///
     /// # Panics
     ///
     /// Panics if the `value` used for filling does not fit in the configured
     /// `bit_width`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    ///
+    /// let mut vec = UFixedVec::<u32>::new(4).unwrap();
+    /// vec.push(1);
+    /// vec.push(2);
+    ///
+    /// vec.resize(4, 10);
+    /// assert_eq!(vec.len(), 4);
+    /// assert_eq!(vec.get(3), Some(10));
+    ///
+    /// vec.resize(1, 0);
+    /// assert_eq!(vec.len(), 1);
+    /// assert_eq!(vec.get(0), Some(1));
+    /// ```
     #[inline(always)]
     pub fn resize(&mut self, new_len: usize, value: T) {
         if new_len > self.len {
@@ -1122,9 +1203,6 @@ where
     }
 
     /// Shrinks the capacity of the vector as much as possible.
-    ///
-    /// This will reduce the memory usage of the vector to the minimum required
-    /// to hold the current number of elements.
     pub fn shrink_to_fit(&mut self) {
         let min_word_len = if self.len == 0 {
             0
@@ -1132,8 +1210,7 @@ where
             let bits_per_word = <W as traits::Word>::BITS;
             let required_total_bits = self.len.saturating_mul(self.bit_width);
             let required_words = required_total_bits.div_ceil(bits_per_word);
-            // +1 for the padding word.
-            required_words + 1
+            required_words + 2 // +2 for padding
         };
 
         if self.bits.len() > min_word_len {
@@ -1203,9 +1280,7 @@ where
         }
     }
 
-    /// A high-performance helper to shift a range of bits to the left in-place.
-    ///
-    /// This operation is optimized with a fast path for word-aligned shifts.
+    /// Shifts a range of bits to the left in-place.
     fn shift_bits_left(&mut self, start_bit: usize, shift_amount: usize, num_bits_to_move: usize) {
         if num_bits_to_move == 0 {
             return;
@@ -1213,36 +1288,21 @@ where
 
         let bits_per_word = <W as Word>::BITS;
 
-        // --- Fast Path: Word-aligned shift ---
+        // Fast path for word-aligned shifts, using `copy_within`.
         if shift_amount.is_multiple_of(bits_per_word) {
             let start_write_word = start_bit / bits_per_word;
             let start_read_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
 
-            // Check if there is anything to copy from within the buffer.
             if start_read_word < self.bits.len() {
                 let read_end = (start_read_word + num_words_to_move).min(self.bits.len());
                 self.bits
                     .copy_within(start_read_word..read_end, start_write_word);
             }
-
-            // If the shift moves data from "beyond" the buffer, zero out the rest.
-            let words_copied = self
-                .bits
-                .len()
-                .saturating_sub(start_read_word)
-                .min(num_words_to_move);
-            if words_copied < num_words_to_move {
-                let zero_start = start_write_word + words_copied;
-                let zero_end = (start_write_word + num_words_to_move).min(self.bits.len());
-                if zero_start < zero_end {
-                    self.bits[zero_start..zero_end].fill(W::ZERO);
-                }
-            }
             return;
         }
 
-        // --- Slow Path: Unaligned shift (word-at-a-time) ---
+        // Slow path for unaligned shifts (word-at-a-time).
         let shift_rem = shift_amount % bits_per_word;
         let inv_shift_rem = bits_per_word - shift_rem;
 
@@ -1263,7 +1323,7 @@ where
 
             let value_to_write = low_part | high_part;
 
-            // Create a mask for the bits we are about to modify in the destination word.
+            // Create a mask for the bits we are about to modify.
             let mut mask = W::max_value();
             if write_word_idx == start_write_word {
                 mask &= W::max_value() << (start_write_bit % bits_per_word);
@@ -1280,10 +1340,7 @@ where
         }
     }
 
-    /// A high-performance helper to shift a range of bits to the right in-place.
-    ///
-    /// This operation is optimized with a fast path for word-aligned shifts.
-    /// The unaligned path iterates from right to left to avoid data corruption.
+    /// Shifts a range of bits to the right in-place.
     fn shift_bits_right(&mut self, start_bit: usize, shift_amount: usize, num_bits_to_move: usize) {
         if num_bits_to_move == 0 {
             return;
@@ -1294,12 +1351,12 @@ where
         // Ensure the vector has enough capacity and is resized to accommodate the shift.
         let required_end_bit = start_bit + shift_amount + num_bits_to_move;
         let required_words = required_end_bit.div_ceil(bits_per_word);
-        let required_vec_len = required_words.saturating_add(1); // +1 for padding
+        let required_vec_len = required_words.saturating_add(2); // +2 for padding
         if self.bits.len() < required_vec_len {
             self.bits.resize(required_vec_len, W::ZERO);
         }
 
-        // --- Fast Path: Word-aligned shift ---
+        // Fast path for word-aligned shifts.
         if shift_amount.is_multiple_of(bits_per_word) {
             let start_read_word = start_bit / bits_per_word;
             let start_write_word = (start_bit + shift_amount) / bits_per_word;
@@ -1312,7 +1369,7 @@ where
                 );
             }
         } else {
-            // --- Slow Path: Unaligned shift (from right to left) ---
+            // Slow path for unaligned shifts (iterating from right to left).
             let word_shift = shift_amount / bits_per_word;
             let shift_rem = shift_amount % bits_per_word;
             let inv_shift_rem = bits_per_word - shift_rem;
@@ -1326,7 +1383,7 @@ where
             for write_word_idx in (start_write_word..=end_write_word).rev() {
                 let read_word_idx = write_word_idx - word_shift;
 
-                // Fetch source data from two potential source words.
+                // Fetch source data, which may span two words.
                 let high_part =
                     self.bits.get(read_word_idx).copied().unwrap_or(W::ZERO) << shift_rem;
                 let low_part = if read_word_idx > 0 {
@@ -1336,7 +1393,7 @@ where
                 };
                 let value_to_write = low_part | high_part;
 
-                // Create a mask for the bits we are about to modify in the destination word.
+                // Create a mask for the bits we are about to modify.
                 let mut mask = W::max_value();
                 if write_word_idx == start_write_word {
                     mask &= W::max_value() << (start_write_bit % bits_per_word);
@@ -1353,7 +1410,7 @@ where
             }
         }
 
-        // --- Cleanup: Zero out the vacated bits at the beginning of the shifted region ---
+        // Zero out the vacated bits at the beginning of the shifted region.
         let mut clear_bit = start_bit;
         let end_clear_bit = start_bit + shift_amount;
 
@@ -1390,7 +1447,7 @@ where
             self.pop().unwrap()
         } else {
             let old_val = unsafe { self.get_unchecked(index) };
-            let last_val = self.pop().unwrap(); // pop already decrements len
+            let last_val = self.pop().unwrap(); // `pop` already decrements len
             self.set(index, last_val);
             old_val
         }
@@ -1426,8 +1483,6 @@ where
 
     /// Extends the vector with the elements from a slice.
     ///
-    /// This method is generally more efficient than calling `push` in a loop.
-    ///
     /// # Panics
     ///
     /// Panics if any value in `other` does not fit within the `bit_width`.
@@ -1438,8 +1493,7 @@ where
 
         self.reserve(other.len());
 
-        // Pre-validate all values in the slice to ensure atomicity.
-        // If any value is invalid, the vector remains unchanged.
+        // Pre-validate all values to ensure atomicity.
         let bits_per_word = <W as traits::Word>::BITS;
         let limit = if self.bit_width < bits_per_word {
             W::ONE << self.bit_width
@@ -1461,7 +1515,7 @@ where
         let old_len = self.len;
         let new_len = old_len + other.len();
 
-        // Ensure the underlying Vec has enough *initialized* words to write into.
+        // Ensure the underlying Vec has enough initialized words to write into.
         let required_total_bits = new_len * self.bit_width;
         let required_data_words = required_total_bits.div_ceil(bits_per_word);
         let required_vec_len = required_data_words.saturating_add(2); // Padding
@@ -1469,9 +1523,9 @@ where
             self.bits.resize(required_vec_len, W::ZERO);
         }
 
-        // Write the new values in an optimized loop.
+        // Write the new values.
         for (i, &value) in other.iter().enumerate() {
-            // SAFETY: We have already reserved, resized, and validated the data.
+            // SAFETY: We have reserved, resized, and validated the data.
             unsafe {
                 self.set_unchecked(old_len + i, <T as Storable<W>>::into_word(value));
             }
@@ -1491,9 +1545,7 @@ where
 {
     /// Returns a mutable proxy for an element at `index`.
     ///
-    /// This allows for syntax like `*vec.at_mut(i).unwrap() = new_value;`. The
-    /// proxy holds a temporary copy of the value and writes it back into the
-    /// vector when it is dropped.
+    /// This allows for syntax like `*vec.at_mut(i).unwrap() = new_value;`.
     ///
     /// Returns `None` if the index is out of bounds.
     pub fn at_mut(&mut self, index: usize) -> Option<MutProxy<'_, T, W, E, B>> {
@@ -1509,9 +1561,7 @@ where
     ///
     /// Modifying the returned slice is logically unsafe. Any change to the bits
     /// can violate the invariants of the `FixedVec`, leading to panics or
-    /// incorrect results on subsequent method calls. The caller must ensure
-    /// that any modifications maintain the bit-packed structure as expected by
-    /// the vector's `len` and `bit_width`.
+    /// incorrect results on subsequent method calls.
     pub fn as_mut_limbs(&mut self) -> &mut [W] {
         self.bits.as_mut()
     }
@@ -1528,7 +1578,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
     ///
-    /// let data: &[u32] = &;
+    /// let data: &[u32] = &[10, 20, 30];
     /// let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(data).unwrap();
     ///
     /// vec.set(1, 99);
@@ -1599,30 +1649,33 @@ where
                 *high_word &= !high_mask;
                 *high_word |= value_w >> (self.bit_width - bits_in_high);
             }
-        } else if bit_offset + self.bit_width <= bits_per_word {
-            let shift = bits_per_word - self.bit_width - bit_offset;
-            let mask = self.mask << shift;
-            let word = &mut limbs[word_index];
-            *word &= !mask.to_be();
-            *word |= (value_w << shift).to_be();
         } else {
-            let (left, right) = limbs.split_at_mut(word_index + 1);
-            let high_word = &mut left[word_index];
-            let low_word = &mut right[0];
+            // Big-Endian set logic.
+            if bit_offset + self.bit_width <= bits_per_word {
+                let shift = bits_per_word - self.bit_width - bit_offset;
+                let mask = self.mask << shift;
+                let word = &mut limbs[word_index];
+                *word &= !mask.to_be();
+                *word |= (value_w << shift).to_be();
+            } else {
+                let (left, right) = limbs.split_at_mut(word_index + 1);
+                let high_word = &mut left[word_index];
+                let low_word = &mut right[0];
 
-            let bits_in_first = bits_per_word - bit_offset;
-            let bits_in_second = self.bit_width - bits_in_first;
+                let bits_in_first = bits_per_word - bit_offset;
+                let bits_in_second = self.bit_width - bits_in_first;
 
-            let high_mask =
-                (self.mask >> bits_in_second) << (bits_per_word - bits_in_first - bit_offset);
-            let high_value = value_w >> bits_in_second;
-            *high_word &= !high_mask.to_be();
-            *high_word |= (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
+                let high_mask =
+                    (self.mask >> bits_in_second) << (bits_per_word - bits_in_first - bit_offset);
+                let high_value = value_w >> bits_in_second;
+                *high_word &= !high_mask.to_be();
+                *high_word |= (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
 
-            let low_mask = self.mask << (bits_per_word - bits_in_second);
-            let low_value = value_w << (bits_per_word - bits_in_second);
-            *low_word &= !low_mask.to_be();
-            *low_word |= low_value.to_be();
+                let low_mask = self.mask << (bits_per_word - bits_in_second);
+                let low_value = value_w << (bits_per_word - bits_in_second);
+                *low_word &= !low_mask.to_be();
+                *low_word |= low_value.to_be();
+            }
         }
     }
 
@@ -1656,15 +1709,11 @@ where
             });
         }
 
-        // `set` would panic, but we've pre-flighted the check.
         unsafe { self.set_unchecked(index, value_w) };
         Ok(())
     }
 
     /// Returns an iterator over non-overlapping, mutable chunks of the vector.
-    ///
-    /// Each chunk is a mutable [`FixedVecSlice`] of length `chunk_size`,
-    /// except for the last chunk, which may be shorter.
     ///
     /// # Panics
     ///
@@ -1696,6 +1745,7 @@ where
         F: FnMut(T) -> T,
     {
         if E::IS_LITTLE {
+            // This path operates on words directly for efficiency.
             let mut word_op = |word: W| -> W {
                 let val_t = <T as Storable<W>>::from_word(word);
                 let new_val_t = f(val_t);
@@ -1703,6 +1753,7 @@ where
             };
             self.map_in_place_generic_word_op(&mut word_op);
         } else {
+            // Fallback for BE, which is more complex to optimize at the word level.
             for i in 0..self.len {
                 let old_val_t = self.get_unchecked(i);
                 let new_val_t = f(old_val_t);
@@ -1711,7 +1762,7 @@ where
         }
     }
 
-    /// Internal worker for the generic path, operating purely on `W` for max performance.
+    /// Internal worker for `map_in_place_unchecked`, operating on `W`.
     unsafe fn map_in_place_generic_word_op<FW>(&mut self, f_w: &mut FW)
     where
         FW: FnMut(W) -> W,
@@ -1723,6 +1774,7 @@ where
 
         let bits_per_word = <W as Word>::BITS;
 
+        // Path for power-of-two bit widths that align with word boundaries.
         if bit_width.is_power_of_two() && bits_per_word % bit_width == 0 {
             let elems_per_word = bits_per_word / bit_width;
             let mask = self.mask;
@@ -1738,7 +1790,7 @@ where
                 }
                 *self.bits.as_mut().get_unchecked_mut(word_idx) = new_word;
             }
-
+            // Process remaining elements individually.
             let start_idx = num_full_words * elems_per_word;
             for i in start_idx..self.len {
                 let old_val_t = self.get(i).unwrap();
@@ -1748,6 +1800,7 @@ where
             return;
         }
 
+        // Generic path for non-power-of-two bit widths.
         let limbs = self.bits.as_mut();
         let num_words = (self.len * bit_width).div_ceil(bits_per_word);
         let last_word_idx = num_words.saturating_sub(1);
@@ -1810,9 +1863,6 @@ where
 
     /// Applies a function to all elements in the vector, modifying them in-place.
     ///
-    /// This method is highly optimized, with a fast path for bit widths that are
-    /// a power of two.
-    ///
     /// # Panics
     ///
     /// Panics if the function `f` returns a value that does not fit within the
@@ -1823,8 +1873,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
     ///
-    /// // Values up to 9*2=18 will require 5 bits. We must build the vector
-    /// // with enough space for the final results.
+    /// // Values up to 9*2=18, requires 5 bits. We must build with enough space.
     /// let initial_data: Vec<u32> = (0..10).collect();
     /// let mut vec: UFixedVec<u32> = FixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(5))
@@ -1833,17 +1882,14 @@ where
     ///
     /// vec.map_in_place(|x| x * 2);
     ///
-    /// let expected: Vec<u32> = (0..10).map(|x| x * 2).collect();
     /// for i in 0..vec.len() {
-    ///     assert_eq!(vec.get(i), Some(expected[i]));
+    ///     assert_eq!(vec.get(i), Some(i as u32 * 2));
     /// }
     /// ```
     pub fn map_in_place<F>(&mut self, mut f: F)
     where
         F: FnMut(T) -> T,
     {
-        // Capture necessary fields from `self` by value before creating the closure.
-        // This prevents the closure from borrowing `self`.
         let bit_width = self.bit_width;
         let limit = if bit_width < <W as Word>::BITS {
             W::ONE << bit_width
@@ -1851,20 +1897,17 @@ where
             W::max_value()
         };
 
-        // This closure now captures `bit_width` and `limit` by value, not `&self`.
         let safe_f = |value: T| {
             let new_value = f(value);
             let new_value_w = <T as Storable<W>>::into_word(new_value);
             if bit_width < <W as Word>::BITS && new_value_w >= limit {
                 panic!(
-                    "map_in_place: returned value {:?} does not fit in the configured bit_width of {}",
-                    new_value_w, bit_width
+                    "map_in_place: returned value {new_value_w:?} does not fit in bit_width {bit_width}"
                 );
             }
             new_value
         };
 
-        // Now, `self` is not borrowed by the closure, so we can mutably borrow it here.
         // SAFETY: The `safe_f` wrapper ensures that any value passed to the
         // underlying unsafe function is valid for the vector's bit_width.
         unsafe {
@@ -1947,9 +1990,6 @@ where
 
     /// Splits the vector into two mutable slices at `mid`.
     ///
-    /// The first slice contains elements `[0, mid)`, and the second contains
-    /// elements `[mid, len)`.
-    ///
     /// # Panics
     ///
     /// Panics if `mid > len`.
@@ -1986,7 +2026,7 @@ where
         if self.is_empty() || mid == 0 || mid == self.len {
             return;
         }
-        // A simple, correct implementation. Can be optimized later.
+        // A simple, correct implementation.
         let mut temp = Vec::with_capacity(mid);
         for i in 0..mid {
             temp.push(unsafe { self.get_unchecked(i) });
@@ -2061,7 +2101,7 @@ where
             let value_w = <T as Storable<W>>::into_word(value);
             if self.bit_width < bits_per_word && value_w >= limit {
                 panic!(
-                    "Value {:?} returned by closure does not fit in the configured bit_width of {}",
+                    "Value {:?} returned by closure does not fit in bit_width {}",
                     value_w, self.bit_width
                 );
             }
@@ -2071,12 +2111,10 @@ where
 
     /// Copies a sequence of elements from a source `FixedVec` into this one.
     ///
-    /// The source and destination ranges may overlap.
-    ///
     /// # Panics
     ///
-    /// Panics if the source and destination vectors do not have the same `bit_width`.
-    /// Panics if the source or destination ranges are out of bounds.
+    /// Panics if the source and destination vectors do not have the same `bit_width`,
+    /// or if the source or destination ranges are out of bounds.
     pub fn copy_from_slice(
         &mut self,
         src: &Self,
@@ -2115,7 +2153,7 @@ where
             let dest_words =
                 &mut self.bits.as_mut()[dest_word_start..dest_word_start + num_words_to_copy];
 
-            // If the last word is not fully copied, we need to mask it to avoid overwriting unrelated data.
+            // If the last word is not fully copied, we need to mask it.
             let residual_bits = total_bits_to_copy % bits_per_word;
             if residual_bits == 0 {
                 dest_words.copy_from_slice(src_words);
@@ -2132,9 +2170,8 @@ where
             }
         } else {
             // Slow path: copy element by element if alignments differ.
-            // This can be further optimized, but element-wise is a correct fallback.
-            // The check for overlapping ranges is important for correctness.
             if dest_index > src_range.start && dest_index < src_range.end {
+                // Copy backwards if ranges overlap and dest is after src.
                 for i in (0..len).rev() {
                     let val = unsafe { src.get_unchecked(src_range.start + i) };
                     unsafe {
@@ -2163,8 +2200,7 @@ where
 {
     /// Checks for equality between two `FixedVec` instances.
     ///
-    /// This comparison is efficient. It first checks `len` and `bit_width`,
-    /// then performs a bit-level comparison of the underlying storage.
+    /// It first checks `len` and `bit_width`, then the underlying storage.
     fn eq(&self, other: &FixedVec<T, W, E, B2>) -> bool {
         if self.len() != other.len() || self.bit_width() != other.bit_width() {
             return false;
@@ -2174,8 +2210,6 @@ where
 }
 
 /// Implements `PartialEq` for comparing a `FixedVec` with a standard slice.
-///
-/// This performs an element-by-element comparison.
 impl<T, W, E, B, T2> PartialEq<&[T2]> for FixedVec<T, W, E, B>
 where
     T: Storable<W> + PartialEq<T2>,
@@ -2222,9 +2256,6 @@ where
     E: Endianness,
 {
     /// Converts a `Vec`-backed `FixedVec` into a `Box<[]>`-backed `FixedVec`.
-    ///
-    /// This is a cheap operation that does not involve reallocating memory for
-    /// the data buffer.
     fn from(vec: FixedVec<T, W, E, Vec<W>>) -> Self {
         unsafe {
             Self::new_unchecked(vec.bits.into_boxed_slice(), vec.len, vec.bit_width)
@@ -2239,8 +2270,6 @@ where
     E: Endianness,
 {
     /// Converts a `Box<[]>`-backed `FixedVec` into a `Vec`-backed `FixedVec`.
-    /// This is a cheap operation that does not involve reallocating memory for
-    /// the data buffer.
     fn from(vec: FixedVec<T, W, E, Box<[W]>>) -> Self {
         unsafe {
             Self::new_unchecked(vec.bits.into_vec(), vec.len, vec.bit_width)

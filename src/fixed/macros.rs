@@ -1,31 +1,76 @@
 //! # Macros for `FixedVec`
 //!
 //! This module provides the [`fixed_vec!`] macro for creating a [`FixedVec`]
-//! with a `vec!`-like syntax.
+//! with a `vec!`-like syntax. This is convenient for creating small, fixed-size
+//! vectors in tests or examples.
 
 /// Creates a `FixedVec` with default parameters.
 ///
 /// This macro simplifies the creation of `FixedVec` by using default parameters
 /// (`usize` for the storage word, `LittleEndian` for byte order) inferred
 /// from the element type. It uses `BitWidth::Minimal` for space efficiency.
+///
+/// There are three forms of this macro:
+///
+/// - Create a vector from a list of elements:
+///   ```
+///   # use compressed_intvec::fixed_vec;
+///   let vec = fixed_vec![10u32, 20, 30];
+///   # assert_eq!(vec.len(), 3);
+///   ```
+///
+/// - Create a vector from a repeated element:
+///   ```
+///   # use compressed_intvec::fixed_vec;
+///   let vec = fixed_vec![0i16; 100];
+///   # assert_eq!(vec.len(), 100);
+///   ```
+///
+/// - Create an empty vector (the element type must be specified):
+///   ```
+///   # use compressed_intvec::fixed_vec;
+///   # use compressed_intvec::fixed::UFixedVec;
+///   let vec: UFixedVec<u32> = fixed_vec![];
+///   # assert!(vec.is_empty());
+///   ```
+///
+/// # Examples
+///
+/// ```
+/// use compressed_intvec::fixed_vec;
+/// use compressed_intvec::fixed::UFixedVec;
+///
+/// // Create a vector from a list of elements.
+/// let vec = fixed_vec![10u32, 20, 30];
+/// assert_eq!(vec.len(), 3);
+/// assert_eq!(vec.bit_width(), 5); // 30 requires 5 bits
+///
+/// // Create a vector from a repeated element.
+/// let vec_rep = fixed_vec![0i16; 100];
+/// assert_eq!(vec_rep.len(), 100);
+/// assert_eq!(vec_rep.get(50), Some(0));
+///
+/// // Create an empty vector (type annotation is required).
+/// let empty: UFixedVec<u64> = fixed_vec![];
+/// assert!(empty.is_empty());
+/// ```
 #[macro_export]
 macro_rules! fixed_vec {
     // Empty vector: `fixed_vec![]`
-    // Requires type annotation from the user, e.g., `let v: UFixedVec<u32> = fixed_vec![];`
+    // Requires type annotation from the user.
     () => {
         $crate::fixed::FixedVec::builder().build(&[]).unwrap()
     };
 
     // From list: `fixed_vec![a, b, c]`
     ($($elem:expr),+ $(,)?) => {
-        // Delegate to the hidden helper function.
-        // The compiler infers `T` from the slice `&[$($elem),+]`.
+        // Delegate to a helper function to avoid repeating complex bounds.
         $crate::fixed::macros::from_slice(&[$($elem),+])
     };
 
     // From element and length: `fixed_vec![elem; len]`
     ($elem:expr; $len:expr) => {
-        // Delegate to the hidden helper function.
+        // Delegate to a helper function.
         $crate::fixed::macros::from_repetition($elem, $len)
     };
 }
@@ -41,6 +86,9 @@ use dsi_bitstream::prelude::Endianness;
 use num_traits::ToPrimitive;
 
 /// A hidden helper function for the `fixed_vec![...]` macro variant.
+///
+/// This function is not intended for direct use. It is called by the macro
+/// to construct a `FixedVec` from a slice of elements.
 #[doc(hidden)]
 pub fn from_slice<T>(slice: &[T]) -> FixedVec<T, <T as DefaultParams>::W, <T as DefaultParams>::E>
 where
@@ -48,7 +96,7 @@ where
     <T as DefaultParams>::W: Word,
     <T as DefaultParams>::E: Endianness,
     FixedVecBuilder<T, <T as DefaultParams>::W, <T as DefaultParams>::E>: Default,
-    // The complex bound for the builder's `build` method.
+    // This complex bound is required by the `build` method of the builder.
     for<'a> dsi_bitstream::impls::BufBitWriter<
         <T as DefaultParams>::E,
         dsi_bitstream::impls::MemWordWriterVec<
@@ -64,6 +112,9 @@ where
 }
 
 /// A hidden helper function for the `fixed_vec![elem; len]` macro variant.
+///
+/// This function is not intended for direct use. It is called by the macro
+/// to construct a `FixedVec` by repeating an element.
 #[doc(hidden)]
 pub fn from_repetition<T>(
     elem: T,
@@ -74,7 +125,7 @@ where
     <T as DefaultParams>::W: Word,
     <T as DefaultParams>::E: Endianness,
     FixedVecBuilder<T, <T as DefaultParams>::W, <T as DefaultParams>::E>: Default,
-    // The complex bound for the builder's `build` method.
+    // This complex bound is required by the `build` method of the builder.
     for<'a> dsi_bitstream::impls::BufBitWriter<
         <T as DefaultParams>::E,
         dsi_bitstream::impls::MemWordWriterVec<

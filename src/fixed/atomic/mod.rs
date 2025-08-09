@@ -1,44 +1,62 @@
-//! # `AtomicFixedVec`: A Thread-Safe Fixed-Width Integer Vector
+//! A thread-safe, compressed vector of integers with fixed-width encoding.
 //!
-//! This module provides `AtomicFixedVec`, a variant of `FixedVec` designed for
-//! safe, highly-performant concurrent access from multiple threads. It guarantees
-//! atomicity for all operations by transparently selecting the optimal strategy.
+//! This module provides [`AtomicFixedVec`], a data structure that behaves like
+//! [`FixedVec`](crate::fixed::FixedVec) but allows for concurrent access and
+//! modification from multiple threads. It is designed for scenarios where a
+//! large collection of integers must be shared and mutated in a parallel
+//! environment.
 //!
-//! Unlike `FixedVec`, this structure does not support dynamic resizing operations
-//! like `push` or `pop`, as these cannot be implemented efficiently and safely
-//! in a lock-free manner for a shared vector. The intended use case is to
-//! create the vector from an initial set of data and then share it across
-//! threads for concurrent reads and updates of existing elements.
+//! All operations that modify the vector's contents are implemented using
+//! atomic instructions (e.g., compare-and-swap loops), ensuring thread safety
+//! without requiring a global lock.
 //!
-//! ## Concurrency Strategy
+//! # Atomicity Guarantees and Locking
 //!
-//! This implementation uses a hybrid strategy to balance performance, space efficiency,
-//! and correctness, with a storage backend fixed to `u64` words:
+//! The atomicity of operations depends on the configured `bit_width`.
 //!
-//! - **Single-Word Operations (Lock-Free)**: For elements that are guaranteed to be
-//!   contained within a single `AtomicU64`, all operations are fully lock-free
-//!   using standard compare-and-swap (CAS) loops. This is the common path for
-//!   bit-widths that are powers of two (e.g., 8, 16, 32).
+//! - **Power-of-Two `bit_width`**: When the `bit_width` is a power of two
+//!   (e.g., 2, 4, 8, 16, 32), and it evenly divides the 64-bit word size,
+//!   most operations can be performed with lock-free atomic instructions.
+//!   This is because each element is guaranteed to be fully contained within a
+//!   single `AtomicU64` word.
 //!
-//! - **Spanning-Word Operations (Locked)**: For elements that may span the
-//!   boundary between two `AtomicU64` words, operations are protected by a lock.
-//!   The lock serializes the multi-word update, ensuring it is performed atomically
-//!   with respect to both other spanning updates and single-word lock-free updates.
+//! - **Non-Power-of-Two `bit_width`**: When the `bit_width` is not a power of
+//!   two, an element's value may span across the boundary of two `AtomicU64`
+//!   words. Modifying such an element requires updating two words simultaneously,
+//!   which cannot be done in a single atomic hardware instruction.
 //!
-//! This design ensures that `AtomicFixedVec` is always as space-efficient as
-//! `FixedVec` while providing robust atomic guarantees for all possible bit-widths.
+//! To handle this case, `AtomicFixedVec` uses a technique called "lock striping".
+//! It maintains a pool of `parking_lot::Mutex` locks. When an operation needs
+//! to modify a value that spans two words, it acquires a lock for that specific
+//! memory region. This ensures that the two-word update is itself atomic with
+//! respect to other threads, while still allowing concurrent operations on
+//! different parts of the vector. This approach avoids a single global lock,
+//! preserving a high degree of parallelism.
+//!
+//! ### Performance Considerations
+//!
+//! The trade-off is between memory compactness and performance. While a
+//! non-power-of-two `bit_width` provides the most space-efficient storage,
+//! it may incur a performance overhead for write operations that span word
+//! boundaries due to locking.
+//!
+//! For write-heavy, performance-critical workloads, choosing a power-of-two
+//! `bit_width` (e.g., by using [`BitWidth::PowerOfTwo`]) is recommended to
+//! ensure all operations remain lock-free.
 //!
 //! # Examples
 //!
+//! ## Basic Usage
+//!
 //! ```
 //! use compressed_intvec::prelude::*;
+//! use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec};
 //! use std::sync::Arc;
 //! use std::thread;
 //! use std::sync::atomic::Ordering;
-//! use crate::fixed::proxy;
 //!
 //! // Create from a slice using the builder.
-//! let initial_data: Vec<u32> = vec!;
+//! let initial_data: Vec<u32> = vec![10, 20, 30, 40];
 //! let atomic_vec: Arc<UAtomicFixedVec<u32>> = Arc::new(
 //!     AtomicFixedVec::builder()
 //!         .build(&initial_data)
@@ -51,13 +69,42 @@
 //!     let vec_clone = Arc::clone(&atomic_vec);
 //!     handles.push(thread::spawn(move || {
 //!         // Each thread atomically updates its own slot.
-//!         vec_clone.store(i, 99, Ordering::SeqCst);
+//!         vec_clone.store(i, 63, Ordering::SeqCst);
 //!     }));
 //! }
 //! for handle in handles {
 //!     handle.join().unwrap();
 //! }
-//! assert_eq!(atomic_vec.load(3, Ordering::SeqCst), 99);
+//! assert_eq!(atomic_vec.load(3, Ordering::SeqCst), 63);
+//! ```
+//!
+//! ## Storing Signed Integers
+//!
+//! `AtomicFixedVec` can also store signed integers. The underlying `Storable`
+//! trait uses zig-zag encoding to store signed values efficiently, so that
+//! small negative numbers require few bits, just like small positive numbers.
+//!
+//! ```
+//! use compressed_intvec::prelude::*;
+//! use compressed_intvec::fixed::{AtomicFixedVec, SAtomicFixedVec};
+//! use std::sync::Arc;
+//! use std::sync::atomic::Ordering;
+//!
+//! // The values range from -2 to 1. To also store -3 later, we need 3 bits.
+//! let initial_data: Vec<i16> = vec![-2, -1, 0, 1];
+//! let atomic_vec: Arc<SAtomicFixedVec<i16>> = Arc::new(
+//!     AtomicFixedVec::builder()
+//!         .bit_width(BitWidth::Explicit(3)) // Explicitly set bit width
+//!         .build(&initial_data)
+//!         .unwrap()
+//! );
+//!
+//! assert_eq!(atomic_vec.bit_width(), 3);
+//! assert_eq!(atomic_vec.load(0, Ordering::SeqCst), -2);
+//!
+//! // Atomically update a value.
+//! atomic_vec.store(0, -3, Ordering::SeqCst);
+//! assert_eq!(atomic_vec.load(0, Ordering::SeqCst), -3);
 //! ```
 
 #[macro_use]
@@ -175,11 +222,33 @@ where
     _phantom: PhantomData<T>,
 }
 
-// General API, not dependent on `ToPrimitive`.
+// Public API implementation
 impl<T> AtomicFixedVec<T>
 where
-    T: Storable<u64>,
+    T: Storable<u64> + Copy + ToPrimitive,
 {
+    /// Creates a builder for constructing an `AtomicFixedVec` from a slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    /// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
+    ///
+    /// let data: &[i16] = &[-100, 0, 100, 200];
+    /// let vec: UAtomicFixedVec<i16> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::PowerOfTwo) // Force 16 bits for signed values
+    ///     .build(data)
+    ///     .unwrap();
+    ///
+    /// assert_eq!(vec.len(), 4);
+    /// assert_eq!(vec.bit_width(), 16);
+    /// ```
+    #[inline(always)]
+    pub fn builder() -> builder::AtomicFixedVecBuilder<T> {
+        builder::AtomicFixedVecBuilder::new()
+    }
+
     /// Returns the number of elements in the vector.
     #[inline(always)]
     pub fn len(&self) -> usize {
@@ -203,20 +272,16 @@ where
     pub fn as_slice(&self) -> &[AtomicU64] {
         &self.storage
     }
-}
-
-// API that requires `ToPrimitive` for element conversion.
-impl<T> AtomicFixedVec<T>
-where
-    T: Storable<u64> + Copy + ToPrimitive,
-{
-    /// Creates a builder for constructing an `AtomicFixedVec` from a slice.
-    #[inline(always)]
-    pub fn builder() -> builder::AtomicFixedVecBuilder<T> {
-        builder::AtomicFixedVecBuilder::new()
-    }
 
     /// Atomically loads the value at `index`.
+    ///
+    /// `load` takes an `Ordering` argument which describes the memory ordering
+    /// of this operation. For more information, see the [Rust documentation on
+    /// memory ordering](https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn load(&self, index: usize, order: Ordering) -> T {
         assert!(index < self.len, "load index out of bounds");
@@ -225,6 +290,12 @@ where
     }
 
     /// Atomically stores `value` at `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds. Note that the stored value is not
+    /// checked for whether it fits in the configured `bit_width` and will be
+    /// truncated if it is too large.
     #[inline(always)]
     pub fn store(&self, index: usize, value: T, order: Ordering) {
         assert!(index < self.len, "store index out of bounds");
@@ -232,7 +303,12 @@ where
         self.atomic_store(index, value_w, order);
     }
 
-    /// Atomically swaps the value at `index` with `value`.
+    /// Atomically swaps the value at `index` with `value`, returning the
+    /// previous value.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn swap(&self, index: usize, value: T, order: Ordering) -> T {
         assert!(index < self.len, "swap index out of bounds");
@@ -241,7 +317,16 @@ where
         T::from_word(old_word)
     }
 
-    /// Atomically compares the value at `index` with `current` and replaces it with `new`.
+    /// Atomically compares the value at `index` with `current` and, if they are
+    /// equal, replaces it with `new`.
+    ///
+    /// Returns `Ok` with the previous value on success, or `Err` with the
+    /// actual value if the comparison fails. This is also known as a
+    /// "compare-and-set" (CAS) operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn compare_exchange(
         &self,
@@ -262,8 +347,7 @@ where
 
     /// Returns the element at `index`, or `None` if out of bounds.
     ///
-    /// This is an ergonomic wrapper around `load` that uses `Ordering::SeqCst`
-    /// for the strongest memory guarantees, which is a safe default.
+    /// This is an ergonomic wrapper around `load` that uses `Ordering::SeqCst`.
     #[inline(always)]
     pub fn get(&self, index: usize) -> Option<T> {
         if index >= self.len {
@@ -284,15 +368,15 @@ where
 
     /// Returns a parallel iterator that allows modifying elements of the vector in place.
     ///
-    /// This method provides a safe way to apply a function to all elements of the
-    /// vector in parallel. Each element is accessed via an [`AtomicMutProxy`],
-    /// which ensures that all modifications are written back atomically.
+    /// Each element is accessed via an [`AtomicMutProxy`], which ensures that
+    /// all modifications are written back atomically.
     ///
     /// # Examples
     ///
     /// ```
     /// # #[cfg(feature = "parallel")] {
     /// use compressed_intvec::prelude::*;
+    /// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
     /// use rayon::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -326,6 +410,14 @@ where
     T: Storable<u64> + Bounded + Copy + ToPrimitive,
 {
     /// Atomically adds to the value at `index`, returning the previous value.
+    ///
+    /// This operation is a "read-modify-write" (RMW) operation. It atomically
+    /// reads the value at `index`, adds `val` to it (with wrapping on overflow),
+    /// and writes the result back.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn fetch_add(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -335,6 +427,12 @@ where
     }
 
     /// Atomically subtracts from the value at `index`, returning the previous value.
+    ///
+    /// This is an atomic "read-modify-write" (RMW) operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn fetch_sub(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -344,6 +442,12 @@ where
     }
 
     /// Atomically performs a bitwise AND on the value at `index`, returning the previous value.
+    ///
+    /// This is an atomic "read-modify-write" (RMW) operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn fetch_and(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -353,6 +457,12 @@ where
     }
 
     /// Atomically performs a bitwise OR on the value at `index`, returning the previous value.
+    ///
+    /// This is an atomic "read-modify-write" (RMW) operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn fetch_or(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -362,6 +472,12 @@ where
     }
 
     /// Atomically performs a bitwise XOR on the value at `index`, returning the previous value.
+    ///
+    /// This is an atomic "read-modify-write" (RMW) operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn fetch_xor(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -371,6 +487,12 @@ where
     }
 
     /// Atomically computes the maximum of the value at `index` and `val`, returning the previous value.
+    ///
+    /// This is an atomic "read-modify-write" (RMW) operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn fetch_max(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -380,6 +502,12 @@ where
     }
 
     /// Atomically computes the minimum of the value at `index` and `val`, returning the previous value.
+    ///
+    /// This is an atomic "read-modify-write" (RMW) operation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     #[inline(always)]
     pub fn fetch_min(&self, index: usize, val: T, order: Ordering) -> T
     where
@@ -394,7 +522,11 @@ where
     /// new value back. If the value has been changed by another thread in the
     /// meantime, the function is re-evaluated with the new current value.
     ///
-    /// Returns the previous value if successful.
+    /// The closure `f` can return `None` to abort the update.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
     pub fn fetch_update<F>(
         &self,
         index: usize,
@@ -825,10 +957,6 @@ where
         self.iter()
     }
 }
-
-// In src/fixed/atomic/mod.rs
-
-// --- PartialEq Implementation ---
 
 impl<T> PartialEq for AtomicFixedVec<T>
 where

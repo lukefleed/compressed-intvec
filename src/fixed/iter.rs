@@ -4,6 +4,13 @@
 //! [`FixedVec`]. The iterators decode values on the fly without allocating an
 //! intermediate buffer, making them efficient for processing large datasets.
 //!
+//! # Provided Iterators
+//!
+//! - [`FixedVecIter`]: A bidirectional iterator over the elements of a `FixedVec`.
+//! - [`FixedVecIntoIter`]: A consuming iterator that takes ownership of a `FixedVec`.
+//! - [`Chunks`]: An iterator that yields non-overlapping, immutable slices.
+//! - [`Windows`]: An iterator that yields overlapping, immutable slices.
+//!
 //! # Examples
 //!
 //! ## Iterating over elements
@@ -20,26 +27,6 @@
 //! }
 //!
 //! assert_eq!(sum, 200);
-//! ```
-//!
-//! ## Iterating over chunks
-//!
-//! ```rust
-//! use compressed_intvec::fixed::{FixedVec, BEFixedVec};
-//!
-//! let data: Vec<u64> = (0..10).collect();
-//! let vec: BEFixedVec = FixedVec::builder().build(&data).unwrap();
-//!
-//! let mut chunks_iter = vec.chunks(3);
-//!
-//! let first_chunk = chunks_iter.next().unwrap();
-//! assert_eq!(first_chunk.len(), 3);
-//! assert_eq!(first_chunk.get(0), Some(0));
-//! assert_eq!(first_chunk.get(2), Some(2));
-//!
-//! let last_chunk = chunks_iter.last().unwrap();
-//! assert_eq!(last_chunk.len(), 1);
-//! assert_eq!(last_chunk.get(0), Some(9));
 //! ```
 
 use crate::fixed::{
@@ -85,6 +72,7 @@ use std::cmp::min;
 /// assert_eq!(iter.next_back(), Some(5));
 /// assert_eq!(iter.next_back(), Some(4));
 /// ```
+#[derive(Debug)]
 pub struct FixedVecIter<'a, T, W, E, B>
 where
     T: Storable<W>,
@@ -96,12 +84,12 @@ where
     front_index: usize,
     back_index: usize,
 
-    // --- Forward iteration state ---
+    // State for forward iteration.
     front_window: W,
     front_bits_in_window: usize,
     front_word_index: usize,
 
-    // --- Backward iteration state ---
+    // State for backward iteration.
     back_window: W,
     back_bits_in_window: usize,
     back_word_index: usize,
@@ -111,7 +99,6 @@ where
 /// An iterator over non-overlapping, immutable chunks of a [`FixedVec`].
 ///
 /// This struct is created by the [`chunks`](super::FixedVec::chunks) method.
-/// Each item in the iterator is a [`FixedVecSlice`].
 #[derive(Debug)]
 pub struct Chunks<'a, T, W, E, B>
 where
@@ -154,15 +141,16 @@ where
 
         // --- Setup forward state ---
         let front_word_index = 1;
-        // SAFETY: The `is_empty` check ensures at least one word exists.
+        // Pre-load the first word into the forward window.
         let front_window = unsafe { *limbs.get_unchecked(0) };
         let front_bits_in_window = bits_per_word;
 
         // --- Setup backward state ---
         let total_bits = vec.len() * vec.bit_width();
         let back_word_index = (total_bits.saturating_sub(1)) / bits_per_word;
-        // SAFETY: `is_empty` check ensures this is a valid index.
+        // Pre-load the last word into the backward window.
         let back_window = unsafe { *limbs.get_unchecked(back_word_index) };
+        // Calculate how many bits in the last word are valid data.
         let back_bits_in_window = total_bits % bits_per_word;
         let back_bits_in_window = if back_bits_in_window == 0 {
             bits_per_word
@@ -203,17 +191,20 @@ where
         self.front_index += 1;
 
         let bit_width = self.vec.bit_width();
+        // Path for word-sized elements.
         if bit_width == <W as Word>::BITS {
             let val = unsafe { *self.vec.as_limbs().get_unchecked(index) };
             let final_val = if E::IS_BIG { W::from_be(val) } else { val };
             return Some(<T as Storable<W>>::from_word(final_val));
         }
 
+        // Fallback to the standard `get_unchecked` for Big-Endian.
         if E::IS_BIG {
             return Some(unsafe { self.vec.get_unchecked(index) });
         }
 
         let mask = self.vec.mask;
+        // If the current window has enough bits for the next element.
         if self.front_bits_in_window >= bit_width {
             let value = self.front_window & mask;
             self.front_window >>= bit_width;
@@ -221,6 +212,7 @@ where
             return Some(<T as Storable<W>>::from_word(value));
         }
 
+        // Otherwise, load the next word to replenish the window.
         unsafe {
             let limbs = self.vec.as_limbs();
             let bits_from_old = self.front_bits_in_window;
@@ -306,8 +298,7 @@ where
 
 /// An iterator that consumes an owned [`FixedVec`] and yields its elements.
 ///
-/// This struct is created by the `into_iter` method on `FixedVec` (which is
-/// part of the [`IntoIterator`] trait).
+/// This struct is created by the `into_iter` method on `FixedVec`.
 pub struct FixedVecIntoIter<'a, T, W, E, B = Vec<W>>
 where
     T: Storable<W>,
@@ -328,6 +319,9 @@ where
 {
     /// Creates a new consuming iterator from an owned `FixedVec`.
     pub(super) fn new(vec: FixedVec<T, W, E, Vec<W>>) -> Self {
+        // SAFETY: This is a standard pattern for creating a self-referential
+        // struct. We are moving `vec` but immediately borrowing it. The borrow
+        // is valid for 'static because the data is now owned by this struct.
         let iter = unsafe {
             let vec_ref: &'static FixedVec<T, W, E, Vec<W>> =
                 std::mem::transmute(&vec as &FixedVec<T, W, E, Vec<W>>);
