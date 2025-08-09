@@ -49,8 +49,8 @@ use std::thread;
 use std::time::Duration;
 use sux::prelude::AtomicBitFieldSlice;
 
-const VECTOR_SIZE: usize = 1_000_000;
-const NUM_ACCESSES: usize = 100_000;
+const VECTOR_SIZE: usize = 10_000_000;
+const NUM_ACCESSES: usize = 1_000_000;
 
 /// Defines the contention pattern for multi-threaded benchmarks.
 #[derive(Debug, Clone, Copy)]
@@ -449,9 +449,9 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(100)
         .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(3));
+        .measurement_time(Duration::from_secs(5));
 
     targets = benchmark_atomic_ops
 }

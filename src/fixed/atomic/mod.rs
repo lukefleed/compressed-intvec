@@ -38,7 +38,7 @@
 //! use std::sync::atomic::Ordering;
 //!
 //! // Create from a slice using the builder.
-//! let initial_data: Vec<u32> = vec!;
+//! let initial_data: Vec<u32> = vec![1, 2, 3, 4, 5];
 //! let atomic_vec: Arc<UAtomicFixedVec<u32>> = Arc::new(
 //!     AtomicFixedVec::builder()
 //!         .build(&initial_data)
@@ -103,29 +103,31 @@ where
     T: Storable<u64> + Copy + ToPrimitive,
 {
     /// Creates a builder for constructing an `AtomicFixedVec` from a slice.
+    #[inline(always)]
     pub fn builder() -> builder::AtomicFixedVecBuilder<T> {
         builder::AtomicFixedVecBuilder::new()
     }
 
     /// Returns the number of elements in the vector.
-    #[inline]
+    #[inline(always)]
     pub fn len(&self) -> usize {
         self.len
     }
 
     /// Returns `true` if the vector contains no elements.
-    #[inline]
+    #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Returns the number of bits used to encode each element.
-    #[inline]
+    #[inline(always)]
     pub fn bit_width(&self) -> usize {
         self.bit_width
     }
 
     /// Atomically loads the value at `index`.
+    #[inline(always)]
     pub fn load(&self, index: usize, order: Ordering) -> T {
         assert!(index < self.len, "load index out of bounds");
         let loaded_word = self.atomic_load(index, order);
@@ -133,6 +135,7 @@ where
     }
 
     /// Atomically stores `value` at `index`.
+    #[inline(always)]
     pub fn store(&self, index: usize, value: T, order: Ordering) {
         assert!(index < self.len, "store index out of bounds");
         let value_w = T::into_word(value);
@@ -140,6 +143,7 @@ where
     }
 
     /// Atomically swaps the value at `index` with `value`.
+    #[inline(always)]
     pub fn swap(&self, index: usize, value: T, order: Ordering) -> T {
         assert!(index < self.len, "swap index out of bounds");
         let value_w = T::into_word(value);
@@ -148,6 +152,7 @@ where
     }
 
     /// Atomically compares the value at `index` with `current` and replaces it with `new`.
+    #[inline(always)]
     pub fn compare_exchange(
         &self,
         index: usize,
@@ -225,6 +230,7 @@ impl<T> AtomicFixedVec<T>
 where
     T: Storable<u64>,
 {
+    #[inline(always)]
     fn atomic_load(&self, index: usize, order: Ordering) -> u64 {
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / u64::BITS as usize;
@@ -245,33 +251,55 @@ where
         }
     }
 
+    #[inline(always)]
     fn atomic_store(&self, index: usize, value: u64, order: Ordering) {
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / u64::BITS as usize;
         let bit_offset = bit_pos % u64::BITS as usize;
 
         if bit_offset + self.bit_width <= u64::BITS as usize {
-            // Lock-free path.
+            // Lock-free path for single-word values.
+            // This uses a manual compare-and-swap (CAS) loop, which can be more
+            // performant than `fetch_update` by avoiding closure overhead and
+            // allowing for more fine-grained control over memory orderings.
             let atomic_word_ref = &self.storage[word_index];
             let store_mask = self.mask << bit_offset;
             let store_value = value << bit_offset;
-            atomic_word_ref
-                .fetch_update(order, order, |old_word| {
-                    Some((old_word & !store_mask) | store_value)
-                })
-                .unwrap();
+
+            // Start with a relaxed load, as we only need atomicity for the final write.
+            let mut old_word = atomic_word_ref.load(Ordering::Relaxed);
+            loop {
+                // Calculate the new word value by clearing the target bits and ORing the new value.
+                let new_word = (old_word & !store_mask) | store_value;
+
+                // Attempt to swap the old word with the new one.
+                // `compare_exchange_weak` is used as it can be faster inside a loop,
+                // even if it fails spuriously. The failure ordering can be relaxed.
+                match atomic_word_ref.compare_exchange_weak(
+                    old_word,
+                    new_word,
+                    order, // Use the user-specified ordering on success.
+                    Ordering::Relaxed, // Relaxed ordering is sufficient on failure.
+                ) {
+                    Ok(_) => break, // The store was successful.
+                    Err(x) => old_word = x, // The word was modified by another thread; retry.
+                }
+            }
         } else {
-            // Locked path.
+            // Locked path for values spanning two words.
             let lock_index = word_index & (NUM_LOCKS - 1);
             let _guard = self.locks[lock_index].lock();
-            // SAFETY: The lock guarantees exclusive access.
+            // SAFETY: The lock guarantees exclusive access, so we can perform non-atomic writes.
+            // The pointers are obtained from a valid, owned Vec.
             unsafe {
                 let low_word_ptr = self.storage.as_ptr().add(word_index) as *mut u64;
                 let high_word_ptr = self.storage.as_ptr().add(word_index + 1) as *mut u64;
 
+                // Modify the lower word.
                 *low_word_ptr &= !(u64::MAX << bit_offset);
                 *low_word_ptr |= value << bit_offset;
 
+                // Modify the higher word.
                 let bits_in_high = (bit_offset + self.bit_width) - u64::BITS as usize;
                 let high_mask = (1u64 << bits_in_high).wrapping_sub(1);
                 *high_word_ptr &= !high_mask;
@@ -280,26 +308,34 @@ where
         }
     }
 
+    #[inline(always)]
     fn atomic_swap(&self, index: usize, value: u64, order: Ordering) -> u64 {
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / u64::BITS as usize;
         let bit_offset = bit_pos % u64::BITS as usize;
 
         if bit_offset + self.bit_width <= u64::BITS as usize {
-            // Lock-free path.
+            // Lock-free path for single-word values.
             let atomic_word_ref = &self.storage[word_index];
             let store_mask = self.mask << bit_offset;
             let store_value = value << bit_offset;
             let mut old_word = atomic_word_ref.load(Ordering::Relaxed);
             loop {
                 let new_word = (old_word & !store_mask) | store_value;
-                match atomic_word_ref.compare_exchange_weak(old_word, new_word, order, Ordering::Relaxed) {
+                match atomic_word_ref.compare_exchange_weak(
+                    old_word,
+                    new_word,
+                    order,
+                    Ordering::Relaxed,
+                ) {
+                    // If the CAS succeeds, extract and return the old value.
                     Ok(_) => return (old_word >> bit_offset) & self.mask,
+                    // Otherwise, retry with the updated value.
                     Err(x) => old_word = x,
                 }
             }
         } else {
-            // Locked path.
+            // Locked path for spanning values.
             let lock_index = word_index & (NUM_LOCKS - 1);
             let _guard = self.locks[lock_index].lock();
             // SAFETY: The lock guarantees exclusive access.
@@ -323,6 +359,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn atomic_compare_exchange(
         &self,
         index: usize,
@@ -336,24 +373,38 @@ where
         let bit_offset = bit_pos % u64::BITS as usize;
 
         if bit_offset + self.bit_width <= u64::BITS as usize {
-            // Lock-free path.
+            // Lock-free path for single-word values.
             let atomic_word_ref = &self.storage[word_index];
             let store_mask = self.mask << bit_offset;
             let new_value_shifted = new << bit_offset;
+            
+            // The `failure` ordering is important here for the initial load.
             let mut old_word = atomic_word_ref.load(failure);
             loop {
-                let old_val = (old_word >> bit_offset) & self.mask;
-                if old_val != current {
-                    return Err(old_val);
+                // Extract the current value from the bitfield.
+                let old_val_extracted = (old_word >> bit_offset) & self.mask;
+
+                // If the value in the bitfield does not match the expected one, fail immediately.
+                if old_val_extracted != current {
+                    return Err(old_val_extracted);
                 }
+
+                // Calculate the new word to be written.
                 let new_word = (old_word & !store_mask) | new_value_shifted;
-                match atomic_word_ref.compare_exchange_weak(old_word, new_word, success, failure) {
-                    Ok(_) => return Ok(current),
-                    Err(x) => old_word = x,
+
+                // Attempt the atomic exchange.
+                match atomic_word_ref.compare_exchange_weak(
+                    old_word,
+                    new_word,
+                    success,
+                    failure, // Use the specified failure ordering.
+                ) {
+                    Ok(_) => return Ok(current), // Success, return the expected value.
+                    Err(x) => old_word = x, // Failure, the word was updated, retry the loop.
                 }
             }
         } else {
-            // Locked path.
+            // Locked path for spanning values.
             let lock_index = word_index & (NUM_LOCKS - 1);
             let _guard = self.locks[lock_index].lock();
             // SAFETY: The lock guarantees exclusive access.
