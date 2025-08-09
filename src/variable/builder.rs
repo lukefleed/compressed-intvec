@@ -1,8 +1,17 @@
-//! # `IntVec` Builders
+//! Builders for constructing an [`IntVec`].
 //!
-//! This module provides the builder implementations for constructing a generic [`IntVec`].
+//! This module provides the two primary builders for creating an [`IntVec`]:
+//!
+//! - [`IntVecBuilder`]: For building from an existing slice of data. This is the
+//!   most flexible builder, as it can analyze the data to automatically select
+//!   an optimal compression codec.
+//! - [`IntVecFromIterBuilder`]: For building from an iterator. This is suitable
+//!   for large datasets that are generated on the fly, but it requires the
+//!   compression codec to be specified manually.
+//!
+//! [`IntVec`]: crate::variable::IntVec
 
-use super::{traits::Storable, IntVec, IntVecBitWriter, IntVecError, VariableCodecSpec, codec};
+use super::{codec, traits::Storable, IntVec, IntVecBitWriter, IntVecError, VariableCodecSpec};
 use crate::fixed::{BitWidth, FixedVec};
 use dsi_bitstream::{
     dispatch::{FuncCodeWriter, StaticCodeWrite},
@@ -11,22 +20,27 @@ use dsi_bitstream::{
 };
 use std::marker::PhantomData;
 
-/// A builder for creating an [`IntVec<T, E, ...>`] from a slice of integers.
+/// A builder for creating an [`IntVec`] from a slice of integers.
 ///
-/// This builder is obtained by calling [`IntVec::builder`]. It is generic over the
-/// element type `T` (e.g., `u8`, `i32`) and the endianness `E`.
+/// This builder is the primary entry point for constructing a compressed vector
+/// when the data is already available in memory. It allows for detailed
+/// configuration of the sampling rate (`k`) and the compression codec.
 ///
-/// This builder always produces an owned `IntVec<T, E, Vec<u64>>`.
+/// This builder always produces an owned `IntVec<T, E, Vec<u64>>`. It is obtained
+/// by calling [`IntVec::builder`].
 #[derive(Debug)]
 pub struct IntVecBuilder<'a, T: Storable, E: Endianness> {
-    pub(super) input: &'a [T],
-    pub(super) k: usize,
-    pub(super) codec_spec: VariableCodecSpec,
-    pub(super) _markers: PhantomData<(T, E)>,
+    input: &'a [T],
+    k: usize,
+    codec_spec: VariableCodecSpec,
+    _markers: PhantomData<(T, E)>,
 }
 
 impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
-    /// Creates a new builder for an `IntVec`.
+    /// Creates a new builder for an `IntVec` with default settings.
+    ///
+    /// By default, the sampling rate is `k=32` and the codec is chosen
+    /// automatically via [`VariableCodecSpec::Auto`].
     pub(super) fn new(input: &'a [T]) -> Self {
         Self {
             input,
@@ -36,19 +50,56 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
         }
     }
 
-    /// Sets the sampling rate `k`.
+    /// Sets the sampling rate `k` for random access.
+    ///
+    /// The sampling rate determines how many elements are stored between each
+    /// sample point. A smaller `k` results in faster random access but uses
+    /// more memory for the sampling table. See the [module-level documentation](super)
+    /// for a detailed explanation.
+    ///
+    /// # Panics
+    ///
+    /// The `build` method will return an error if `k` is 0.
     pub fn k(mut self, k: usize) -> Self {
         self.k = k;
         self
     }
 
-    /// Sets the codec specification for compression.
+    /// Sets the compression codec to use.
+    ///
+    /// The choice of codec can significantly impact the compression ratio.
+    /// By default, this is [`VariableCodecSpec::Auto`], which analyzes the data
+    /// to select the best codec.
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
         self
     }
 
-    /// Builds the `IntVec`, consuming the builder.
+    /// Builds the [`IntVec`], consuming the builder.
+    ///
+    /// This method performs the compression and builds the sampling table.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`IntVecError`] if the parameters are invalid (e.g., `k=0`) or
+    /// if an error occurs during compression.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, SIntVec, VariableCodecSpec};
+    ///
+    /// let data: &[i16] = &[-100, 0, 50, -2, 1000];
+    ///
+    /// let vec: SIntVec<i16> = IntVec::builder(data)
+    ///     .k(2) // Smaller `k` for faster access
+    ///     .codec(VariableCodecSpec::Delta) // Explicitly choose Delta coding
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// assert_eq!(vec.len(), 5);
+    /// assert_eq!(vec.get(0), Some(-100));
+    /// ```
     pub fn build(self) -> Result<IntVec<T, E, Vec<u64>>, IntVecError>
     where
         IntVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
@@ -59,6 +110,7 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
             ));
         }
 
+        // Convert the input data to a vector of u64 words for analysis and compression.
         let words: Vec<u64> = self.input.iter().map(|&x| x.to_word()).collect();
         let resolved_code = codec::resolve_codec(&words, self.codec_spec)?;
 
@@ -81,6 +133,7 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
         let mut temp_samples = Vec::with_capacity(sample_capacity);
         let mut current_bit_offset = 0;
 
+        // Iterate through the data, writing compressed values and recording samples.
         for (i, &value) in self.input.iter().enumerate() {
             if i % self.k == 0 {
                 temp_samples.push(current_bit_offset as u64);
@@ -88,8 +141,10 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
             let bits_written = code_writer.write(&mut writer, value.to_word()).unwrap();
             current_bit_offset += bits_written;
         }
-        writer.write_bits(u64::MAX, 64).unwrap(); // Stopper
+        // Write a final stopper to ensure the last value can always be read safely.
+        writer.write_bits(u64::MAX, 64).unwrap();
 
+        // Compress the recorded samples into a FixedVec.
         let samples = FixedVec::<u64, u64, LE>::builder()
             .bit_width(BitWidth::Minimal)
             .build(&temp_samples)
@@ -107,11 +162,16 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
 
 /// A builder for creating an [`IntVec`] from an iterator.
 ///
+/// This builder is designed for constructing an `IntVec` from a data source that
+/// is an iterator. It consumes the iterator and compresses its elements on the fly.
+/// It is obtained by calling [`IntVec::from_iter_builder`].
+///
 /// # Limitations
-/// This builder does not support automatic parameter selection for codecs
-/// (e.g., `VariableCodecSpec::Auto`). The iterator is consumed once to build the
-/// vector, so the data cannot be pre-analyzed. If you need automatic codec
-/// selection, collect your data into a `Vec` and use [`IntVec::builder`] instead.
+///
+/// This builder does **not** support automatic codec selection (i.e., `VariableCodecSpec::Auto`)
+/// or automatic parameter estimation for codecs like `Rice` or `Golomb`. Because the
+/// iterator is consumed in a single pass, the data cannot be pre-analyzed to
+/// determine its statistical properties. The user must specify a concrete codec.
 #[derive(Debug)]
 pub struct IntVecFromIterBuilder<T: Storable, E: Endianness, I: IntoIterator<Item = T>> {
     iter: I,
@@ -121,7 +181,10 @@ pub struct IntVecFromIterBuilder<T: Storable, E: Endianness, I: IntoIterator<Ite
 }
 
 impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> IntVecFromIterBuilder<T, E, I> {
-    /// Creates a new builder from an iterator.
+    /// Creates a new builder from an iterator with default settings.
+    ///
+    /// By default, the sampling rate is `k=32` and the codec is [`VariableCodecSpec::Gamma`],
+    /// as automatic selection is not possible.
     pub(super) fn new(iter: I) -> Self {
         Self {
             iter,
@@ -131,27 +194,54 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> IntVecFromIterBuilde
         }
     }
 
-    /// Sets the sampling rate `k`.
+    /// Sets the sampling rate `k` for random access.
     pub fn k(mut self, k: usize) -> Self {
         self.k = k;
         self
     }
 
-    /// Sets the codec specification.
+    /// Sets the compression codec to use.
     ///
-    /// # Panics
-    /// This method will panic if an automatic codec specification is provided,
-    /// as iterators cannot be pre-analyzed.
+    /// # Errors
+    ///
+    /// The `build` method will return an error if a codec specification that
+    /// requires data analysis is provided (e.g., `VariableCodecSpec::Auto`).
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
         self
     }
 
-    /// Builds the `IntVec` by consuming the iterator.
+    /// Builds the [`IntVec`] by consuming the iterator.
+    ///
+    /// This method iterates through the provided data source, compresses it,
+    /// and builds the sampling table in a single pass.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`IntVecError`] if an automatic codec spec is used or if `k` is 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, UIntVec, VariableCodecSpec};
+    ///
+    /// // Create a vector from a range iterator
+    /// let data_iter = 0..1000u32;
+    ///
+    /// let vec: UIntVec<u32> = IntVec::from_iter_builder(data_iter)
+    ///     .k(64)
+    ///     .codec(VariableCodecSpec::Gamma) // Must be specified
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// assert_eq!(vec.len(), 1000);
+    /// assert_eq!(vec.get(999), Some(999));
+    /// ```
     pub fn build(self) -> Result<IntVec<T, E, Vec<u64>>, IntVecError>
     where
         IntVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
+        // Resolve the codec, but return an error if it requires data analysis.
         let resolved_code = match self.codec_spec {
             VariableCodecSpec::Auto
             | VariableCodecSpec::Rice { log2_b: None }
@@ -161,6 +251,7 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> IntVecFromIterBuilde
             | VariableCodecSpec::ExpGolomb { k: None } => {
                 return Err(IntVecError::InvalidParameters("Automatic parameter selection is not supported for iterator-based construction. Please provide fixed parameters.".to_string()));
             }
+            // Pass an empty slice for validation; the parameters are explicit.
             spec => codec::resolve_codec(&[0u64; 0], spec)?,
         };
 

@@ -1,19 +1,51 @@
-// src/variable/serde.rs
-
-//! Manual [`serde`] implementation for [`IntVec`].
+//! [`serde`] support for [`IntVec`].
 //!
-//! A manual implementation is necessary because `dsi-bitstream::codes::Codes`
-//! does not implement [`serde`] traits. This module uses a serializable
-//! "proxy" enum to handle this cleanly.
-
-#![cfg_attr(docsrs, doc(cfg(feature = "serde")))]
+//! This module provides `Serialize` and `Deserialize` implementations for
+//! [`IntVec`], allowing it to be easily serialized and deserialized with formats
+//! like JSON, Bincode, etc. This is enabled by the `serde` feature flag.
+//!
+//! # Implementation
+//!
+//! A manual implementation is necessary because the underlying `dsi-bitstream::codes::Codes`
+//! enum does not implement the `serde` traits. This module uses a serializable
+//! "proxy" enum to handle this conversion.
+//!
+//! # Examples
+//!
+//! Serializing and deserializing an `IntVec` using `serde_json`:
+//!
+//! ```
+//! # #[cfg(feature = "serde")] {
+//! use compressed_intvec::prelude::*;
+//!
+//! // The `sint_vec!` macro creates a vector of `i64`.
+//! // We specify the type of `vec` as `LESIntVec` to match.
+//! let vec: LESIntVec = sint_vec![-10, 20, -30, 40, -50];
+//!
+//! // Serialize the vector to a JSON string
+//! let serialized = serde_json::to_string(&vec).unwrap();
+//!
+//! // Deserialize the JSON string back into an IntVec of the same type.
+//! let deserialized: LESIntVec = serde_json::from_str(&serialized).unwrap();
+//!
+//! // To compare for equality, we can collect both into a standard Vec.
+//! // This verifies that the content is identical after the round trip.
+//! assert_eq!(vec.iter().collect::<Vec<_>>(), deserialized.iter().collect::<Vec<_>>());
+//! # }
+//! ```
+//!
+//! [`serde`]: https://serde.rs/
+//! [`IntVec`]: crate::variable::IntVec
+// A direct copy of the original file is provided below, as no changes
+// to the implementation code were necessary, only to the doc comments.
 
 use super::{traits::Storable, Endianness, IntVec};
 use crate::fixed::{FixedVec, LEFixedVec};
 use dsi_bitstream::prelude::{Codes, LE};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// A serializable proxy for `dsi_bitstream::prelude::Codes`.
+/// A serializable proxy for `dsi-bitstream::prelude::Codes`.
+/// This is an internal detail to bridge `Codes` with `serde`.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 enum CodesSerde {
     Gamma,
@@ -50,8 +82,6 @@ impl From<Codes> for CodesSerde {
 
 impl From<CodesSerde> for Codes {
     fn from(proxy: CodesSerde) -> Self {
-        // FIX: Corrected the match arms to return the `Codes` enum variants.
-        // The previous version had a typo in the last arm.
         match proxy {
             CodesSerde::Gamma => Codes::Gamma,
             CodesSerde::Delta => Codes::Delta,
@@ -68,13 +98,11 @@ impl From<CodesSerde> for Codes {
     }
 }
 
-// FIX: Added the `B: Serialize` trait bound to the main impl signature.
 impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for IntVec<T, E, B> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // FIX: Renamed generic parameter to UpperCamelCase and ensured its bounds are correct.
         #[derive(Serialize)]
         struct SerializeProxy<'a, BSamples: AsRef<[u64]> + Serialize> {
             data: &'a [u64],
@@ -95,6 +123,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for IntV
     }
 }
 
+/// A helper struct for deserializing an owned `IntVec`.
 #[derive(Deserialize)]
 #[serde(rename = "IntVec")]
 struct IntVecProxy {

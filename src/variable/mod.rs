@@ -1,20 +1,127 @@
-//! # A compressed, randomly accessible vector of integers.
+//! A compressed integer vector using variable-length encoding with fast random access.
 //!
-//! This module provides the core implementation of [`IntVec`], a data structure
-//! designed for space-efficient storage and fast random access of integer
-//! sequences. It supports both unsigned (`u8`-`u64`) and signed (`i8`-`i64`)
-//! integer types.
+//! This module provides [`IntVec`], a data structure for storing sequences of
+//! integers in a compressed format while retaining efficient random access. It is
+//! well-suited for datasets where integer values are non-uniformly distributed,
+//! as it uses variable-length codes to represent smaller numbers with fewer bits.
 //!
-//! Compression is achieved by leveraging a variety of instantaneous,
-//! variable-length codes from the [`dsi-bitstream`] crate. Signed integers are
-//! automatically handled using ZigZag encoding via the [`Storable`] trait.
+//! # Core Concepts
 //!
-//! The main generic structure is [`IntVec<T, E, B>`], where `T` is the element
-//! type, `E` is the endianness, and `B` is the backing storage. For convenience,
-//`! several type aliases are provided:
-//! - [`UIntVec<T>`]: For unsigned integers with default Little-Endian encoding.
-//! - [`SIntVec<T>`]: For signed integers with default Little-Endian encoding.
-//! - [`LEIntVec`], [`BEIntVec`]: For `u64` elements with specific endianness.
+//! ## Variable-Length Encoding
+//!
+//! Unlike [`FixedVec`](crate::fixed::FixedVec), which uses a fixed number of
+//! bits for every integer, `IntVec` employs **instantaneous codes** (such as
+//! Gamma, Delta, or Zeta codes) provided by the [`dsi-bitstream`] crate. This
+//! approach allows each integer to be encoded with a variable number of bits,
+//! typically using shorter codes for smaller or more frequent values. This can
+//! lead to significant space savings, especially for data with many small numbers.
+//!
+//! Signed integers (e.g., `i8`, `i32`) are supported transparently through
+//! zig-zag encoding, which maps small negative and positive integers to small
+//! unsigned integers.
+//!
+//! ## Random Access and Sampling
+//!
+//! A key challenge with variable-length codes is that the location of the *i*-th
+//! element cannot be calculated directly. To solve this, `IntVec` implements a
+//! **sampling mechanism**. It stores the bit position of every *k*-th element in
+//! a separate, auxiliary [`FixedVec`]. This parameter, `k`, is the **sampling rate**.
+//!
+//! To access an element at `index`, `IntVec`:
+//! 1.  Finds the nearest sample by calculating `index / k`.
+//! 2.  Retrieves the bit offset of the start of that sampled block.
+//! 3.  Jumps to that offset in the compressed data stream.
+//! 4.  Sequentially decodes the remaining `index % k` elements to reach the target.
+//!
+//! This strategy provides amortized O(1) random access, as the number of
+//! sequential decoding steps is bounded by `k`.
+//!
+//! ### The `k` Trade-off
+//!
+//! The choice of the sampling rate `k` involves a trade-off:
+//! -   **Smaller `k`**: Faster random access (fewer elements to decode per access)
+//!     but higher memory usage due to a larger samples table.
+//! -   **Larger `k`**: Slower random access but better compression, as the
+//!     samples table is smaller.
+//!
+//! The optimal `k` depends on the specific access patterns of an application.
+//!
+//! # Design and Immutability
+//!
+//! A crucial design aspect of `IntVec` is that it is **immutable** after creation.
+//! Unlike [`FixedVec`](crate::fixed::FixedVec), it does not provide methods for
+//! in-place modification (e.g., `set`, `push`). This is a deliberate technical
+//! choice rooted in the nature of variable-length encoding.
+//!
+//! If a value in the middle of the compressed bitstream were changed, its new
+//! encoded length might be different. For example, changing `5` (which might be
+//! 4 bits) to `5000` (which might be 16 bits) would require shifting all
+//! subsequent data, invalidating every sample point that follows. The cost of
+//! such an operation would be prohibitive, scaling with the length of the vector.
+//!
+//! For this reason, `IntVec` is designed as a write-once, read-many data structure.
+//!
+//! # Main Components
+//!
+//! - [`IntVec`]: The core compressed vector.
+//! - [`IntVecBuilder`]: The primary tool for constructing an `IntVec` with
+//!   custom compression codecs and sampling rates.
+//! - [`VariableCodecSpec`]: An enum to specify the compression codec.
+//! - [`IntVecReader`]: A stateful reader for efficient, repeated random access.
+//! - [`IntVecSlice`]: An immutable view over a portion of the vector.
+//!
+//! # Examples
+//!
+//! ## Basic Usage with Unsigned Integers
+//!
+//! Create a [`UIntVec`] from a slice of `u32`. The builder will automatically
+//! select a suitable codec and use a default sampling rate.
+//!
+//! ```
+//! use compressed_intvec::variable::{IntVec, UIntVec};
+//!
+//! let data: Vec<u32> = vec![10, 2, 5000, 3, 80, 120];
+//! let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+//!
+//! assert_eq!(vec.len(), 6);
+//! assert_eq!(vec.get(2), Some(5000));
+//! ```
+//!
+//! ## Storing Signed Integers
+//!
+//! `IntVec` handles signed integers, such as `i16`, by mapping them to unsigned
+//! values using zig-zag encoding.
+//!
+//! ```
+//! use compressed_intvec::variable::{IntVec, SIntVec};
+//!
+//! let data: &[i16] = &[-5, 20, -100, 0, 8];
+//! let vec: SIntVec<i16> = IntVec::from_slice(data).unwrap();
+//!
+//! assert_eq!(vec.len(), 5);
+//! assert_eq!(vec.get(0), Some(-5));
+//! assert_eq!(vec.get(2), Some(-100));
+//! ```
+//!
+//! ## Customizing Compression and Sampling
+//!
+//! For fine-grained control, use the [`IntVecBuilder`]. Here, we specify a
+//! sampling rate of `k=8` and use the `Zeta` code with `k=3`.
+//!
+//! ```
+//! use compressed_intvec::variable::{IntVec, UIntVec, VariableCodecSpec};
+//!
+//! let data: Vec<u64> = (0..100).map(|i| i * i).collect();
+//!
+//! let vec: UIntVec<u64> = IntVec::builder(&data)
+//!     .k(8) // Set sampling rate
+//!     .codec(VariableCodecSpec::Zeta { k: Some(3) }) // Set compression codec
+//!     .build()
+//!     .unwrap();
+//!
+//! assert_eq!(vec.get_sampling_rate(), 8);
+//! assert_eq!(vec.get(10), Some(100));
+//! ```
 //!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
@@ -33,21 +140,8 @@ pub mod serde;
 pub mod slice;
 pub mod traits;
 
-pub mod prelude {
-    pub use super::builder::{IntVecBuilder, IntVecFromIterBuilder};
-    pub use super::codec::VariableCodecSpec;
-    pub use super::iter::{IntVecIntoIter, IntVecIter};
-    pub use super::reader::IntVecReader;
-    pub use super::seq_reader::IntVecSeqReader;
-    pub use super::slice::IntVecSlice;
-    pub use super::traits::Storable;
-    pub use super::{
-        BEIntVec, BESIntVec, LEIntVec, LESIntVec, SIntVec, UIntVec, IntVec,
-    };
-}
-
 use crate::fixed::{Error as FixedVecError, FixedVec};
-use self::{codec::VariableCodecSpec, traits::Storable};
+pub use self::{codec::VariableCodecSpec, traits::Storable};
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
     dispatch::StaticCodeRead,
@@ -58,7 +152,7 @@ use dsi_bitstream::{
     traits::{BitWrite, BE, LE},
 };
 use mem_dbg::{MemDbg, MemSize};
-use std::{error::Error, fmt, marker::PhantomData};
+use std::{error::Error, fmt::{self}, marker::PhantomData};
 
 pub use builder::{IntVecBuilder, IntVecFromIterBuilder};
 pub use iter::{IntVecIntoIter, IntVecIter};
@@ -69,15 +163,19 @@ pub use slice::IntVecSlice;
 /// Defines the set of errors that can occur in `IntVec` operations.
 #[derive(Debug)]
 pub enum IntVecError {
-    /// An error occurred during an I/O operation.
+    /// An error occurred during an I/O operation, typically from the underlying
+    /// bitstream reader or writer.
     Io(std::io::Error),
-    /// A generic error from the `dsi-bitstream` library.
+    /// A generic error from the `dsi-bitstream` library, often related to
+    /// decoding malformed data.
     Bitstream(Box<dyn Error + Send + Sync>),
-    /// An error indicating invalid parameters.
+    /// An error indicating that one or more parameters are invalid for the
+    /// requested operation.
     InvalidParameters(String),
-    /// An error during codec function dispatch.
+    /// An error that occurs during the dynamic dispatch of codec functions.
     CodecDispatch(String),
-    /// An error for out-of-bounds index access.
+    /// An error indicating that a provided index is outside the valid bounds
+    /// of the vector.
     IndexOutOfBounds(usize),
 }
 
@@ -121,40 +219,69 @@ impl From<FixedVecError> for IntVecError {
     }
 }
 
-/// A compressed, randomly accessible vector of generic integers.
+/// A compressed, randomly accessible vector of integers using variable-length encoding.
 ///
-/// It uses instantaneous codes for compression and a sampling mechanism for
-/// fast random access, configurable via the sampling rate `k`. The element type
-/// `T` must implement the [`Storable`] trait for conversion to/from `u64`.
-#[derive(Debug, Clone, MemDbg, MemSize)]
+/// `IntVec` achieves compression by using instantaneous codes and enables fast,
+/// amortized O(1) random access via a sampling mechanism. See the
+/// [module-level documentation](crate::variable) for a detailed explanation.
+///
+/// # Type Parameters
+///
+/// - `T`: The integer type for the elements (e.g., `u32`, `i16`). It must
+///   implement the [`Storable`] trait.
+/// - `E`: The [`Endianness`] of the underlying bitstream (e.g., [`LE`] or [`BE`]).
+/// - `B`: The backend storage buffer, such as `Vec<u64>` for an owned vector or
+///   `&[u64]` for a borrowed, zero-copy view.
+#[derive(Debug, Clone, MemSize, MemDbg)]
 pub struct IntVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
-    /// The raw compressed data.
+    /// The raw, bit-packed compressed data.
     pub(super) data: B,
-    /// Bit offsets of sampled elements.
+    /// A `FixedVec` containing the bit offsets of sampled elements.
     pub(super) samples: FixedVec<u64, u64, LE, B>,
-    /// The sampling rate `k`.
+    /// The sampling rate `k`. Every `k`-th element's position is stored.
     pub(super) k: usize,
     /// The number of elements in the vector.
     pub(super) len: usize,
     /// The `dsi-bitstream` code used for compression.
     pub(super) encoding: Codes,
-    /// A zero-sized marker for element type, endianness, and backend.
+    /// Zero-sized markers for the generic type parameters.
     pub(super) _markers: PhantomData<(T, E)>,
 }
 
-/// Type alias for the writer used internally by `IntVec`.
+/// Type alias for the bit writer used internally by `IntVec` builders.
 pub(crate) type IntVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
-/// Type alias for the reader used internally by `IntVec`.
+/// Type alias for the bit reader used internally by `IntVec` accessors.
 pub(crate) type IntVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
 
+
 impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
-    /// Returns a builder for creating an owned [`IntVec`] from a slice of data.
+    /// Creates a builder for constructing an owned [`IntVec`] from a slice of data.
+    ///
+    /// This is the most flexible way to create an `IntVec`, allowing customization
+    /// of the compression codec and sampling rate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, UIntVec, VariableCodecSpec};
+    ///
+    /// let data: &[u32] = &[5, 8, 13, 21, 34];
+    /// let vec: UIntVec<u32> = IntVec::builder(data)
+    ///     .k(2) // Sample every 2nd element
+    ///     .codec(VariableCodecSpec::Delta)
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// assert_eq!(vec.get(3), Some(21));
+    /// ```
     pub fn builder(input: &'_ [T]) -> IntVecBuilder<'_, T, E> {
         IntVecBuilder::new(input)
     }
 
-    /// Returns a builder for creating an owned [`IntVec`] from an iterator.
+    /// Creates a builder for constructing an owned [`IntVec`] from an iterator.
+    ///
+    /// This is useful for large datasets that are generated on the fly.
     pub fn from_iter_builder<I>(iter: I) -> IntVecFromIterBuilder<T, E, I>
     where
         I: IntoIterator<Item = T> + Clone,
@@ -162,7 +289,19 @@ impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
         IntVecFromIterBuilder::new(iter)
     }
 
-    /// Consumes the [`IntVec`] and returns its decoded values as a `Vec<T>`.
+    /// Consumes the [`IntVec`] and returns its decoded values as a standard `Vec<T>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, SIntVec};
+    ///
+    /// let data: &[i32] = &[-10, 0, 10];
+    /// let vec: SIntVec<i32> = IntVec::from_slice(data).unwrap();
+    /// let decoded_data = vec.into_vec();
+    ///
+    /// assert_eq!(decoded_data, &[-10, 0, 10]);
+    /// ```
     pub fn into_vec(self) -> Vec<T>
     where
         for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
@@ -172,11 +311,10 @@ impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
         self.into_iter().collect()
     }
 
-    /// Creates an owned `IntVec` directly from a slice of data.
+    /// Creates an owned `IntVec` from a slice of data using default settings.
     ///
-    /// This is a convenient alias for `IntVec::builder(slice).build()`.
-    /// The codec will be automatically determined using `VariableCodecSpec::Auto`,
-    /// and a default sampling rate of `k=16` will be used.
+    /// This method uses `VariableCodecSpec::Auto` to select a codec and a
+    /// default sampling rate of `k=16`.
     pub fn from_slice(slice: &[T]) -> Result<Self, IntVecError>
     where
         for<'a> crate::variable::IntVecBitWriter<E>:
@@ -190,7 +328,15 @@ impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
 }
 
 impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
-    /// Creates a new `IntVec` from its raw parts, enabling zero-copy views.
+    /// Creates a new `IntVec` from its raw components, enabling zero-copy views.
+    ///
+    /// This constructor is intended for advanced use cases, such as memory-mapping
+    /// a pre-built `IntVec` from disk without copying the data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`IntVecError::InvalidParameters`] if `k` is zero or if the
+    /// number of samples is inconsistent with `len` and `k`.
     pub fn from_parts(
         data: B,
         samples_data: B,
@@ -223,9 +369,14 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         Ok(unsafe { Self::new_unchecked(data, samples, k, len, encoding) })
     }
 
-    /// Creates a new `IntVec` from its raw parts without safety checks.
+    /// Creates a new `IntVec` from its raw parts without performing safety checks.
+    ///
     /// # Safety
-    /// The caller must ensure all parameters are consistent and valid.
+    ///
+    /// The caller must ensure that all parameters are consistent and valid. The
+    /// `samples` must contain the correct bit offsets for the `data` stream,
+    /// and `len`, `k`, and `encoding` must accurately describe the layout.
+    /// Mismatched parameters will lead to panics or incorrect data retrieval.
     pub(crate) unsafe fn new_unchecked(
         data: B,
         samples: FixedVec<u64, u64, LE, B>,
@@ -243,15 +394,33 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         }
     }
 
-    /// Creates a zero-copy slice of this vector.
+    /// Creates a zero-copy, immutable view (a "slice") of this vector.
+    ///
+    /// Returns `None` if the specified range is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, UIntVec};
+    ///
+    /// let data: Vec<u32> = (0..20).collect();
+    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    /// let slice = vec.slice(5, 10).unwrap();
+    ///
+    /// assert_eq!(slice.len(), 10);
+    /// assert_eq!(slice.get(0), Some(5)); // Corresponds to index 5 of the original vec
+    /// ```
     pub fn slice(&'_ self, start: usize, len: usize) -> Option<IntVecSlice<'_, T, E, B>> {
-        if start + len > self.len {
+        if start.saturating_add(len) > self.len {
             return None;
         }
         Some(IntVecSlice::new(self, start..start + len))
     }
 
-    /// Splits the vector into two slices at a given index.
+    /// Splits the vector into two immutable slices at a given index.
+    ///
+    /// Returns `None` if `mid` is out of bounds.
+    #[allow(clippy::type_complexity)]
     pub fn split_at(&'_ self, mid: usize) -> Option<(IntVecSlice<'_, T, E, B>, IntVecSlice<'_, T, E, B>)> {
         if mid > self.len {
             return None;
@@ -262,36 +431,43 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
     }
 
     /// Returns the number of integers in the vector.
+    #[inline]
     pub fn len(&self) -> usize {
         self.len
     }
 
     /// Returns `true` if the vector contains no elements.
+    #[inline]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// Returns the sampling rate `k` used during encoding.
+    #[inline]
     pub fn get_sampling_rate(&self) -> usize {
         self.k
     }
 
     /// Returns the number of sample points stored in the vector.
+    #[inline]
     pub fn get_num_samples(&self) -> usize {
         self.samples.len()
     }
 
     /// Returns a reference to the inner `FixedVec` of samples.
+    #[inline]
     pub fn samples_ref(&self) -> &FixedVec<u64, u64, LE, B> {
         &self.samples
     }
 
-    /// Returns a zero-copy, read-only slice of the underlying compressed data (`&[u64]`).
+    /// Returns a read-only slice of the underlying compressed data words (`&[u64]`).
+    #[inline]
     pub fn as_limbs(&self) -> &[u64] {
         self.data.as_ref()
     }
 
     /// Returns the concrete `Codes` variant that was used for compression.
+    #[inline]
     pub fn encoding(&self) -> Codes {
         self.encoding
     }
@@ -319,15 +495,36 @@ where
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// Creates a stateful, reusable [`IntVecReader`] for this vector.
+    ///
+    /// The reader caches its position, which can improve performance for
+    /// access patterns that are sequential or quasi-sequential.
     pub fn reader(&'_ self) -> IntVecReader<'_, T, E, B> {
         IntVecReader::new(self)
     }
 
     /// Creates a stateful, reusable [`IntVecSeqReader`] for this vector.
+    ///
+    /// This reader is optimized for strictly sequential access patterns.
     pub fn seq_reader(&'_ self) -> IntVecSeqReader<'_, T, E, B> {
         IntVecSeqReader::new(self)
     }
 
+    /// Returns the element at the specified index, or `None` if the index is
+    /// out of bounds.
+    ///
+    /// This operation is amortized O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, UIntVec};
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    ///
+    /// assert_eq!(vec.get(50), Some(50));
+    /// assert_eq!(vec.get(100), None);
+    /// ```
     #[inline]
     pub fn get(&self, index: usize) -> Option<T> {
         if index >= self.len {
@@ -336,12 +533,39 @@ where
         Some(unsafe { self.get_unchecked(index) })
     }
 
+    /// Returns the element at the specified index without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    /// The `index` must be less than the vector's `len`.
     #[inline]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         let mut reader = self.reader();
         reader.get_unchecked(index)
     }
 
+    /// Retrieves multiple elements from the vector at the specified indices.
+    ///
+    /// This method is generally more efficient than calling `get` in a loop, as
+    /// it sorts the indices and scans through the compressed data stream once.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IntVecError::IndexOutOfBounds`] if any index is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, UIntVec};
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    ///
+    /// let indices = [99, 0, 50];
+    /// let values = vec.get_many(&indices).unwrap();
+    /// assert_eq!(values, vec![99, 0, 50]);
+    /// ```
     pub fn get_many(&self, indices: &[usize]) -> Result<Vec<T>, IntVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
@@ -352,14 +576,22 @@ where
                 return Err(IntVecError::IndexOutOfBounds(index));
             }
         }
+        // SAFETY: We have just performed the bounds checks.
         Ok(unsafe { self.get_many_unchecked(indices) })
     }
 
+    /// Retrieves multiple elements without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with any out-of-bounds index is undefined behavior.
+    #[allow(clippy::uninit_vec)]
     pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<T> {
         if indices.is_empty() {
             return Vec::new();
         }
         let mut results = Vec::with_capacity(indices.len());
+        // SAFETY: The vector is immediately populated by the sorted access logic below.
         results.set_len(indices.len());
 
         let mut indexed_indices: Vec<(usize, usize)> = indices
@@ -367,9 +599,11 @@ where
             .enumerate()
             .map(|(i, &idx)| (idx, i))
             .collect();
+        // Sort by the target index to enable efficient sequential scanning.
         indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
 
         if self.k.is_power_of_two() {
+            // Optimization: use bit-shift for division if k is a power of two.
             let k_exp = self.k.trailing_zeros();
             self.get_many_dsi_inner(
                 &indexed_indices,
@@ -391,6 +625,10 @@ where
         results
     }
 
+    /// Internal implementation for `get_many_unchecked`.
+    ///
+    /// This function takes closures to abstract away the division/multiplication
+    /// by `k`, allowing for a bit-shift optimization when `k` is a power of two.
     fn get_many_dsi_inner<F1, F2>(
         &self,
         indexed_indices: &[(usize, usize)],
@@ -406,25 +644,36 @@ where
         let mut current_decoded_index: usize = 0;
 
         for &(target_index, original_position) in indexed_indices {
+            // Check if we need to jump to a new sample block. This is true if the
+            // target index is before our current position, or if it's in a different
+            // sample block than the one we're currently in.
             if target_index < current_decoded_index
                 || block_of(target_index) != block_of(current_decoded_index.saturating_sub(1))
             {
                 let target_sample_block = block_of(target_index);
+                // SAFETY: The public-facing `get_many` performs bounds checks.
                 let start_bit = unsafe { self.samples.get_unchecked(target_sample_block) };
                 reader.reader.set_bit_pos(start_bit)?;
                 current_decoded_index = start_of_block(target_sample_block);
             }
 
+            // Sequentially decode elements until we reach our target.
             for _ in current_decoded_index..target_index {
                 reader.code_reader.read(&mut reader.reader)?;
             }
             let value = reader.code_reader.read(&mut reader.reader)?;
+            // Place the decoded value in its original requested position.
             results[original_position] = Storable::from_word(value);
             current_decoded_index = target_index + 1;
         }
         Ok(())
     }
 
+    /// Retrieves multiple elements from an iterator of indices.
+    ///
+    /// This is a convenient alternative to `get_many` when the indices are not
+    /// already in a slice. It may be less performant as it cannot pre-sort the
+    /// indices for optimal access.
     pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<T>, IntVecError>
     where
         I: IntoIterator<Item = usize>,
@@ -451,10 +700,28 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
+    /// Binary searches this vector for a given element.
+    ///
+    /// If the value is found, returns `Ok(usize)` with the index of the
+    /// matching element. If the value is not found, returns `Err(usize)` with
+    /// the index where the value could be inserted to maintain order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, SIntVec};
+    ///
+    /// let data: &[i32] = &[-10, 0, 10, 20, 30];
+    /// let vec: SIntVec<i32> = IntVec::from_slice(data).unwrap();
+    ///
+    /// assert_eq!(vec.binary_search(&10), Ok(2));
+    /// assert_eq!(vec.binary_search(&15), Err(3));
+    /// ```
     pub fn binary_search(&self, value: &T) -> Result<usize, usize> {
         self.binary_search_by(|probe| probe.cmp(value))
     }
 
+    /// Binary searches this vector with a custom comparison function.
     #[inline]
     pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
     where
@@ -466,6 +733,7 @@ where
 
         while low < high {
             let mid = low + (high - low) / 2;
+            // SAFETY: The loop invariants ensure `mid` is always in bounds.
             let cmp = f(unsafe { reader.get_unchecked(mid) });
 
             match cmp {
@@ -477,6 +745,7 @@ where
         Err(low)
     }
 
+    /// Binary searches this vector with a key extraction function.
     #[inline]
     pub fn binary_search_by_key<K: Ord, F>(&self, b: &K, mut f: F) -> Result<usize, usize>
     where
@@ -500,11 +769,17 @@ where
     }
 }
 
+/// An [`IntVec`] for unsigned integers with Little-Endian bit layout.
 pub type UIntVec<T> = IntVec<T, LE>;
+/// An [`IntVec`] for signed integers with Little-Endian bit layout.
 pub type SIntVec<T> = IntVec<T, LE>;
+/// An [`IntVec`] for `u64` elements with Big-Endian bit layout.
 pub type BEIntVec = IntVec<u64, BE>;
+/// An [`IntVec`] for `u64` elements with Little-Endian bit layout.
 pub type LEIntVec = IntVec<u64, LE>;
+/// An [`IntVec`] for `i64` elements with Big-Endian bit layout.
 pub type BESIntVec = IntVec<i64, BE>;
+/// An [`IntVec`] for `i64` elements with Little-Endian bit layout.
 pub type LESIntVec = IntVec<i64, LE>;
 
 impl<T, E, B, O> PartialEq<O> for IntVec<T, E, B>
@@ -517,6 +792,10 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
+    /// Checks for equality between an `IntVec` and a standard slice.
+    ///
+    /// The comparison is done by iterating over both and comparing elements
+    /// one by one. The overall comparison is not a single atomic operation.
     fn eq(&self, other: &O) -> bool {
         let other_slice = other.as_ref();
         if self.len() != other_slice.len() {

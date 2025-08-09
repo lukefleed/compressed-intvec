@@ -26,3 +26,7 @@ pub use crate::variable::{
     traits::Storable as VariableStorable,
     BEIntVec, BESIntVec, IntVecError, IntVec, LEIntVec, LESIntVec, SIntVec, UIntVec,
 };
+
+// --- Macros Prelude ---
+pub use crate::sint_vec;
+pub use crate::int_vec;

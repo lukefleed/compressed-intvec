@@ -18,7 +18,8 @@ fn test_int_vec_macro_empty() {
 #[test]
 fn test_int_vec_macro_from_list() {
     let data = vec![100u64, 200, 300, 400, 500];
-    let v = int_vec![100, 200, 300, 400, 500];
+    // Add an explicit type annotation to help the compiler resolve trait bounds.
+    let v: LEIntVec = int_vec![100, 200, 300, 400, 500];
 
     assert_eq!(v.len(), 5);
     assert_eq!(v.get(0), Some(100));
@@ -31,14 +32,16 @@ fn test_int_vec_macro_from_list() {
 
 #[test]
 fn test_int_vec_macro_from_list_with_trailing_comma() {
-    let v = int_vec![1, 2, 3,];
+    // Add an explicit type annotation.
+    let v: LEIntVec = int_vec![1, 2, 3,];
     assert_eq!(v.len(), 3);
     assert_eq!(v.get(2), Some(3));
 }
 
 #[test]
 fn test_int_vec_macro_from_repeated_element() {
-    let v = int_vec![42u64; 100];
+    // Add an explicit type annotation.
+    let v: LEIntVec = int_vec![42u64; 100];
     assert_eq!(v.len(), 100);
 
     for i in 0..100 {
@@ -59,7 +62,8 @@ fn test_sint_vec_macro_empty() {
 #[test]
 fn test_sint_vec_macro_from_list() {
     let data = vec![-100i64, 0, 200, -300, 500];
-    let v = sint_vec![-100, 0, 200, -300, 500];
+    // Add an explicit type annotation.
+    let v: LESIntVec = sint_vec![-100, 0, 200, -300, 500];
 
     assert_eq!(v.len(), 5);
     assert_eq!(v.get(0), Some(-100));
@@ -72,7 +76,8 @@ fn test_sint_vec_macro_from_list() {
 
 #[test]
 fn test_sint_vec_macro_from_repeated_element() {
-    let v = sint_vec![-42; 100];
+    // Add an explicit type annotation.
+    let v: LESIntVec = sint_vec![-42; 100];
     assert_eq!(v.len(), 100);
 
     for i in 0..100 {

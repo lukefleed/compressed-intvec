@@ -253,15 +253,15 @@ impl StdError for Error {}
 #[derive(Debug, Clone, MemDbg, MemSize)]
 pub struct FixedVec<T: Storable<W>, W: Word, E: Endianness, B: AsRef<[W]> = Vec<W>> {
     /// The underlying storage for the bit-packed data.
-    pub bits: B,
+    pub(crate) bits: B,
     /// The number of bits used to encode each element.
-    pub bit_width: usize,
+    pub(crate) bit_width: usize,
     /// A bitmask with the lowest `bit_width` bits set to one.
-    pub mask: W,
+    pub(crate) mask: W,
     /// The number of elements in the vector.
-    pub len: usize,
+    pub(crate) len: usize,
     /// Zero-sized markers for the generic type parameters `T`, `W`, and `E`.
-    pub _phantom: PhantomData<(T, W, E)>,
+    pub(crate) _phantom: PhantomData<(T, W, E)>,
 }
 
 // `FixedVec` builder implementation.
