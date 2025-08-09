@@ -112,7 +112,7 @@ where
 /// An owning iterator over the values of an [`IntVec`].
 ///
 /// This struct is created by the [`into_iter`](IntVec::into_iter) method on
-/// [`IntVec`] (or by using a `for` loop on an owned `IntVec`). It takes ownership
+/// [`IntVec`] (or by using a `for` loop on an owned [`IntVec`]). It takes ownership
 /// of the vector and decodes its values on the fly.
 ///
 /// # Examples

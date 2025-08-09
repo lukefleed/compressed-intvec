@@ -59,7 +59,7 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
     ///
     /// # Panics
     ///
-    /// The `build` method will return an error if `k` is 0.
+    /// The [`build`](IntVecBuilder::build) method will return an error if `k` is 0.
     pub fn k(mut self, k: usize) -> Self {
         self.k = k;
         self
@@ -168,8 +168,8 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
 ///
 /// # Limitations
 ///
-/// This builder does **not** support automatic codec selection (i.e., `VariableCodecSpec::Auto`)
-/// or automatic parameter estimation for codecs like `Rice` or `Golomb`. Because the
+/// This builder does **not** support automatic codec selection (i.e., [`VariableCodecSpec::Auto`])
+/// or automatic parameter estimation for codecs like `Rice` or `Golomb`. Since the
 /// iterator is consumed in a single pass, the data cannot be pre-analyzed to
 /// determine its statistical properties. The user must specify a concrete codec.
 #[derive(Debug)]
@@ -205,7 +205,7 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> IntVecFromIterBuilde
     /// # Errors
     ///
     /// The `build` method will return an error if a codec specification that
-    /// requires data analysis is provided (e.g., `VariableCodecSpec::Auto`).
+    /// requires data analysis is provided (e.g., [`VariableCodecSpec::Auto`]).
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
         self

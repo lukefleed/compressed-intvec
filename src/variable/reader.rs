@@ -5,16 +5,16 @@
 //!
 //! # Performance
 //!
-//! A standard call to [`IntVec::get`](super::IntVec::get) is convenient, but it
+//! A standard call to [`get`](super::IntVec::get) is convenient, but it
 //! creates and discards an internal bitstream reader for each call. When
 //! performing many random lookups, this can introduce significant overhead.
 //!
-//! `IntVecReader` avoids this by maintaining a persistent, stateful reader
-//! instance. This amortizes the setup cost across multiple `get` operations,
+//! [`IntVecReader`] avoids this by maintaining a persistent, stateful reader
+//! instance. This amortizes the setup cost across multiple [`get`](super::IntVec::get) operations,
 //! making it ideal for access patterns where lookup indices are not known in
 //! advance (e.g., graph traversals, pointer chasing).
 //!
-//! For reading a predefined list of indices, [`IntVec::get_many`](super::IntVec::get_many)
+//! For reading a predefined list of indices, [`get_many`](super::IntVec::get_many)
 //! is generally more efficient, as it can pre-sort the indices for a single
 //! sequential scan.
 //!

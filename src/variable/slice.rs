@@ -18,7 +18,7 @@ use std::ops::Range;
 /// [`slice`](super::IntVec::slice) or [`split_at`](super::IntVec::split_at)
 /// methods on an [`IntVec`].
 ///
-/// All operations on an `IntVecSlice` are relative to the start of the slice,
+/// All operations on an [`IntVecSlice`] are relative to the start of the slice,
 /// not the parent vector.
 ///
 /// # Examples

@@ -23,7 +23,7 @@
 ///
 /// # Examples
 ///
-/// Create an empty `LEIntVec`:
+/// Create an empty [`LEIntVec`]:
 /// ```
 /// # use compressed_intvec::int_vec;
 /// # use compressed_intvec::prelude::LEIntVec;
@@ -31,7 +31,7 @@
 /// assert!(v.is_empty());
 /// ```
 ///
-/// Create an `LEIntVec` from a list of elements:
+/// Create an [`LEIntVec`] from a list of elements:
 /// ```
 /// # use compressed_intvec::int_vec;
 ///   # use compressed_intvec::prelude::LEIntVec;
@@ -40,7 +40,7 @@
 /// assert_eq!(v.get(1), Some(200));
 /// ```
 ///
-/// Create an `LEIntVec` with a repeated element:
+/// Create an [`LEIntVec`] with a repeated element:
 /// ```
 /// # use compressed_intvec::int_vec;
 ///   # use compressed_intvec::prelude::LEIntVec;
@@ -48,6 +48,9 @@
 /// assert_eq!(v.len(), 100);
 /// assert_eq!(v.get(50), Some(42));
 /// ```
+/// 
+/// [`LEIntVec`]: crate::variable::LEIntVec
+/// [`VariableCodecSpec::Auto`]: crate::variable::VariableCodecSpec::Auto
 #[macro_export]
 macro_rules! int_vec {
     () => {
@@ -87,7 +90,7 @@ macro_rules! int_vec {
 ///
 /// # Examples
 ///
-/// Create an empty `LESIntVec`:
+/// Create an empty [`LESIntVec`]:
 /// ```
 /// # use compressed_intvec::sint_vec;
 /// # use compressed_intvec::prelude::LESIntVec;
@@ -95,7 +98,7 @@ macro_rules! int_vec {
 /// assert!(v.is_empty());
 /// ```
 ///
-/// Create an `LESIntVec` from a list of elements:
+/// Create an [`LESIntVec`] from a list of elements:
 /// ```
 /// # use compressed_intvec::sint_vec;
 ///   # use compressed_intvec::prelude::LESIntVec;
@@ -104,7 +107,7 @@ macro_rules! int_vec {
 /// assert_eq!(v.get(2), Some(-300));
 /// ```
 ///
-/// Create an `LESIntVec` with a repeated element:
+/// Create an [`LESIntVec`] with a repeated element:
 /// ```
 /// # use compressed_intvec::sint_vec;
 ///   # use compressed_intvec::prelude::LESIntVec;
@@ -112,6 +115,9 @@ macro_rules! int_vec {
 /// assert_eq!(v.len(), 100);
 /// assert_eq!(v.get(50), Some(-42));
 /// ```
+/// 
+/// [`LESIntVec`]: crate::variable::LESIntVec
+/// [`VariableCodecSpec::Auto`]: crate::variable::VariableCodecSpec::Auto
 #[macro_export]
 macro_rules! sint_vec {
     () => {

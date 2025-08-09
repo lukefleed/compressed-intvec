@@ -3,15 +3,15 @@
 //! This module provides [`IntVec`], a data structure for storing sequences of
 //! integers in a compressed format while retaining efficient random access. It is
 //! well-suited for datasets where integer values are non-uniformly distributed,
-//! as it uses variable-length codes to represent smaller numbers with fewer bits.
+//! as it uses instantaneous variable-length codes to represent smaller numbers with fewer bits.
 //!
 //! # Core Concepts
 //!
 //! ## Variable-Length Encoding
 //!
-//! Unlike [`FixedVec`](crate::fixed::FixedVec), which uses a fixed number of
-//! bits for every integer, `IntVec` employs **instantaneous codes** (such as
-//! Gamma, Delta, or Zeta codes) provided by the [`dsi-bitstream`] crate. This
+//! Unlike [`FixedVec`], which uses a fixed number of
+//! bits for every integer, [`IntVec`] employs **instantaneous codes** (such as
+//! Gamma, Delta, or Rice codes) provided by the [`dsi-bitstream`] crate. This
 //! approach allows each integer to be encoded with a variable number of bits,
 //! typically using shorter codes for smaller or more frequent values. This can
 //! lead to significant space savings, especially for data with many small numbers.
@@ -23,11 +23,11 @@
 //! ## Random Access and Sampling
 //!
 //! A key challenge with variable-length codes is that the location of the *i*-th
-//! element cannot be calculated directly. To solve this, `IntVec` implements a
+//! element cannot be calculated directly. To solve this, [`IntVec`] implements a
 //! **sampling mechanism**. It stores the bit position of every *k*-th element in
 //! a separate, auxiliary [`FixedVec`]. This parameter, `k`, is the **sampling rate**.
 //!
-//! To access an element at `index`, `IntVec`:
+//! To access an element at `index`, [`IntVec`]:
 //! 1.  Finds the nearest sample by calculating `index / k`.
 //! 2.  Retrieves the bit offset of the start of that sampled block.
 //! 3.  Jumps to that offset in the compressed data stream.
@@ -48,10 +48,9 @@
 //!
 //! # Design and Immutability
 //!
-//! A crucial design aspect of `IntVec` is that it is **immutable** after creation.
-//! Unlike [`FixedVec`](crate::fixed::FixedVec), it does not provide methods for
-//! in-place modification (e.g., `set`, `push`). This is a deliberate technical
-//! choice rooted in the nature of variable-length encoding.
+//! [`IntVec`] is **immutable** after creation.
+//! Unlike [`FixedVec`], it does not provide methods for
+//! in-place modification (e.g., `set`, `push`).
 //!
 //! If a value in the middle of the compressed bitstream were changed, its new
 //! encoded length might be different. For example, changing `5` (which might be
@@ -59,32 +58,67 @@
 //! subsequent data, invalidating every sample point that follows. The cost of
 //! such an operation would be prohibitive, scaling with the length of the vector.
 //!
-//! For this reason, `IntVec` is designed as a write-once, read-many data structure.
+//! For this reason, [`IntVec`] is designed as a write-once, read-many data structure.
+//!
+//! # Access Strategies and Readers
+//!
+//! [`IntVec`] provides multiple interfaces for accessing data, each optimized for a
+//! different pattern of use.
+//!
+//! - **[`get()`](IntVec::get)**: For single, infrequent lookups. Each call creates and discards
+//!   an internal reader, which incurs overhead if used in a loop.
+//!
+//! - **[`get_many()`](IntVec::get_many)**: The most efficient method for retrieving a batch of elements
+//!   when all indices are known beforehand. It sorts the indices to perform a
+//!   single, monotonic scan over the data, minimizing redundant decoding and seek
+//!   operations.
+//!
+//! - **[`IntVecReader`] (Reusable Stateless Reader)**: This reader is created via
+//!   [`IntVec::reader()`]. It maintains an internal, reusable bitstream reader,
+//!   amortizing its setup cost over multiple calls. Each [`get()`](IntVec::get) call is
+//!   **stateless** with respect to position: it performs a full seek to the nearest
+//!   sample and decodes forward from there, independently of previous calls. It is
+//!   best suited for true random access patterns where indices are sparse and
+//!   unpredictable.
+//!
+//! - **[`IntVecSeqReader`] (Stateful Sequential Reader)**: This reader, created via
+//!   [`IntVec::seq_reader()`], is a stateful object optimized for access patterns with
+//!   high locality. It maintains an internal cursor of the current decoding position.
+//!   - **Fast Path**: If a requested `index` is at or after the cursor's current
+//!     position and within the same sample block, the reader simply decodes
+//!     forward from its last position, avoiding a costly seek operation.
+//!   - **Fallback Path**: If the requested `index` is before the cursor or in a
+//!     different sample block, the reader falls back to the standard behavior of
+//!     seeking to the nearest sample and decoding from there.
+//!   This makes it exceptionally efficient for iterating through sorted or clustered
+//!   indices.
 //!
 //! # Main Components
 //!
 //! - [`IntVec`]: The core compressed vector.
-//! - [`IntVecBuilder`]: The primary tool for constructing an `IntVec` with
+//! - [`IntVecBuilder`]: The primary tool for constructing an [`IntVec`] with
 //!   custom compression codecs and sampling rates.
 //! - [`VariableCodecSpec`]: An enum to specify the compression codec.
-//! - [`IntVecReader`]: A stateful reader for efficient, repeated random access.
-//! - [`IntVecSlice`]: An immutable view over a portion of the vector.
+//! - [`IntVecReader`]: A reusable, stateless reader for efficient random access.
+//! - [`IntVecSeqReader`]: A stateful reader optimized for sequential or localized access patterns.
+//! - [`IntVecSlice`]: An immutable, zero-copy view over a portion of the vector.
 //!
 //! # Examples
 //!
 //! ## Basic Usage with Unsigned Integers
 //!
-//! Create a [`UIntVec`] from a slice of `u32`. The builder will automatically
+//! Create a [`UIntVec`] (an alias for `IntVec<u32, LE>`) from a slice of `u32`. The builder will automatically
 //! select a suitable codec and use a default sampling rate.
 //!
 //! ```
 //! use compressed_intvec::variable::{IntVec, UIntVec};
 //!
-//! let data: Vec<u32> = vec![10, 2, 5000, 3, 80, 120];
+//! let data: Vec<u32> = vec![100, 200, 300, 1024];
 //! let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
-//!
-//! assert_eq!(vec.len(), 6);
-//! assert_eq!(vec.get(2), Some(5000));
+//! 
+//! assert_eq!(vec.len(), 4);
+//! // Accessing an element
+//! assert_eq!(vec.get(1), Some(200));
 //! ```
 //!
 //! ## Storing Signed Integers
@@ -103,7 +137,7 @@
 //! assert_eq!(vec.get(2), Some(-100));
 //! ```
 //!
-//! ## Customizing Compression and Sampling
+//! ## Manual Codec and Sampling Rate
 //!
 //! For fine-grained control, use the [`IntVecBuilder`]. Here, we specify a
 //! sampling rate of `k=8` and use the `Zeta` code with `k=3`.
@@ -122,17 +156,19 @@
 //! assert_eq!(vec.get_sampling_rate(), 8);
 //! assert_eq!(vec.get(10), Some(100));
 //! ```
+//! 
+//! Best performance is achieved when the sampling rate `k` is a power of two. Usually a value of `32` or `16` is a good trade-off between speed and compression ratio.
 //!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
 #[macro_use]
-pub mod macros;
+mod macros;
 
 pub mod builder;
 pub mod codec;
 pub mod iter;
 #[cfg(feature = "parallel")]
-pub mod parallel;
+mod parallel;
 pub mod reader;
 pub mod seq_reader;
 #[cfg(feature = "serde")]
@@ -258,7 +294,7 @@ pub(crate) type IntVecBitReader<'a, E> =
 impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
     /// Creates a builder for constructing an owned [`IntVec`] from a slice of data.
     ///
-    /// This is the most flexible way to create an `IntVec`, allowing customization
+    /// This is the most flexible way to create an [`IntVec`], allowing customization
     /// of the compression codec and sampling rate.
     ///
     /// # Examples
@@ -311,9 +347,9 @@ impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
         self.into_iter().collect()
     }
 
-    /// Creates an owned `IntVec` from a slice of data using default settings.
+    /// Creates an owned [`IntVec`] from a slice of data using default settings.
     ///
-    /// This method uses `VariableCodecSpec::Auto` to select a codec and a
+    /// This method uses [`VariableCodecSpec::Auto`] to select a codec and a
     /// default sampling rate of `k=16`.
     pub fn from_slice(slice: &[T]) -> Result<Self, IntVecError>
     where
@@ -328,10 +364,10 @@ impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
 }
 
 impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
-    /// Creates a new `IntVec` from its raw components, enabling zero-copy views.
+    /// Creates a new [`IntVec`] from its raw components, enabling zero-copy views.
     ///
     /// This constructor is intended for advanced use cases, such as memory-mapping
-    /// a pre-built `IntVec` from disk without copying the data.
+    /// a pre-built [`IntVec`] from disk without copying the data.
     ///
     /// # Errors
     ///
@@ -369,7 +405,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         Ok(unsafe { Self::new_unchecked(data, samples, k, len, encoding) })
     }
 
-    /// Creates a new `IntVec` from its raw parts without performing safety checks.
+    /// Creates a new [`IntVec`] from its raw parts without performing safety checks.
     ///
     /// # Safety
     ///
@@ -394,7 +430,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         }
     }
 
-    /// Creates a zero-copy, immutable view (a "slice") of this vector.
+    /// Creates a zero-copy, immutable view (a _slice_) of this vector.
     ///
     /// Returns `None` if the specified range is out of bounds.
     ///
@@ -466,7 +502,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         self.data.as_ref()
     }
 
-    /// Returns the concrete `Codes` variant that was used for compression.
+    /// Returns the concrete [`Codes`] variant that was used for compression.
     #[inline]
     pub fn encoding(&self) -> Codes {
         self.encoding
@@ -494,17 +530,79 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Creates a stateful, reusable [`IntVecReader`] for this vector.
+    /// Creates a reusable, stateless reader for efficient random access.
     ///
-    /// The reader caches its position, which can improve performance for
-    /// access patterns that are sequential or quasi-sequential.
+    /// This method returns an [`IntVecReader`], a struct that maintains a persistent,
+    /// reusable bitstream reader. This amortizes the setup cost across multiple `get`
+    /// operations, making it more efficient than calling [`get`](IntVec::get) repeatedly in a loop.
+    ///
+    /// This reader is **stateless**: it performs a full seek from the nearest sample point for each call,
+    /// independently of any previous access.
+    ///
+    /// # When to use it
+    /// Use [`IntVecReader`] for true random access patterns where lookup indices are sparse,
+    /// unordered, or not known in advance (e.g., graph traversals, pointer chasing).
+    /// For accessing a known set of indices, [`get_many`](IntVec::get_many) is generally superior.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    ///
+    /// let data: Vec<u32> = (0..100).rev().collect(); // Data is not sequential
+    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    ///
+    /// // Create a reusable reader for multiple random lookups
+    /// let mut reader = vec.reader();
+    ///
+    /// assert_eq!(reader.get(99).unwrap(), Some(0));
+    /// assert_eq!(reader.get(0).unwrap(), Some(99));
+    /// assert_eq!(reader.get(50).unwrap(), Some(49));
+    /// ```
     pub fn reader(&'_ self) -> IntVecReader<'_, T, E, B> {
         IntVecReader::new(self)
     }
 
-    /// Creates a stateful, reusable [`IntVecSeqReader`] for this vector.
+    /// Creates a stateful, reusable reader optimized for sequential access.
     ///
-    /// This reader is optimized for strictly sequential access patterns.
+    /// This method returns an [`IntVecSeqReader`], which is specifically designed
+    /// to take advantage of the vector's internal state, tracking the current decoding position (cursor).
+    ///
+    /// This statefulness enables a key optimization:
+    /// - **Fast Path**: If a requested index is at or after the cursor and within
+    ///   the same sample block, the reader decodes forward from its last known
+    ///   position. This avoids a costly seek operation.
+    /// - **Fallback Path**: If the requested index is before the cursor (requiring a
+    ///   backward move) or in a different sample block, the reader falls back to
+    ///   the standard behavior of seeking to the nearest sample point.
+    ///
+    /// # When to use it
+    /// Use [`IntVecSeqReader`] when your access pattern has high locality, meaning
+    /// indices are primarily increasing and often clustered together. It is ideal
+    /// for iterating through a sorted list of indices or for stream-like processing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::prelude::*;
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    ///
+    /// // Create a reader optimized for sequential access
+    /// let mut seq_reader = vec.seq_reader();
+    ///
+    /// // Accessing indices in increasing order is efficient
+    /// assert_eq!(seq_reader.get(10).unwrap(), Some(10));
+    /// // This next call is fast, as it decodes forward from index 10
+    /// assert_eq!(seq_reader.get(15).unwrap(), Some(15));
+    ///
+    /// // A large jump will trigger a seek to a new sample block
+    /// assert_eq!(seq_reader.get(90).unwrap(), Some(90));
+    ///
+    /// // A backward jump will also trigger a seek
+    /// assert_eq!(seq_reader.get(5).unwrap(), Some(5));
+    /// ```
     pub fn seq_reader(&'_ self) -> IntVecSeqReader<'_, T, E, B> {
         IntVecSeqReader::new(self)
     }
@@ -547,7 +645,7 @@ where
 
     /// Retrieves multiple elements from the vector at the specified indices.
     ///
-    /// This method is generally more efficient than calling `get` in a loop, as
+    /// This method is generally more efficient than calling [`get`](Self::get) in a loop, as
     /// it sorts the indices and scans through the compressed data stream once.
     ///
     /// # Errors
@@ -671,7 +769,7 @@ where
 
     /// Retrieves multiple elements from an iterator of indices.
     ///
-    /// This is a convenient alternative to `get_many` when the indices are not
+    /// This is a convenient alternative to [`get_many`](Self::get_many) when the indices are not
     /// already in a slice. It may be less performant as it cannot pre-sort the
     /// indices for optimal access.
     pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<T>, IntVecError>

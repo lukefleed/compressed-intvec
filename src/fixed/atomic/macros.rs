@@ -1,13 +1,8 @@
 //! # Macros for `AtomicFixedVec`
-//!
-//! This module provides the [`atomic_fixed_vec!`] macro for creating an
-//! [`AtomicFixedVec`] with a `vec!`-like syntax. This is convenient for
-//! creating vectors in tests or examples.
-
-/// Creates an `AtomicFixedVec` with default parameters.
+/// Creates an [`AtomicFixedVec`] with default parameters.
 ///
-/// This macro simplifies the creation of an `AtomicFixedVec`. It uses a `u64`
-/// storage backend and `BitWidth::Minimal` for space efficiency.
+/// This macro simplifies the creation of an [`AtomicFixedVec`]. It uses a `u64`
+/// storage backend and [`BitWidth::Minimal`](crate::fixed::BitWidth::Minimal) for space efficiency.
 ///
 /// There are two forms of this macro:
 ///

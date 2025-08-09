@@ -6,8 +6,8 @@
 //!
 //! # Performance
 //!
-//! `IntVecSeqReader` maintains an internal state of the current decoding position.
-//! When a new `get` request is made, it intelligently decides whether to:
+//! [`IntVecSeqReader`] maintains an internal state of the current decoding position.
+//! When a new [`get`](super::IntVec::get) request is made, it intelligently decides whether to:
 //!
 //! 1.  **Decode Forward (Fast Path):** If the requested index is at or after the
 //!     current position and within the same sample block, the reader decodes
@@ -31,14 +31,28 @@ use dsi_bitstream::{
     prelude::{BitRead, BitSeek, Endianness},
 };
 
-/// A stateful, sequential reader for an `IntVec` optimized for forward access.
+/// A stateful, sequential reader for an [`IntVec`] optimized for forward access.
 ///
-/// This reader is created by the [`IntVec::seq_reader`](super::IntVec::seq_reader)
+/// This reader is created by the [`seq_reader`](super::IntVec::seq_reader)
 /// method. It maintains an internal cursor corresponding to the last-read
 /// element's position, making it highly efficient for sequential or
 /// mostly-forward access patterns.
 ///
 /// It is a more specialized tool than [`IntVecReader`](super::reader::IntVecReader).
+/// 
+/// # Performance
+///
+/// [`IntVecSeqReader`] maintains an internal state of the current decoding position.
+/// When a new [`get`](super::IntVec::get) request is made, it decides whether to:
+///
+/// 1.  **Decode Forward (Fast Path):** If the requested index is at or after the
+///     current position and within the same sample block, the reader decodes
+///     forward from its last position. This avoids a costly seek operation and
+///     is the primary optimization.
+///
+/// 2.  **Seek and Decode (Fallback):** If the requested index is far away or
+///     requires moving backward, the reader falls back to seeking to the
+///     nearest sample point and decoding from there, just like [`IntVecReader`](super::reader::IntVecReader).
 ///
 /// # Examples
 ///

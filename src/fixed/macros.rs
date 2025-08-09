@@ -1,14 +1,10 @@
-//! # Macros for `FixedVec`
-//!
-//! This module provides the [`fixed_vec!`] macro for creating a [`FixedVec`]
-//! with a `vec!`-like syntax. This is convenient for creating small, fixed-size
-//! vectors in tests or examples.
+//! # Macros for [`FixedVec`]
 
-/// Creates a `FixedVec` with default parameters.
+/// Creates a [`FixedVec`] with default parameters.
 ///
-/// This macro simplifies the creation of `FixedVec` by using default parameters
+/// This macro simplifies the creation of [`FixedVec`] by using default parameters
 /// (`usize` for the storage word, `LittleEndian` for byte order) inferred
-/// from the element type. It uses `BitWidth::Minimal` for space efficiency.
+/// from the element type. It uses [`BitWidth::Minimal`] for space efficiency.
 ///
 /// There are three forms of this macro:
 ///

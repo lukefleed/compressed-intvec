@@ -1,9 +1,9 @@
-//! # Core Traits for `FixedVec`
+//! # Core Traits for [`FixedVec`](crate::fixed::FixedVec)
 //!
 //! This module defines the core traits that enable the generic and unified
-//! `FixedVec` architecture. These traits abstract away the details of the
+//! [`FixedVec`](crate::fixed::FixedVec) architecture. These traits abstract away the details of the
 //! underlying storage words and the conversion logic for different element types,
-//! allowing `FixedVec` to be highly configurable.
+//! allowing [`FixedVec`](crate::fixed::FixedVec) to be highly configurable.
 
 use common_traits::{IntoAtomic, SignedInt, UnsignedInt};
 use dsi_bitstream::{
@@ -14,7 +14,7 @@ use num_traits::{Bounded, NumCast, ToPrimitive};
 use std::fmt::Debug;
 
 /// A trait that abstracts over the primitive unsigned integer types that can
-/// serve as the storage words in a [`FixedVec`].
+/// serve as the storage words in a [`FixedVec`](crate::fixed::FixedVec).
 ///
 /// This trait establishes a contract for what constitutes a "machine word"
 /// for storage, providing access to its size in bits and requiring the
@@ -36,20 +36,20 @@ pub trait Word:
     const BITS: usize = std::mem::size_of::<Self>() * 8;
 }
 
-/// A macro to implement the `Word` trait for a given list of unsigned integer types.
+/// A macro to implement the [`Word`] trait for a given list of unsigned integer types.
 macro_rules! impl_word_for {
     ($($t:ty),*) => {$(
         impl Word for $t {}
     )*};
 }
 
-// Implement `Word` for all standard unsigned integer types.
+// Implement [`Word`] for all standard unsigned integer types.
 impl_word_for!(u8, u16, u32, u64, usize);
 
 /// A trait that defines a bidirectional, lossless conversion between a user-facing
 /// element type `T` and its storage representation `W`.
 ///
-/// This trait is central to `FixedVec`'s ability to store various integer types
+/// This trait is central to [`FixedVec`](crate::fixed::FixedVec)'s ability to store various integer types
 /// in a generic bit buffer.
 pub trait Storable<W: Word>: Sized + Copy {
     /// Converts the element into its storage word representation.
@@ -63,7 +63,7 @@ pub trait Storable<W: Word>: Sized + Copy {
     fn from_word(word: W) -> Self;
 }
 
-/// Macro to implement `Storable` for unsigned integer types.
+/// Macro to implement [`Storable`] for unsigned integer types.
 ///
 /// This implementation is a direct, lossless cast between the unsigned
 /// element type and the storage word type `W`.
@@ -89,7 +89,7 @@ macro_rules! impl_storable_for_unsigned {
     )*};
 }
 
-/// Macro to implement `Storable` for signed integer types using ZigZag encoding.
+/// Macro to implement [`Storable`] for signed integer types using ZigZag encoding.
 ///
 /// ZigZag encoding maps signed integers to unsigned integers in a way that is
 /// efficient for variable-length encoding but is also used here to ensure that
@@ -134,7 +134,7 @@ pub trait DefaultParams: Sized {
     type E: Endianness;
 }
 
-/// Macro to implement `DefaultParams` for unsigned integer types.
+/// Macro to implement [`DefaultParams`] for unsigned integer types.
 macro_rules! impl_default_params_unsigned {
     ($($T:ty),*) => {$(
         impl DefaultParams for $T {
@@ -144,7 +144,7 @@ macro_rules! impl_default_params_unsigned {
     )*};
 }
 
-/// Macro to implement `DefaultParams` for signed integer types.
+/// Macro to implement [`DefaultParams`] for signed integer types.
 macro_rules! impl_default_params_signed {
     ($($T:ty),*) => {$(
         impl DefaultParams for $T {

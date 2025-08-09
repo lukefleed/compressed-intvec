@@ -1,7 +1,7 @@
 //! A thread-safe, compressed vector of integers with fixed-width encoding.
 //!
 //! This module provides [`AtomicFixedVec`], a data structure that behaves like
-//! [`FixedVec`](crate::fixed::FixedVec) but allows for concurrent access and
+//! [`FixedVec`] but allows for concurrent access and
 //! modification from multiple threads. It is designed for scenarios where a
 //! large collection of integers must be shared and mutated in a parallel
 //! environment.
