@@ -189,41 +189,41 @@ where
     /// Atomically adds to the value at `index`, returning the previous value.
     #[inline(always)]
     pub fn fetch_add(&self, index: usize, val: T, order: Ordering) -> T {
-        let val_w = T::into_word(val);
-        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a.wrapping_add(b));
-        T::from_word(result_w)
+        self.atomic_rmw(index, val, order, |a, b| {
+            T::from_word(T::into_word(a).wrapping_add(T::into_word(b)))
+        })
     }
 
     /// Atomically subtracts from the value at `index`, returning the previous value.
     #[inline(always)]
     pub fn fetch_sub(&self, index: usize, val: T, order: Ordering) -> T {
-        let val_w = T::into_word(val);
-        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a.wrapping_sub(b));
-        T::from_word(result_w)
+        self.atomic_rmw(index, val, order, |a, b| {
+            T::from_word(T::into_word(a).wrapping_sub(T::into_word(b)))
+        })
     }
 
     /// Atomically performs a bitwise AND on the value at `index`, returning the previous value.
     #[inline(always)]
     pub fn fetch_and(&self, index: usize, val: T, order: Ordering) -> T {
-        let val_w = T::into_word(val);
-        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a & b);
-        T::from_word(result_w)
+        self.atomic_rmw(index, val, order, |a, b| {
+            T::from_word(T::into_word(a) & T::into_word(b))
+        })
     }
 
     /// Atomically performs a bitwise OR on the value at `index`, returning the previous value.
     #[inline(always)]
     pub fn fetch_or(&self, index: usize, val: T, order: Ordering) -> T {
-        let val_w = T::into_word(val);
-        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a | b);
-        T::from_word(result_w)
+        self.atomic_rmw(index, val, order, |a, b| {
+            T::from_word(T::into_word(a) | T::into_word(b))
+        })
     }
 
     /// Atomically performs a bitwise XOR on the value at `index`, returning the previous value.
     #[inline(always)]
     pub fn fetch_xor(&self, index: usize, val: T, order: Ordering) -> T {
-        let val_w = T::into_word(val);
-        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a ^ b);
-        T::from_word(result_w)
+        self.atomic_rmw(index, val, order, |a, b| {
+            T::from_word(T::into_word(a) ^ T::into_word(b))
+        })
     }
 
     /// Atomically computes the maximum of the value at `index` and `val`, returning the previous value.
@@ -232,15 +232,7 @@ where
     where
         T: Ord,
     {
-        let val_w = T::into_word(val);
-        let result_w = self.atomic_rmw(index, val_w, order, |a, b| {
-            if T::from_word(a) > T::from_word(b) {
-                a
-            } else {
-                b
-            }
-        });
-        T::from_word(result_w)
+        self.atomic_rmw(index, val, order, |a, b| a.max(b))
     }
 
     /// Atomically computes the minimum of the value at `index` and `val`, returning the previous value.
@@ -249,15 +241,7 @@ where
     where
         T: Ord,
     {
-        let val_w = T::into_word(val);
-        let result_w = self.atomic_rmw(index, val_w, order, |a, b| {
-            if T::from_word(a) < T::from_word(b) {
-                a
-            } else {
-                b
-            }
-        });
-        T::from_word(result_w)
+        self.atomic_rmw(index, val, order, |a, b| a.min(b))
     }
 }
 
@@ -536,15 +520,9 @@ where
         }
     }
 
-    /// Generic implementation for all Read-Modify-Write (RMW) operations.
+        /// Generic implementation for all Read-Modify-Write (RMW) operations.
     #[inline(always)]
-    fn atomic_rmw(
-        &self,
-        index: usize,
-        val: u64,
-        order: Ordering,
-        op: impl Fn(u64, u64) -> u64,
-    ) -> u64 {
+    fn atomic_rmw(&self, index: usize, val: T, order: Ordering, op: impl Fn(T, T) -> T) -> T {
         assert!(index < self.len, "RMW index out of bounds");
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / u64::BITS as usize;
@@ -556,17 +534,29 @@ where
             let store_mask = self.mask << bit_offset;
             let mut old_word = atomic_word_ref.load(Ordering::Relaxed);
             loop {
-                let old_val_extracted = (old_word >> bit_offset) & self.mask;
-                let new_val_extracted = op(old_val_extracted, val) & self.mask;
-                let new_word = (old_word & !store_mask) | (new_val_extracted << bit_offset);
+                // 1. Extract the current ENCODED value from the word.
+                let old_val_encoded = (old_word >> bit_offset) & self.mask;
 
+                // 2. DECODE the value to perform the operation on the actual numbers.
+                let old_val_decoded = T::from_word(old_val_encoded);
+
+                // 3. Perform the user-provided operation on the DECODED values.
+                let new_val_decoded = op(old_val_decoded, val);
+
+                // 4. RE-ENCODE the result before storing it.
+                let new_val_encoded = T::into_word(new_val_decoded) & self.mask;
+
+                // 5. Prepare the new word for the CAS operation.
+                let new_word = (old_word & !store_mask) | (new_val_encoded << bit_offset);
+
+                // 6. Attempt the compare-and-swap.
                 match atomic_word_ref.compare_exchange_weak(
                     old_word,
                     new_word,
                     order,
                     Ordering::Relaxed,
                 ) {
-                    Ok(_) => return old_val_extracted,
+                    Ok(_) => return old_val_decoded, // Return the *old* DECODED value on success.
                     Err(x) => old_word = x,
                 }
             }
@@ -574,12 +564,19 @@ where
             // Locked path
             let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
-            let old_val = self.atomic_load(index, Ordering::Relaxed);
-            let new_val = op(old_val, val) & self.mask;
-            self.atomic_store(index, new_val, Ordering::Relaxed);
-            old_val
+
+            // The logic inside the lock is simpler as it's serialized.
+            let old_val_encoded = self.atomic_load(index, Ordering::Relaxed);
+            let old_val_decoded = T::from_word(old_val_encoded);
+
+            let new_val_decoded = op(old_val_decoded, val);
+            let new_val_encoded = T::into_word(new_val_decoded) & self.mask;
+
+            self.atomic_store(index, new_val_encoded, Ordering::Relaxed);
+            old_val_decoded
         }
     }
+
 }
 
 // --- Conversions between AtomicFixedVec and FixedVec ---

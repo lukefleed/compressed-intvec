@@ -5,13 +5,14 @@
 //! - Correctness of the lock-based strategy for values that span word boundaries.
 //! - Behavior with both signed (ZigZag encoded) and unsigned integer types.
 //! - All atomic operations: load, store, swap, and compare_exchange.
+//! - All RMW (Read-Modify-Write) operations like `fetch_add`, `fetch_and`, etc.
 //! - Edge cases such as zero bit width, max bit width, and boundary indices.
 //! - Robustness under various multi-threaded concurrency patterns.
-//! - Ergonomics and correctness of the new builder, `TryFrom`, and macro APIs.
+//! - Ergonomics and correctness of the new builder, `TryFrom`, `From`, and macro APIs.
 
 use compressed_intvec::atomic_fixed_vec;
 use compressed_intvec::fixed::atomic::{SAtomicFixedVec, UAtomicFixedVec};
-use compressed_intvec::fixed::{BitWidth, Error};
+use compressed_intvec::fixed::{BitWidth, Error, FixedVec, UFixedVec};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -108,6 +109,55 @@ macro_rules! test_atomic_api_for_type {
     };
 }
 
+macro_rules! test_atomic_rmw_for_type {
+    ($test_name:ident, $T:ty, $v1_lit:expr, $v2_lit:expr, $v3_lit:expr) => {
+        #[test]
+        fn $test_name() {
+            let v1 = $v1_lit as $T;
+            let v2 = $v2_lit as $T;
+            let v3 = $v3_lit as $T;
+
+            let builder = UAtomicFixedVec::<$T>::builder().bit_width(BitWidth::Explicit(32));
+
+            // Test fetch_add
+            let vec = builder.clone().build(&[v1]).unwrap();
+            assert_eq!(vec.fetch_add(0, v2, Ordering::SeqCst), v1, "fetch_add: wrong return value");
+            assert_eq!(vec.load(0, Ordering::Relaxed), v1.wrapping_add(v2), "fetch_add: wrong final value");
+
+            // Test fetch_sub
+            let vec = builder.clone().build(&[v1]).unwrap();
+            assert_eq!(vec.fetch_sub(0, v2, Ordering::SeqCst), v1, "fetch_sub: wrong return value");
+            assert_eq!(vec.load(0, Ordering::Relaxed), v1.wrapping_sub(v2), "fetch_sub: wrong final value");
+
+            // Test fetch_and
+            let vec = builder.clone().build(&[v1]).unwrap();
+            assert_eq!(vec.fetch_and(0, v3, Ordering::SeqCst), v1, "fetch_and: wrong return value");
+            assert_eq!(vec.load(0, Ordering::Relaxed), v1 & v3, "fetch_and: wrong final value");
+
+            // Test fetch_or
+            let vec = builder.clone().build(&[v1]).unwrap();
+            assert_eq!(vec.fetch_or(0, v3, Ordering::SeqCst), v1, "fetch_or: wrong return value");
+            assert_eq!(vec.load(0, Ordering::Relaxed), v1 | v3, "fetch_or: wrong final value");
+
+            // Test fetch_xor
+            let vec = builder.clone().build(&[v1]).unwrap();
+            assert_eq!(vec.fetch_xor(0, v3, Ordering::SeqCst), v1, "fetch_xor: wrong return value");
+            assert_eq!(vec.load(0, Ordering::Relaxed), v1 ^ v3, "fetch_xor: wrong final value");
+
+            // Test fetch_max
+            let vec = builder.clone().build(&[v1]).unwrap();
+            assert_eq!(vec.fetch_max(0, v2, Ordering::SeqCst), v1, "fetch_max: wrong return value");
+            assert_eq!(vec.load(0, Ordering::Relaxed), v1.max(v2), "fetch_max: wrong final value");
+
+            // Test fetch_min
+            let vec = builder.build(&[v1]).unwrap();
+            assert_eq!(vec.fetch_min(0, v2, Ordering::SeqCst), v1, "fetch_min: wrong return value");
+            assert_eq!(vec.load(0, Ordering::Relaxed), v1.min(v2), "fetch_min: wrong final value");
+        }
+    };
+}
+
+
 // --- Test Suite Execution ---
 
 // Unsigned types
@@ -115,12 +165,14 @@ test_atomic_api_for_type!(test_api_u8, u8, false, u8::MAX as u64);
 test_atomic_api_for_type!(test_api_u16, u16, false, u16::MAX as u64);
 test_atomic_api_for_type!(test_api_u32, u32, false, u32::MAX as u64);
 test_atomic_api_for_type!(test_api_u64, u64, false, 0); // 0 indicates full range
+test_atomic_rmw_for_type!(test_rmw_u32, u32, 100, 50, 0xF0);
 
 // Signed types
 test_atomic_api_for_type!(test_api_i8, i8, true, i8::MAX as u64);
 test_atomic_api_for_type!(test_api_i16, i16, true, i16::MAX as u64);
 test_atomic_api_for_type!(test_api_i32, i32, true, i32::MAX as u64);
 test_atomic_api_for_type!(test_api_i64, i64, true, i64::MAX as u64);
+test_atomic_rmw_for_type!(test_rmw_i32, i32, -100, 50, 0xF0);
 
 // --- Standalone Tests for Macros and Edge Cases ---
 
@@ -180,6 +232,27 @@ fn test_edge_case_zero_bit_width() {
         .build(&empty_data)
         .unwrap();
     assert!(vec.is_empty());
+}
+
+#[test]
+fn test_from_conversions() {
+    let data: Vec<u32> = (0..100).collect();
+    let fixed_vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+
+    let bit_width = fixed_vec.bit_width();
+    let len = fixed_vec.len();
+
+    // Convert FixedVec -> AtomicFixedVec
+    let atomic_vec = UAtomicFixedVec::<u32>::from(fixed_vec);
+    assert_eq!(atomic_vec.bit_width(), bit_width);
+    assert_eq!(atomic_vec.len(), len);
+    assert_eq!(atomic_vec.load(50, Ordering::Relaxed), 50);
+
+    // Convert AtomicFixedVec -> FixedVec
+    let new_fixed_vec = FixedVec::from(atomic_vec);
+    assert_eq!(new_fixed_vec.bit_width(), bit_width);
+    assert_eq!(new_fixed_vec.len(), len);
+    assert_eq!(new_fixed_vec.get(50), Some(50));
 }
 
 // --- Concurrency Tests (kept separate for clarity) ---
@@ -257,6 +330,35 @@ fn test_concurrent_cas_contention() {
                             Err(actual) => current = actual,
                         }
                     }
+                }
+            });
+        }
+    });
+
+    assert_eq!(
+        vec.load(0, Ordering::SeqCst),
+        NUM_THREADS as u32 * INCREMENTS_PER_THREAD
+    );
+}
+
+#[test]
+fn test_concurrent_fetch_add_contention() {
+    let vec = Arc::new(
+        UAtomicFixedVec::<u32>::builder()
+            .bit_width(BitWidth::Explicit(16))
+            .build(&[0; 1])
+            .unwrap(),
+    );
+
+    const NUM_THREADS: usize = 10;
+    const INCREMENTS_PER_THREAD: u32 = 1000;
+
+    thread::scope(|s| {
+        for _ in 0..NUM_THREADS {
+            let vec_clone = Arc::clone(&vec);
+            s.spawn(move || {
+                for _ in 0..INCREMENTS_PER_THREAD {
+                    vec_clone.fetch_add(0, 1, Ordering::SeqCst);
                 }
             });
         }
