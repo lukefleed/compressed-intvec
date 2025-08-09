@@ -235,7 +235,6 @@ where
     }
 }
 
-
 // FixedVecSlice == &FixedVec
 impl<T, W, E, B, B2, V> PartialEq<&FixedVec<T, W, E, B2>> for FixedVecSlice<V>
 where

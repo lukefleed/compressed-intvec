@@ -124,42 +124,97 @@ macro_rules! test_atomic_rmw_for_type {
 
             // Test fetch_add
             let vec = builder.clone().build(&[v1]).unwrap();
-            assert_eq!(vec.fetch_add(0, v2, Ordering::SeqCst), v1, "fetch_add: wrong return value");
-            assert_eq!(vec.load(0, Ordering::Relaxed), v1.wrapping_add(v2), "fetch_add: wrong final value");
+            assert_eq!(
+                vec.fetch_add(0, v2, Ordering::SeqCst),
+                v1,
+                "fetch_add: wrong return value"
+            );
+            assert_eq!(
+                vec.load(0, Ordering::Relaxed),
+                v1.wrapping_add(v2),
+                "fetch_add: wrong final value"
+            );
 
             // Test fetch_sub
             let vec = builder.clone().build(&[v1]).unwrap();
-            assert_eq!(vec.fetch_sub(0, v2, Ordering::SeqCst), v1, "fetch_sub: wrong return value");
-            assert_eq!(vec.load(0, Ordering::Relaxed), v1.wrapping_sub(v2), "fetch_sub: wrong final value");
+            assert_eq!(
+                vec.fetch_sub(0, v2, Ordering::SeqCst),
+                v1,
+                "fetch_sub: wrong return value"
+            );
+            assert_eq!(
+                vec.load(0, Ordering::Relaxed),
+                v1.wrapping_sub(v2),
+                "fetch_sub: wrong final value"
+            );
 
             // Test fetch_and
             let vec = builder.clone().build(&[v1]).unwrap();
-            assert_eq!(vec.fetch_and(0, v3, Ordering::SeqCst), v1, "fetch_and: wrong return value");
-            assert_eq!(vec.load(0, Ordering::Relaxed), v1 & v3, "fetch_and: wrong final value");
+            assert_eq!(
+                vec.fetch_and(0, v3, Ordering::SeqCst),
+                v1,
+                "fetch_and: wrong return value"
+            );
+            assert_eq!(
+                vec.load(0, Ordering::Relaxed),
+                v1 & v3,
+                "fetch_and: wrong final value"
+            );
 
             // Test fetch_or
             let vec = builder.clone().build(&[v1]).unwrap();
-            assert_eq!(vec.fetch_or(0, v3, Ordering::SeqCst), v1, "fetch_or: wrong return value");
-            assert_eq!(vec.load(0, Ordering::Relaxed), v1 | v3, "fetch_or: wrong final value");
+            assert_eq!(
+                vec.fetch_or(0, v3, Ordering::SeqCst),
+                v1,
+                "fetch_or: wrong return value"
+            );
+            assert_eq!(
+                vec.load(0, Ordering::Relaxed),
+                v1 | v3,
+                "fetch_or: wrong final value"
+            );
 
             // Test fetch_xor
             let vec = builder.clone().build(&[v1]).unwrap();
-            assert_eq!(vec.fetch_xor(0, v3, Ordering::SeqCst), v1, "fetch_xor: wrong return value");
-            assert_eq!(vec.load(0, Ordering::Relaxed), v1 ^ v3, "fetch_xor: wrong final value");
+            assert_eq!(
+                vec.fetch_xor(0, v3, Ordering::SeqCst),
+                v1,
+                "fetch_xor: wrong return value"
+            );
+            assert_eq!(
+                vec.load(0, Ordering::Relaxed),
+                v1 ^ v3,
+                "fetch_xor: wrong final value"
+            );
 
             // Test fetch_max
             let vec = builder.clone().build(&[v1]).unwrap();
-            assert_eq!(vec.fetch_max(0, v2, Ordering::SeqCst), v1, "fetch_max: wrong return value");
-            assert_eq!(vec.load(0, Ordering::Relaxed), v1.max(v2), "fetch_max: wrong final value");
+            assert_eq!(
+                vec.fetch_max(0, v2, Ordering::SeqCst),
+                v1,
+                "fetch_max: wrong return value"
+            );
+            assert_eq!(
+                vec.load(0, Ordering::Relaxed),
+                v1.max(v2),
+                "fetch_max: wrong final value"
+            );
 
             // Test fetch_min
             let vec = builder.build(&[v1]).unwrap();
-            assert_eq!(vec.fetch_min(0, v2, Ordering::SeqCst), v1, "fetch_min: wrong return value");
-            assert_eq!(vec.load(0, Ordering::Relaxed), v1.min(v2), "fetch_min: wrong final value");
+            assert_eq!(
+                vec.fetch_min(0, v2, Ordering::SeqCst),
+                v1,
+                "fetch_min: wrong return value"
+            );
+            assert_eq!(
+                vec.load(0, Ordering::Relaxed),
+                v1.min(v2),
+                "fetch_min: wrong final value"
+            );
         }
     };
 }
-
 
 // --- Test Suite Execution ---
 
@@ -284,7 +339,6 @@ fn test_ergonomic_read_apis() {
     assert_eq!(empty_vec.iter().next(), None);
 }
 
-
 // --- Concurrency Tests (kept separate for clarity) ---
 
 #[test]
@@ -320,10 +374,7 @@ fn test_concurrent_disjoint_stores() {
         let start = thread_id * chunk_size;
         let end = start + chunk_size;
         for i in start..end {
-            assert_eq!(
-                vec.load(i, Ordering::SeqCst),
-                (thread_id * 1000 + i) as u16
-            );
+            assert_eq!(vec.load(i, Ordering::SeqCst), (thread_id * 1000 + i) as u16);
         }
     }
 }

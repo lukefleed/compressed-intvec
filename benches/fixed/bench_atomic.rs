@@ -68,7 +68,6 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
     (0..size).map(|_| rng.random_range(0..limit)).collect()
 }
 
-
 /// Defines the contention pattern for multi-threaded benchmarks.
 #[derive(Debug, Clone, Copy)]
 enum Contention {
@@ -149,7 +148,6 @@ fn register_single_thread_benches(
         for (i, &val) in initial_data.iter().enumerate() {
             unsafe { sux_vec.set_atomic_unchecked(i, val, Ordering::Relaxed) };
         }
-
 
         // --- Benchmark Load ---
         group.bench_function("Baseline_Vec<AtomicU64>/load", |b| {
@@ -286,7 +284,6 @@ fn register_multi_thread_benches(
                 }
                 storage
             });
-
 
             // --- Benchmark Load ---
             group.bench_function("Baseline_Vec<AtomicU64>/load", |b| {

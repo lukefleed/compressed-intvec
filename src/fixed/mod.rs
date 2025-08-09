@@ -63,11 +63,11 @@
 pub mod macros;
 pub mod builder;
 pub mod iter;
-pub mod traits;
-pub mod slice;
+pub mod iter_mut;
 pub mod parallel;
 pub mod proxy;
-pub mod iter_mut;
+pub mod slice;
+pub mod traits;
 
 pub mod atomic;
 
@@ -75,16 +75,19 @@ pub mod atomic;
 #[cfg(feature = "serde")]
 mod serde;
 
-use dsi_bitstream::{prelude::Endianness, traits::{BE, LE}};
+use dsi_bitstream::{
+    prelude::Endianness,
+    traits::{BE, LE},
+};
 use mem_dbg::{MemDbg, MemSize};
-use std::{error::Error as StdError, fmt, marker::PhantomData, iter::FromIterator};
-use traits::{Storable, Word};
 use num_traits::ToPrimitive;
+use std::{error::Error as StdError, fmt, iter::FromIterator, marker::PhantomData};
+use traits::{Storable, Word};
 
 use crate::fixed::proxy::MutProxy;
 
 // Re-export atomic aliases for convenience
-pub use atomic::{SAtomicFixedVec, UAtomicFixedVec, AtomicFixedVec};
+pub use atomic::{AtomicFixedVec, SAtomicFixedVec, UAtomicFixedVec};
 
 // Type aliases for common `FixedVec` configurations.
 
@@ -203,12 +206,7 @@ impl StdError for Error {}
 ///
 /// [type aliases]: crate::fixed#type-aliases
 #[derive(Debug, Clone, MemDbg, MemSize)]
-pub struct FixedVec<
-    T: Storable<W>,
-    W: Word,
-    E: Endianness,
-    B: AsRef<[W]> = Vec<W>,
-> {
+pub struct FixedVec<T: Storable<W>, W: Word, E: Endianness, B: AsRef<[W]> = Vec<W>> {
     /// The underlying storage for the bit-packed data.
     pub bits: B,
     /// The number of bits used to encode each element.
@@ -314,7 +312,8 @@ where
         if bit_width > <W as traits::Word>::BITS {
             return Err(Error::InvalidParameters(format!(
                 "bit_width ({}) cannot be greater than the word size ({})",
-                bit_width, <W as traits::Word>::BITS
+                bit_width,
+                <W as traits::Word>::BITS
             )));
         }
 
@@ -437,7 +436,7 @@ where
             let final_val = if E::IS_BIG { val.to_be() } else { val };
             return <T as Storable<W>>::from_word(final_val);
         }
-        
+
         // Calculate the starting bit position of the element.
         let bit_pos = index * self.bit_width;
         // Determine the word that contains the start of the element.
@@ -475,7 +474,6 @@ where
         <T as Storable<W>>::from_word(final_word)
     }
 
-
     /// Returns the element at `index` using unaligned memory access.
     ///
     /// This method provides a high-performance alternative to [`get_unchecked`].
@@ -509,10 +507,10 @@ where
             let bit_rem = bit_pos % 8;
 
             let limbs_ptr = self.as_limbs().as_ptr() as *const u8;
-            
+
             let word: W = (limbs_ptr.add(byte_pos) as *const W).read_unaligned();
             let extracted_word = word >> bit_rem;
-            
+
             <T as Storable<W>>::from_word(extracted_word & self.mask)
         } else {
             // For Big-Endian, the logic for unaligned reads is highly complex
@@ -543,6 +541,16 @@ where
         iter::FixedVecIter::new(self)
     }
 
+    /// Returns an unchecked iterator over the elements of the vector.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the iterator is not advanced beyond the
+    /// vector's length.
+    pub unsafe fn iter_unchecked(&self) -> iter::FixedVecUncheckedIter<'_, T, W, E, B> {
+        iter::FixedVecUncheckedIter::new(self)
+    }
+
     /// Creates an immutable view (slice) of a sub-region of the vector.
     ///
     /// Returns `None` if the specified range is out of bounds.
@@ -563,7 +571,10 @@ where
     ///
     /// # Arguments
     /// * `mid`: The index at which to split the vector.
-    pub fn split_at(&self, mid: usize) -> Option<(slice::FixedVecSlice<&Self>, slice::FixedVecSlice<&Self>)> {
+    pub fn split_at(
+        &self,
+        mid: usize,
+    ) -> Option<(slice::FixedVecSlice<&Self>, slice::FixedVecSlice<&Self>)> {
         if mid > self.len {
             return None;
         }
@@ -635,7 +646,7 @@ where
 
         let bit_pos = index * self.bit_width;
         let word_idx = bit_pos / <W as Word>::BITS;
-        
+
         let limbs = self.as_limbs();
         if word_idx < limbs.len() {
             Some(limbs.as_ptr().wrapping_add(word_idx))
@@ -664,7 +675,7 @@ where
 
             let bit_pos = index * self.bit_width;
             let byte_pos = bit_pos / 8;
-            
+
             let limbs_ptr = self.as_limbs().as_ptr() as *const i8;
 
             // SAFETY: We have already performed the bounds check on `index`, which
@@ -705,7 +716,7 @@ where
         while low < high {
             let mid = low + (high - low) / 2;
             let mid_val = unsafe { self.get_unchecked(mid) };
-            
+
             match mid_val.cmp(value) {
                 std::cmp::Ordering::Less => low = mid + 1,
                 std::cmp::Ordering::Equal => return Ok(mid),
@@ -729,7 +740,7 @@ where
         while low < high {
             let mid = low + (high - low) / 2;
             let mid_val = unsafe { self.get_unchecked(mid) };
-            let cmp = f(mid_val); 
+            let cmp = f(mid_val);
 
             match cmp {
                 std::cmp::Ordering::Less => low = mid + 1,
@@ -859,7 +870,8 @@ where
         if bit_width > <W as traits::Word>::BITS {
             return Err(Error::InvalidParameters(format!(
                 "bit_width ({}) cannot be greater than the word size ({})",
-                bit_width, <W as traits::Word>::BITS
+                bit_width,
+                <W as traits::Word>::BITS
             )));
         }
         Ok(unsafe { Self::new_unchecked(Vec::new(), 0, bit_width) })
@@ -908,7 +920,7 @@ where
 
         self.len += 1;
     }
-    
+
     /// Removes the last element from the vector and returns it.
     ///
     /// Returns `None` if the vector is empty.
@@ -916,7 +928,7 @@ where
         if self.is_empty() {
             return None;
         }
-        let value = self.get(self.len - 1).unwrap(); 
+        let value = self.get(self.len - 1).unwrap();
         self.len -= 1;
         Some(value)
     }
@@ -941,19 +953,20 @@ where
         if bit_width > <W as traits::Word>::BITS {
             return Err(Error::InvalidParameters(format!(
                 "bit_width ({}) cannot be greater than the word size ({})",
-                bit_width, <W as traits::Word>::BITS
+                bit_width,
+                <W as traits::Word>::BITS
             )));
         }
         let bits_per_word = <W as traits::Word>::BITS;
         let total_bits = capacity.saturating_mul(bit_width);
         let num_words = total_bits.div_ceil(bits_per_word);
-        
+
         let buffer = if capacity == 0 {
             Vec::new()
         } else {
             Vec::with_capacity(num_words + 2) // +2 for padding
         };
-        
+
         Ok(unsafe { Self::new_unchecked(buffer, 0, bit_width) })
     }
 
@@ -963,7 +976,8 @@ where
             return usize::MAX;
         }
         let word_capacity = self.bits.capacity();
-        if word_capacity <= 2 { // Not enough for data + padding
+        if word_capacity <= 2 {
+            // Not enough for data + padding
             return 0;
         }
         // Subtract padding words before calculating element capacity.
@@ -981,15 +995,17 @@ where
     /// `self.len() + additional`. Does nothing if capacity is already sufficient.
     pub fn reserve(&mut self, additional: usize) {
         let target_element_capacity = self.len.saturating_add(additional);
-        if self.capacity() >= target_element_capacity { return; }
+        if self.capacity() >= target_element_capacity {
+            return;
+        }
         let bits_per_word = <W as Word>::BITS;
         let required_total_bits = target_element_capacity.saturating_mul(self.bit_width);
         let required_data_words = required_total_bits.div_ceil(bits_per_word);
         let required_word_capacity = required_data_words + 2; // +2 for padding
-        
+
         let current_len = self.bits.len();
         if self.bits.capacity() < required_word_capacity {
-             self.bits.reserve(required_word_capacity - current_len);
+            self.bits.reserve(required_word_capacity - current_len);
         }
     }
 
@@ -1009,7 +1025,10 @@ where
             let value_w = <T as Storable<W>>::into_word(value);
 
             if (value_w & !self.mask) != W::ZERO {
-                panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+                panic!(
+                    "Value {:?} does not fit in the configured bit_width of {}",
+                    value_w, self.bit_width
+                );
             }
 
             let bits_per_word = <W as traits::Word>::BITS;
@@ -1048,7 +1067,7 @@ where
         };
 
         if self.bits.len() > min_word_len {
-             self.bits.truncate(min_word_len);
+            self.bits.truncate(min_word_len);
         }
         self.bits.shrink_to_fit();
     }
@@ -1091,9 +1110,16 @@ where
         assert!(index <= self.len, "insert: index out of bounds");
         let value_w = <T as Storable<W>>::into_word(element);
         let bits_per_word = <W as Word>::BITS;
-        let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
         if self.bit_width < bits_per_word && value_w >= limit {
-            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+            panic!(
+                "Value {:?} does not fit in the configured bit_width of {}",
+                value_w, self.bit_width
+            );
         }
         self.reserve(1);
         let start_shift_bit = index * self.bit_width;
@@ -1122,15 +1148,20 @@ where
             let start_write_word = start_bit / bits_per_word;
             let start_read_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
-            
+
             // Check if there is anything to copy from within the buffer.
             if start_read_word < self.bits.len() {
                 let read_end = (start_read_word + num_words_to_move).min(self.bits.len());
-                self.bits.copy_within(start_read_word..read_end, start_write_word);
+                self.bits
+                    .copy_within(start_read_word..read_end, start_write_word);
             }
-            
+
             // If the shift moves data from "beyond" the buffer, zero out the rest.
-            let words_copied = self.bits.len().saturating_sub(start_read_word).min(num_words_to_move);
+            let words_copied = self
+                .bits
+                .len()
+                .saturating_sub(start_read_word)
+                .min(num_words_to_move);
             if words_copied < num_words_to_move {
                 let zero_start = start_write_word + words_copied;
                 let zero_end = (start_write_word + num_words_to_move).min(self.bits.len());
@@ -1140,7 +1171,7 @@ where
             }
             return;
         }
-        
+
         // --- Slow Path: Unaligned shift (word-at-a-time) ---
         let shift_rem = shift_amount % bits_per_word;
         let inv_shift_rem = bits_per_word - shift_rem;
@@ -1155,12 +1186,13 @@ where
             // Fetch the source data, which may span two source words.
             let read_bit = write_word_idx * bits_per_word + shift_rem;
             let read_word_idx = read_bit / bits_per_word;
-            
+
             let low_part = self.bits.get(read_word_idx).copied().unwrap_or(W::ZERO) >> shift_rem;
-            let high_part = self.bits.get(read_word_idx + 1).copied().unwrap_or(W::ZERO) << inv_shift_rem;
+            let high_part =
+                self.bits.get(read_word_idx + 1).copied().unwrap_or(W::ZERO) << inv_shift_rem;
 
             let value_to_write = low_part | high_part;
-            
+
             // Create a mask for the bits we are about to modify in the destination word.
             let mut mask = W::max_value();
             if write_word_idx == start_write_word {
@@ -1169,23 +1201,26 @@ where
             if write_word_idx == end_write_word {
                 let end_offset = end_write_bit % bits_per_word;
                 if end_offset != 0 {
-                     mask &= (W::ONE << end_offset).wrapping_sub(W::ONE);
+                    mask &= (W::ONE << end_offset).wrapping_sub(W::ONE);
                 }
             }
 
-            self.bits[write_word_idx] = (self.bits[write_word_idx] & !mask) | (value_to_write & mask);
+            self.bits[write_word_idx] =
+                (self.bits[write_word_idx] & !mask) | (value_to_write & mask);
         }
     }
-    
+
     /// A high-performance helper to shift a range of bits to the right in-place.
     ///
     /// This operation is optimized with a fast path for word-aligned shifts.
     /// The unaligned path iterates from right to left to avoid data corruption.
     fn shift_bits_right(&mut self, start_bit: usize, shift_amount: usize, num_bits_to_move: usize) {
-        if num_bits_to_move == 0 { return; }
+        if num_bits_to_move == 0 {
+            return;
+        }
 
         let bits_per_word = <W as Word>::BITS;
-        
+
         // Ensure the vector has enough capacity and is resized to accommodate the shift.
         let required_end_bit = start_bit + shift_amount + num_bits_to_move;
         let required_words = required_end_bit.div_ceil(bits_per_word);
@@ -1199,9 +1234,12 @@ where
             let start_read_word = start_bit / bits_per_word;
             let start_write_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
-            
+
             if start_read_word + num_words_to_move <= self.bits.len() {
-                self.bits.copy_within(start_read_word..start_read_word + num_words_to_move, start_write_word);
+                self.bits.copy_within(
+                    start_read_word..start_read_word + num_words_to_move,
+                    start_write_word,
+                );
             }
         } else {
             // --- Slow Path: Unaligned shift (from right to left) ---
@@ -1211,22 +1249,23 @@ where
 
             let start_write_bit = start_bit + shift_amount;
             let end_write_bit = start_write_bit + num_bits_to_move;
-            
+
             let start_write_word = start_write_bit / bits_per_word;
             let end_write_word = (end_write_bit - 1) / bits_per_word;
 
             for write_word_idx in (start_write_word..=end_write_word).rev() {
                 let read_word_idx = write_word_idx - word_shift;
-                
+
                 // Fetch source data from two potential source words.
-                let high_part = self.bits.get(read_word_idx).copied().unwrap_or(W::ZERO) << shift_rem;
+                let high_part =
+                    self.bits.get(read_word_idx).copied().unwrap_or(W::ZERO) << shift_rem;
                 let low_part = if read_word_idx > 0 {
                     self.bits.get(read_word_idx - 1).copied().unwrap_or(W::ZERO) >> inv_shift_rem
                 } else {
                     W::ZERO
                 };
                 let value_to_write = low_part | high_part;
-                
+
                 // Create a mask for the bits we are about to modify in the destination word.
                 let mut mask = W::max_value();
                 if write_word_idx == start_write_word {
@@ -1238,30 +1277,31 @@ where
                         mask &= (W::ONE << end_offset).wrapping_sub(W::ONE);
                     }
                 }
-                
-                self.bits[write_word_idx] = (self.bits[write_word_idx] & !mask) | (value_to_write & mask);
+
+                self.bits[write_word_idx] =
+                    (self.bits[write_word_idx] & !mask) | (value_to_write & mask);
             }
         }
-        
+
         // --- Cleanup: Zero out the vacated bits at the beginning of the shifted region ---
         let mut clear_bit = start_bit;
         let end_clear_bit = start_bit + shift_amount;
 
         while clear_bit < end_clear_bit {
-             let word_idx = clear_bit / bits_per_word;
-             let offset = clear_bit % bits_per_word;
-             let bits_to_clear = (bits_per_word - offset).min(end_clear_bit - clear_bit);
+            let word_idx = clear_bit / bits_per_word;
+            let offset = clear_bit % bits_per_word;
+            let bits_to_clear = (bits_per_word - offset).min(end_clear_bit - clear_bit);
 
-             let mask = if bits_to_clear == bits_per_word {
-                 W::max_value()
-             } else {
+            let mask = if bits_to_clear == bits_per_word {
+                W::max_value()
+            } else {
                 ((W::ONE << bits_to_clear).wrapping_sub(W::ONE)) << offset
-             };
-             
-             if word_idx < self.bits.len() {
-                 self.bits[word_idx] &= !mask;
-             }
-             clear_bit += bits_to_clear;
+            };
+
+            if word_idx < self.bits.len() {
+                self.bits[word_idx] &= !mask;
+            }
+            clear_bit += bits_to_clear;
         }
     }
 
@@ -1309,7 +1349,7 @@ where
                 bit_width: self.bit_width,
             });
         }
-        
+
         self.push(value);
         Ok(())
     }
@@ -1331,7 +1371,11 @@ where
         // Pre-validate all values in the slice to ensure atomicity.
         // If any value is invalid, the vector remains unchanged.
         let bits_per_word = <W as traits::Word>::BITS;
-        let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
         if self.bit_width < bits_per_word {
             for (i, &value) in other.iter().enumerate() {
                 let value_w = <T as Storable<W>>::into_word(value);
@@ -1343,10 +1387,10 @@ where
                 }
             }
         }
-        
+
         let old_len = self.len;
         let new_len = old_len + other.len();
-        
+
         // Ensure the underlying Vec has enough *initialized* words to write into.
         let required_total_bits = new_len * self.bit_width;
         let required_data_words = required_total_bits.div_ceil(bits_per_word);
@@ -1354,7 +1398,7 @@ where
         if self.bits.len() < required_vec_len {
             self.bits.resize(required_vec_len, W::ZERO);
         }
-        
+
         // Write the new values in an optimized loop.
         for (i, &value) in other.iter().enumerate() {
             // SAFETY: We have already reserved, resized, and validated the data.
@@ -1365,7 +1409,6 @@ where
 
         self.len = new_len;
     }
-
 }
 
 // Mutable in-place operations.
@@ -1389,7 +1432,6 @@ where
         }
         Some(MutProxy::new(self, index))
     }
-
 
     /// Returns a mutable slice of the underlying storage words.
     ///
@@ -1423,8 +1465,13 @@ where
     /// assert_eq!(vec.get(1), Some(99));
     /// ```
     pub fn set(&mut self, index: usize, value: T) {
-        assert!(index < self.len, "Index out of bounds: expected index < {}, got {}", self.len, index);
-        
+        assert!(
+            index < self.len,
+            "Index out of bounds: expected index < {}, got {}",
+            self.len,
+            index
+        );
+
         let value_w = <T as Storable<W>>::into_word(value);
         let bits_per_word = <W as traits::Word>::BITS;
 
@@ -1435,9 +1482,12 @@ where
         };
 
         if self.bit_width < bits_per_word && value_w >= limit {
-            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+            panic!(
+                "Value {:?} does not fit in the configured bit_width of {}",
+                value_w, self.bit_width
+            );
         }
-        
+
         unsafe { self.set_unchecked(index, value_w) };
     }
 
@@ -1453,7 +1503,7 @@ where
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / bits_per_word;
         let bit_offset = bit_pos % bits_per_word;
-        
+
         let limbs = self.bits.as_mut();
 
         if E::IS_LITTLE {
@@ -1468,11 +1518,11 @@ where
                 let (left, right) = limbs.split_at_mut(word_index + 1);
                 let low_word = &mut left[word_index];
                 let high_word = &mut right[0];
-                
+
                 // Write the low part of the value to the first word.
                 *low_word &= !(self.mask << bit_offset);
                 *low_word |= value_w << bit_offset;
-                
+
                 // Write the high part of the value to the next word.
                 let bits_in_high = (bit_offset + self.bit_width) - bits_per_word;
                 let high_mask = self.mask >> (self.bit_width - bits_in_high);
@@ -1489,11 +1539,12 @@ where
             let (left, right) = limbs.split_at_mut(word_index + 1);
             let high_word = &mut left[word_index];
             let low_word = &mut right[0];
-            
+
             let bits_in_first = bits_per_word - bit_offset;
             let bits_in_second = self.bit_width - bits_in_first;
 
-            let high_mask = (self.mask >> bits_in_second) << (bits_per_word - bits_in_first - bit_offset);
+            let high_mask =
+                (self.mask >> bits_in_second) << (bits_per_word - bits_in_first - bit_offset);
             let high_value = value_w >> bits_in_second;
             *high_word &= !high_mask.to_be();
             *high_word |= (high_value << (bits_per_word - bits_in_first - bit_offset)).to_be();
@@ -1534,7 +1585,7 @@ where
                 bit_width: self.bit_width,
             });
         }
-        
+
         // `set` would panic, but we've pre-flighted the check.
         unsafe { self.set_unchecked(index, value_w) };
         Ok(())
@@ -1550,6 +1601,16 @@ where
     /// Panics if `chunk_size` is 0.
     pub fn chunks_mut(&mut self, chunk_size: usize) -> iter_mut::ChunksMut<'_, T, W, E, B> {
         iter_mut::ChunksMut::new(self, chunk_size)
+    }
+
+    /// Returns an unchecked mutable iterator over the elements of the vector.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the iterator is not advanced beyond the
+    /// vector's length.
+    pub unsafe fn iter_mut_unchecked(&mut self) -> iter_mut::IterMutUnchecked<'_, T, W, E, B> {
+        iter_mut::IterMutUnchecked::new(self)
     }
 
     /// Applies a function to all elements in place, without checking if the
@@ -1620,63 +1681,63 @@ where
         let limbs = self.bits.as_mut();
         let num_words = (self.len * bit_width).div_ceil(bits_per_word);
         let last_word_idx = num_words.saturating_sub(1);
-        
+
         let mut write_buffer = W::ZERO;
         let mut read_buffer = *limbs.get_unchecked(0);
         let mut global_bit_offset = 0;
-        
+
         for word_idx in 0..last_word_idx {
             let lower_word_boundary = word_idx * bits_per_word;
             let upper_word_boundary = lower_word_boundary + bits_per_word;
-            
+
             while global_bit_offset + bit_width <= upper_word_boundary {
                 let offset_in_word = global_bit_offset - lower_word_boundary;
                 let element = (read_buffer >> offset_in_word) & self.mask;
                 write_buffer |= f_w(element) << offset_in_word;
                 global_bit_offset += bit_width;
             }
-            
+
             let next_word = *limbs.get_unchecked(word_idx + 1);
             let mut new_write_buffer = W::ZERO;
-            
+
             if upper_word_boundary != global_bit_offset {
                 let elem_idx = global_bit_offset / bit_width;
                 if elem_idx >= self.len {
                     *limbs.get_unchecked_mut(word_idx) = write_buffer;
                     return;
                 }
-                
+
                 let remainder_in_word = upper_word_boundary - global_bit_offset;
                 let offset_in_word = global_bit_offset - lower_word_boundary;
-                
-                let element = ((read_buffer >> offset_in_word) | (next_word << remainder_in_word)) & self.mask;
+
+                let element = ((read_buffer >> offset_in_word) | (next_word << remainder_in_word))
+                    & self.mask;
                 let new_element = f_w(element);
-                
+
                 write_buffer |= new_element << offset_in_word;
                 new_write_buffer = new_element >> remainder_in_word;
-                
+
                 global_bit_offset += bit_width;
             }
-            
+
             *limbs.get_unchecked_mut(word_idx) = write_buffer;
-            
+
             read_buffer = next_word;
             write_buffer = new_write_buffer;
         }
-        
+
         let lower_word_boundary = last_word_idx * bits_per_word;
-        
+
         while global_bit_offset < self.len * bit_width {
             let offset_in_word = global_bit_offset - lower_word_boundary;
             let element = (read_buffer >> offset_in_word) & self.mask;
             write_buffer |= f_w(element) << offset_in_word;
             global_bit_offset += bit_width;
         }
-        
+
         *limbs.get_unchecked_mut(last_word_idx) = write_buffer;
     }
 
-    
     /// Applies a function to all elements in the vector, modifying them in-place.
     ///
     /// This method is highly optimized, with a fast path for bit widths that are
@@ -1891,9 +1952,16 @@ where
     pub fn fill(&mut self, value: T) {
         let value_w = <T as Storable<W>>::into_word(value);
         let bits_per_word = <W as traits::Word>::BITS;
-        let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
         if self.bit_width < bits_per_word && value_w >= limit {
-            panic!("Value {:?} does not fit in the configured bit_width of {}", value_w, self.bit_width);
+            panic!(
+                "Value {:?} does not fit in the configured bit_width of {}",
+                value_w, self.bit_width
+            );
         }
 
         for i in 0..self.len() {
@@ -1912,19 +1980,107 @@ where
         F: FnMut() -> T,
     {
         let bits_per_word = <W as traits::Word>::BITS;
-        let limit = if self.bit_width < bits_per_word { W::ONE << self.bit_width } else { W::max_value() };
+        let limit = if self.bit_width < bits_per_word {
+            W::ONE << self.bit_width
+        } else {
+            W::max_value()
+        };
 
         for i in 0..self.len() {
             let value = f();
             let value_w = <T as Storable<W>>::into_word(value);
-             if self.bit_width < bits_per_word && value_w >= limit {
-                panic!("Value {:?} returned by closure does not fit in the configured bit_width of {}", value_w, self.bit_width);
+            if self.bit_width < bits_per_word && value_w >= limit {
+                panic!(
+                    "Value {:?} returned by closure does not fit in the configured bit_width of {}",
+                    value_w, self.bit_width
+                );
             }
             unsafe { self.set_unchecked(i, value_w) };
         }
     }
 
+    /// Copies a sequence of elements from a source `FixedVec` into this one.
+    ///
+    /// The source and destination ranges may overlap.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the source and destination vectors do not have the same `bit_width`.
+    /// Panics if the source or destination ranges are out of bounds.
+    pub fn copy_from_slice(
+        &mut self,
+        src: &Self,
+        src_range: std::ops::Range<usize>,
+        dest_index: usize,
+    ) {
+        assert_eq!(
+            self.bit_width, src.bit_width,
+            "bit_width mismatch in copy_from_slice"
+        );
+        assert!(src_range.start <= src_range.end, "source range start > end");
+        assert!(src_range.end <= src.len(), "source range out of bounds");
+        let len = src_range.len();
+        assert!(
+            dest_index + len <= self.len(),
+            "destination range out of bounds"
+        );
 
+        if len == 0 {
+            return;
+        }
+
+        // Fast path: if bit alignments are the same, we can do word-level copies.
+        let bit_width = self.bit_width;
+        let bits_per_word = <W as Word>::BITS;
+        let src_bit_offset = (src_range.start * bit_width) % bits_per_word;
+        let dest_bit_offset = (dest_index * bit_width) % bits_per_word;
+
+        if src_bit_offset == dest_bit_offset {
+            let src_word_start = (src_range.start * bit_width) / bits_per_word;
+            let dest_word_start = (dest_index * bit_width) / bits_per_word;
+            let total_bits_to_copy = len * bit_width;
+            let num_words_to_copy = total_bits_to_copy.div_ceil(bits_per_word);
+
+            let src_words = &src.bits.as_ref()[src_word_start..src_word_start + num_words_to_copy];
+            let dest_words =
+                &mut self.bits.as_mut()[dest_word_start..dest_word_start + num_words_to_copy];
+
+            // If the last word is not fully copied, we need to mask it to avoid overwriting unrelated data.
+            let residual_bits = total_bits_to_copy % bits_per_word;
+            if residual_bits == 0 {
+                dest_words.copy_from_slice(src_words);
+            } else {
+                if num_words_to_copy > 1 {
+                    dest_words[..num_words_to_copy - 1]
+                        .copy_from_slice(&src_words[..num_words_to_copy - 1]);
+                }
+                let last_word_mask = (W::ONE << residual_bits).wrapping_sub(W::ONE);
+                let dest_last_word = &mut dest_words[num_words_to_copy - 1];
+                let src_last_word = &src_words[num_words_to_copy - 1];
+                *dest_last_word =
+                    (*dest_last_word & !last_word_mask) | (*src_last_word & last_word_mask);
+            }
+        } else {
+            // Slow path: copy element by element if alignments differ.
+            // This can be further optimized, but element-wise is a correct fallback.
+            // The check for overlapping ranges is important for correctness.
+            if dest_index > src_range.start && dest_index < src_range.end {
+                for i in (0..len).rev() {
+                    let val = unsafe { src.get_unchecked(src_range.start + i) };
+                    unsafe {
+                        self.set_unchecked(dest_index + i, <T as Storable<W>>::into_word(val))
+                    };
+                }
+            } else {
+                for i in 0..len {
+                    let val = unsafe { src.get_unchecked(src_range.start + i) };
+                    unsafe {
+                        self.set_unchecked(dest_index + i, <T as Storable<W>>::into_word(val))
+                    };
+                }
+            }
+        }
+    }
 }
 
 impl<T, W, E, B, B2> PartialEq<FixedVec<T, W, E, B2>> for FixedVec<T, W, E, B>

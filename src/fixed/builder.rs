@@ -34,8 +34,8 @@
 //! assert_eq!(vec_pow2.bit_width(), 8);
 //! ```
 
-use crate::fixed::{BitWidth, Error, FixedVec};
 use crate::fixed::traits::{Storable, Word};
+use crate::fixed::{BitWidth, Error, FixedVec};
 use dsi_bitstream::{
     impls::{BufBitWriter, MemWordWriterVec},
     prelude::{BitWrite, Endianness},
@@ -164,7 +164,9 @@ where
                 });
             }
             // Convert W to u64 before writing, as required by the BitWrite trait.
-            writer.write_bits(value_w.to_u64().unwrap(), final_bit_width).unwrap();
+            writer
+                .write_bits(value_w.to_u64().unwrap(), final_bit_width)
+                .unwrap();
         }
 
         writer.flush().unwrap();
@@ -180,7 +182,12 @@ where
 /// collecting it into a slice. It requires the `bit_width` to be specified
 /// manually, as it cannot analyze the data in advance.
 #[derive(Debug)]
-pub struct FixedVecFromIterBuilder<T: Storable<W>, W: Word, E: Endianness, I: IntoIterator<Item = T>> {
+pub struct FixedVecFromIterBuilder<
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    I: IntoIterator<Item = T>,
+> {
     iter: I,
     bit_width: usize,
     _phantom: PhantomData<(T, W, E)>,
@@ -219,7 +226,7 @@ where
         }
 
         let mut writer = BufBitWriter::new(MemWordWriterVec::new(Vec::<W>::new()));
-        
+
         let mut len = 0;
         let limit = if self.bit_width < bits_per_word {
             W::ONE << self.bit_width
@@ -237,7 +244,9 @@ where
                 });
             }
             // Convert W to u64 before writing.
-            writer.write_bits(value_w.to_u64().unwrap(), self.bit_width).unwrap();
+            writer
+                .write_bits(value_w.to_u64().unwrap(), self.bit_width)
+                .unwrap();
             len += 1;
         }
 

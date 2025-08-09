@@ -3,7 +3,7 @@
 
 use compressed_intvec::fixed::{
     traits::{Storable, Word},
-    FixedVec, UFixedVec,
+    BitWidth, FixedVec, UFixedVec,
 };
 use dsi_bitstream::{
     prelude::{BE, LE},
@@ -163,4 +163,36 @@ fn test_windows() {
 
     // Test window size larger than vec
     assert!(vec.windows(6).next().is_none());
+}
+
+#[test]
+fn test_unchecked_iterators() {
+    let data: Vec<u32> = (0..100).collect();
+    // Create with enough bit width for the modification test. 99*2=198 -> 8 bits
+    let vec: UFixedVec<u32> = FixedVec::builder()
+        .bit_width(BitWidth::Explicit(8))
+        .build(&data)
+        .unwrap();
+
+    // Test iter_unchecked
+    let mut collected = Vec::with_capacity(data.len());
+    let mut iter = unsafe { vec.iter_unchecked() };
+    for _ in 0..data.len() {
+        collected.push(unsafe { iter.next_unchecked() });
+    }
+    assert_eq!(collected, data);
+
+    // Test iter_mut_unchecked
+    let mut mut_vec = vec;
+    let len = mut_vec.len(); // Get the length *before* borrowing.
+    let mut iter_mut = unsafe { mut_vec.iter_mut_unchecked() };
+    for i in 0..len {
+        let mut proxy = unsafe { iter_mut.next_unchecked() };
+        *proxy = i as u32 * 2;
+    }
+    drop(iter_mut); // Drop the iterator to release the borrow
+
+    for i in 0..len {
+        assert_eq!(mut_vec.get(i), Some(i as u32 * 2));
+    }
 }

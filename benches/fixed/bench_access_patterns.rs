@@ -3,7 +3,7 @@ use std::time::Duration;
 // benches/fixed/bench_access_patterns.rs
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use rand::{rngs::SmallRng, seq::{IndexedRandom}, Rng, SeedableRng};
+use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
 use sux::prelude::{BitFieldSlice, BitFieldVec};
 
@@ -133,7 +133,11 @@ fn benchmark_access_patterns(c: &mut Criterion) {
     ];
 
     for pattern in patterns {
-        let mut group = c.benchmark_group(format!("AccessPatterns/{}bit/{}", BIT_WIDTH, pattern.name()));
+        let mut group = c.benchmark_group(format!(
+            "AccessPatterns/{}bit/{}",
+            BIT_WIDTH,
+            pattern.name()
+        ));
 
         let mut rng = SmallRng::seed_from_u64(1337);
         let access_indices =
@@ -157,7 +161,6 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             })
         });
 
-        
         group.bench_function("sux::BitFieldVec/get_unchecked_loop", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -166,7 +169,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
                 }
             })
         });
-        
+
         #[cfg(feature = "parallel")]
         group.bench_function("LEFixedVec/par_get_many_unchecked", |b| {
             b.iter(|| {

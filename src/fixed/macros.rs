@@ -42,9 +42,7 @@ use num_traits::ToPrimitive;
 
 /// A hidden helper function for the `fixed_vec![...]` macro variant.
 #[doc(hidden)]
-pub fn from_slice<T>(
-    slice: &[T],
-) -> FixedVec<T, <T as DefaultParams>::W, <T as DefaultParams>::E>
+pub fn from_slice<T>(slice: &[T]) -> FixedVec<T, <T as DefaultParams>::W, <T as DefaultParams>::E>
 where
     T: DefaultParams + Storable<<T as DefaultParams>::W> + ToPrimitive,
     <T as DefaultParams>::W: Word,
@@ -53,11 +51,11 @@ where
     // The complex bound for the builder's `build` method.
     for<'a> dsi_bitstream::impls::BufBitWriter<
         <T as DefaultParams>::E,
-        dsi_bitstream::impls::MemWordWriterVec<<T as DefaultParams>::W, Vec<<T as DefaultParams>::W>>,
-    >: dsi_bitstream::prelude::BitWrite<
-        <T as DefaultParams>::E,
-        Error = std::convert::Infallible,
-    >,
+        dsi_bitstream::impls::MemWordWriterVec<
+            <T as DefaultParams>::W,
+            Vec<<T as DefaultParams>::W>,
+        >,
+    >: dsi_bitstream::prelude::BitWrite<<T as DefaultParams>::E, Error = std::convert::Infallible>,
 {
     FixedVec::<T, <T as DefaultParams>::W, <T as DefaultParams>::E>::builder()
         .bit_width(BitWidth::Minimal)
@@ -79,11 +77,11 @@ where
     // The complex bound for the builder's `build` method.
     for<'a> dsi_bitstream::impls::BufBitWriter<
         <T as DefaultParams>::E,
-        dsi_bitstream::impls::MemWordWriterVec<<T as DefaultParams>::W, Vec<<T as DefaultParams>::W>>,
-    >: dsi_bitstream::prelude::BitWrite<
-        <T as DefaultParams>::E,
-        Error = std::convert::Infallible,
-    >,
+        dsi_bitstream::impls::MemWordWriterVec<
+            <T as DefaultParams>::W,
+            Vec<<T as DefaultParams>::W>,
+        >,
+    >: dsi_bitstream::prelude::BitWrite<<T as DefaultParams>::E, Error = std::convert::Infallible>,
 {
     let mut v = Vec::new();
     v.resize(len, elem);

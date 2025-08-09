@@ -63,8 +63,7 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
 
     group.bench_function("LEFixedVec/push_loop", |b| {
         b.iter(|| {
-            let mut vec =
-                LEFixedVec::with_capacity(BIT_WIDTH as usize, VECTOR_SIZE).unwrap();
+            let mut vec = LEFixedVec::with_capacity(BIT_WIDTH as usize, VECTOR_SIZE).unwrap();
             for &val in black_box(&data) {
                 vec.push(val);
             }
@@ -74,8 +73,7 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
 
     group.bench_function("sux::BitFieldVec/push_loop", |b| {
         b.iter(|| {
-            let mut vec =
-                BitFieldVec::<u64>::with_capacity(BIT_WIDTH as usize, VECTOR_SIZE);
+            let mut vec = BitFieldVec::<u64>::with_capacity(BIT_WIDTH as usize, VECTOR_SIZE);
             for &val in black_box(&data) {
                 vec.push(val);
             }
@@ -129,14 +127,13 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
         );
     });
 
-     // --- 4. Set at Random Index ---
+    // --- 4. Set at Random Index ---
     const NUM_SETS: usize = 100_000;
     let mut rng = SmallRng::seed_from_u64(1338);
     let set_indices: Vec<usize> = (0..NUM_SETS)
         .map(|_| rng.random_range(0..VECTOR_SIZE))
         .collect();
-    let set_values: Vec<u64> =
-        generate_random_vec(NUM_SETS, 1u64 << BIT_WIDTH);
+    let set_values: Vec<u64> = generate_random_vec(NUM_SETS, 1u64 << BIT_WIDTH);
 
     let base_le_fixed_vec = LEFixedVec::builder()
         .bit_width(BitWidth::Explicit(BIT_WIDTH as usize))
@@ -167,7 +164,6 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
             },
         );
     });
-
 
     group.finish();
 }

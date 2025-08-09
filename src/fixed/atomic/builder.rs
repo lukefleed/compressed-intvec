@@ -31,9 +31,9 @@
 //! ```
 
 use crate::fixed::atomic::AtomicFixedVec;
-use crate::fixed::{BitWidth, Error};
 use crate::fixed::traits::Storable;
-use num_traits::{ToPrimitive};
+use crate::fixed::{BitWidth, Error};
+use num_traits::ToPrimitive;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
 

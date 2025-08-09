@@ -96,13 +96,13 @@ fn test_chunks_mut_with_remainder() {
     for i in 0..10u8 {
         vec.push(i);
     }
-    
+
     for mut chunk in vec.chunks_mut(3) {
         if !chunk.is_empty() {
             *chunk.at_mut(0).unwrap() = 99;
         }
     }
-    
+
     assert_eq!(vec.get(0), Some(99));
     assert_eq!(vec.get(1), Some(1));
     assert_eq!(vec.get(3), Some(99));

@@ -186,3 +186,47 @@ fn test_fill_with_panic() {
     vec.resize(5, 0);
     vec.fill(16); // 16 does not fit in 4 bits
 }
+
+#[test]
+fn test_copy_from_slice() {
+    // max value for dest is 1099, which needs 11 bits.
+    let bit_width = 11;
+    let src_data: Vec<u32> = (0..100).collect();
+    let dest_data: Vec<u32> = (0..100).map(|x| x + 1000).collect();
+
+    let src: UFixedVec<u32> = FixedVec::builder()
+        .bit_width(BitWidth::Explicit(bit_width))
+        .build(&src_data)
+        .unwrap();
+    let mut dest: UFixedVec<u32> = FixedVec::builder()
+        .bit_width(BitWidth::Explicit(bit_width))
+        .build(&dest_data)
+        .unwrap();
+
+    // Non-overlapping
+    dest.copy_from_slice(&src, 10..30, 50);
+    for i in 0..20 {
+        assert_eq!(dest.get(50 + i), Some(10 + i as u32));
+    }
+    // Verify that other elements are untouched
+    assert_eq!(dest.get(49), Some(1049));
+    assert_eq!(dest.get(70), Some(1070));
+
+    // Overlapping (dest > src)
+    let mut vec: UFixedVec<u32> = FixedVec::builder()
+        .bit_width(BitWidth::Minimal)
+        .build(&(0..10).collect::<Vec<u32>>())
+        .unwrap();
+    vec.copy_from_slice(&vec.clone(), 0..5, 2);
+    let expected: Vec<u32> = vec![0, 1, 0, 1, 2, 3, 4, 7, 8, 9];
+    assert_eq!(vec, &expected[..]);
+
+    // Overlapping (src > dest)
+    let mut vec2: UFixedVec<u32> = FixedVec::builder()
+        .bit_width(BitWidth::Minimal)
+        .build(&(0..10).collect::<Vec<u32>>())
+        .unwrap();
+    vec2.copy_from_slice(&vec2.clone(), 2..7, 0);
+    let expected2: Vec<u32> = vec![2, 3, 4, 5, 6, 5, 6, 7, 8, 9];
+    assert_eq!(vec2, &expected2[..]);
+}

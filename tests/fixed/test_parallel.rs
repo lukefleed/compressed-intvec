@@ -2,14 +2,9 @@
 
 #![cfg(feature = "parallel")]
 
-use compressed_intvec::fixed::{
-    FixedVec,
-    SFixedVec, UFixedVec,
-    BitWidth,
-    Error as FixedVecError
-};
-use rayon::iter::ParallelIterator;
+use compressed_intvec::fixed::{BitWidth, Error as FixedVecError, FixedVec, SFixedVec, UFixedVec};
 use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use rayon::iter::ParallelIterator;
 
 fn get_test_data_unsigned() -> Vec<u32> {
     (0..10_000).collect()
@@ -24,16 +19,22 @@ fn test_par_iter() {
     // Unsigned test
     let data_u32 = get_test_data_unsigned();
     let vec_u32: UFixedVec<u32> = FixedVec::builder().build(&data_u32).unwrap();
-    
+
     let collected_par: Vec<u32> = vec_u32.par_iter().collect();
-    assert_eq!(collected_par, data_u32, "par_iter for UFixedVec<u32> failed");
+    assert_eq!(
+        collected_par, data_u32,
+        "par_iter for UFixedVec<u32> failed"
+    );
 
     // Signed test
     let data_i16 = get_test_data_signed();
     let vec_i16: SFixedVec<i16> = FixedVec::builder().build(&data_i16).unwrap();
 
     let collected_par_signed: Vec<i16> = vec_i16.par_iter().collect();
-    assert_eq!(collected_par_signed, data_i16, "par_iter for SFixedVec<i16> failed");
+    assert_eq!(
+        collected_par_signed, data_i16,
+        "par_iter for SFixedVec<i16> failed"
+    );
 }
 
 #[test]
@@ -61,7 +62,10 @@ fn test_par_get_many() {
     let mut invalid_indices = indices_to_get.to_vec();
     invalid_indices.push(data.len()); // Add an invalid index
     let result_err = vec.par_get_many(&invalid_indices);
-    assert!(matches!(result_err, Err(FixedVecError::InvalidParameters(_))), "par_get_many should fail on out-of-bounds index");
+    assert!(
+        matches!(result_err, Err(FixedVecError::InvalidParameters(_))),
+        "par_get_many should fail on out-of-bounds index"
+    );
 }
 
 #[test]
@@ -72,15 +76,21 @@ fn test_par_get_many_unchecked() {
     // Create a set of random indices
     let mut rng = StdRng::seed_from_u64(1337);
     let indices_to_get: Vec<usize> = (0..1000).map(|_| rng.random_range(0..data.len())).collect();
-    
+
     let expected: Vec<i16> = indices_to_get.iter().map(|&i| data[i]).collect();
 
     // Test the unsafe `par_get_many_unchecked`
     // SAFETY: We are generating indices that are guaranteed to be in-bounds.
     let results = unsafe { vec.par_get_many_unchecked(&indices_to_get) };
-    assert_eq!(results, expected, "par_get_many_unchecked results are incorrect");
+    assert_eq!(
+        results, expected,
+        "par_get_many_unchecked results are incorrect"
+    );
 
     // Test with an empty slice of indices
     let empty_results = unsafe { vec.par_get_many_unchecked(&[]) };
-    assert!(empty_results.is_empty(), "par_get_many_unchecked with empty indices should return empty vec");
+    assert!(
+        empty_results.is_empty(),
+        "par_get_many_unchecked with empty indices should return empty vec"
+    );
 }

@@ -35,7 +35,10 @@
 //! ```
 
 use crate::fixed::{
-    proxy::MutProxy, slice::FixedVecSlice, traits::{Storable, Word}, FixedVec
+    proxy::MutProxy,
+    slice::FixedVecSlice,
+    traits::{Storable, Word},
+    FixedVec,
 };
 use dsi_bitstream::prelude::Endianness;
 use std::{cmp::min, marker::PhantomData};
@@ -177,10 +180,53 @@ where
         // SAFETY: The iterator's lifetime `'a` and bounds checking ensure
         // that the pointer is valid and that we are creating non-overlapping
         // mutable access proxies one at a time.
-        let proxy =
-            unsafe { MutProxy::new(&mut *self.vec_ptr, self.current_index) };
+        let proxy = unsafe { MutProxy::new(&mut *self.vec_ptr, self.current_index) };
         self.current_index += 1;
 
         Some(proxy)
+    }
+}
+
+/// An unchecked mutable iterator over the elements of a [`FixedVec`].
+///
+/// This struct is created by the [`iter_mut_unchecked`](super::FixedVec::iter_mut_unchecked)
+/// method. It does not perform any bounds checking.
+///
+/// # Safety
+///
+/// The iterator is safe to use only if it is guaranteed that it will not
+/// be advanced beyond the end of the vector.
+pub struct IterMutUnchecked<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    iter: IterMut<'a, T, W, E, B>,
+}
+
+impl<'a, T, W, E, B> IterMutUnchecked<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    /// Creates a new `IterMutUnchecked`.
+    pub(super) fn new(vec: &'a mut FixedVec<T, W, E, B>) -> Self {
+        Self {
+            iter: IterMut::new(vec),
+        }
+    }
+
+    /// Returns the next mutable proxy without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method when the iterator is exhausted is undefined behavior.
+    #[inline]
+    pub unsafe fn next_unchecked(&mut self) -> MutProxy<'a, T, W, E, B> {
+        self.iter.next().unwrap_unchecked()
     }
 }

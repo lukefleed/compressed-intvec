@@ -114,9 +114,8 @@ fn benchmark_random_access(c: &mut Criterion) {
 
         // sux::BitFieldVec's unaligned access has specific constraints and requires padding.
         let w_bits = 64;
-        let can_use_unaligned = bit_width <= w_bits - 8 + 2
-            || bit_width == w_bits - 8 + 4
-            || bit_width == w_bits;
+        let can_use_unaligned =
+            bit_width <= w_bits - 8 + 2 || bit_width == w_bits - 8 + 4 || bit_width == w_bits;
 
         if can_use_unaligned {
             let mut sux_bfv_unaligned =

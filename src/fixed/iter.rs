@@ -533,12 +533,55 @@ where
             return None;
         }
 
-        let slice = FixedVecSlice::new(
-            self.vec,
-            self.current_pos..self.current_pos + self.size,
-        );
+        let slice = FixedVecSlice::new(self.vec, self.current_pos..self.current_pos + self.size);
         self.current_pos += 1;
 
         Some(slice)
+    }
+}
+
+/// An unchecked iterator over the elements of a [`FixedVec`].
+///
+/// This struct is created by the [`iter_unchecked`](super::FixedVec::iter_unchecked)
+/// method. It does not perform any bounds checking.
+///
+/// # Safety
+///
+/// The iterator is safe to use only if it is guaranteed that it will not
+/// be advanced beyond the end of the vector.
+pub struct FixedVecUncheckedIter<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    iter: FixedVecIter<'a, T, W, E, B>,
+}
+
+impl<'a, T, W, E, B> FixedVecUncheckedIter<'a, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
+    /// Creates a new `FixedVecUncheckedIter`.
+    pub(super) fn new(vec: &'a FixedVec<T, W, E, B>) -> Self {
+        Self {
+            iter: FixedVecIter::new(vec),
+        }
+    }
+
+    /// Returns the next element without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method when the iterator is exhausted is undefined behavior.
+    #[inline]
+    pub unsafe fn next_unchecked(&mut self) -> T {
+        // The underlying FixedVecIter is already highly optimized.
+        // The primary gain here is removing the check in `next()`.
+        self.iter.next().unwrap_unchecked()
     }
 }

@@ -509,20 +509,24 @@ where
             let high_word_ref = &self.storage[word_index + 1];
 
             // Modify the lower word.
-            low_word_ref.fetch_update(order, Ordering::Relaxed, |mut w| {
-                w &= !(u64::MAX << bit_offset);
-                w |= value << bit_offset;
-                Some(w)
-            }).unwrap(); // Should not fail under lock.
+            low_word_ref
+                .fetch_update(order, Ordering::Relaxed, |mut w| {
+                    w &= !(u64::MAX << bit_offset);
+                    w |= value << bit_offset;
+                    Some(w)
+                })
+                .unwrap(); // Should not fail under lock.
 
             // Modify the higher word.
             let bits_in_high = (bit_offset + self.bit_width) - u64::BITS as usize;
             let high_mask = (1u64 << bits_in_high).wrapping_sub(1);
-            high_word_ref.fetch_update(order, Ordering::Relaxed, |mut w| {
-                w &= !high_mask;
-                w |= value >> (u64::BITS as usize - bit_offset);
-                Some(w)
-            }).unwrap(); // Should not fail under lock.
+            high_word_ref
+                .fetch_update(order, Ordering::Relaxed, |mut w| {
+                    w &= !high_mask;
+                    w |= value >> (u64::BITS as usize - bit_offset);
+                    Some(w)
+                })
+                .unwrap(); // Should not fail under lock.
         }
     }
 
@@ -712,14 +716,8 @@ impl<T: Storable<u64>> MemDbgImpl for AtomicFixedVec<T> {
         flags: DbgFlags,
     ) -> core::fmt::Result {
         // Manual implementation to avoid trying to lock and inspect mutexes.
-        self.bit_width._mem_dbg_rec_on(
-            writer,
-            total_size,
-            max_depth,
-            prefix,
-            false,
-            flags,
-        )?;
+        self.bit_width
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
         self.len
             ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
         self.mask

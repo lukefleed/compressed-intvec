@@ -25,7 +25,10 @@
 //! assert_eq!(vec.get(1), Some(99));
 //! ```
 
-use super::{FixedVec, traits::{Storable, Word}};
+use super::{
+    traits::{Storable, Word},
+    FixedVec,
+};
 use dsi_bitstream::prelude::Endianness;
 use std::ops::{Deref, DerefMut};
 
@@ -61,7 +64,9 @@ where
     /// This is called by `FixedVec::at_mut`. It reads the initial value
     /// from the vector.
     pub(super) fn new(vec: &'a mut FixedVec<T, W, E, B>, index: usize) -> Self {
-        let value = vec.get(index).expect("Index out of bounds in MutProxy creation");
+        let value = vec
+            .get(index)
+            .expect("Index out of bounds in MutProxy creation");
         Self { vec, index, value }
     }
 }

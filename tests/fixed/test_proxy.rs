@@ -31,7 +31,7 @@ fn test_at_mut_value_too_large_panics() {
     // This vec is configured with a bit_width of 4, so it can only hold values up to 15.
     let mut vec: UFixedVec<u8> = FixedVec::new(4).unwrap();
     vec.push(10);
-    
+
     // The value 20 is a valid u8 literal, so this compiles.
     // However, it is larger than the maximum value (15) that can be stored
     // with a bit_width of 4.

@@ -58,7 +58,6 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
             })
         });
 
-
         // --- 2. Parallel Iteration Benchmarks ---
         #[cfg(feature = "parallel")]
         {
@@ -119,7 +118,6 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
         group.finish();
     }
 }
-
 
 criterion_group! {
     name = benches;

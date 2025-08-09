@@ -8,11 +8,16 @@ pub use crate::fixed::{
     builder::{FixedVecBuilder, FixedVecFromIterBuilder},
     iter::{FixedVecIntoIter, FixedVecIter},
     traits::{Storable, Word},
-    BitWidth, Error as FixedVecError, FixedVec,
+    BEFixedVec,
+    BESFixedVec,
+    BitWidth,
+    Error as FixedVecError,
+    FixedVec,
+    LEFixedVec,
+    LESFixedVec,
+    SFixedVec,
     // Direct re-export of the most common aliases
-    UFixedVec, SFixedVec,
-    LEFixedVec, LESFixedVec,
-    BEFixedVec, BESFixedVec,
+    UFixedVec,
 };
 
 // TODO: Add prelude exports for `variable` module once it's refactored.

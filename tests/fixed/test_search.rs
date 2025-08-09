@@ -1,7 +1,7 @@
 //! Integration tests for binary search functionality.
 
-use compressed_intvec::fixed::{FixedVec, UFixedVec, SFixedVec};
-use dsi_bitstream::prelude::{LE};
+use compressed_intvec::fixed::{FixedVec, SFixedVec, UFixedVec};
+use dsi_bitstream::prelude::LE;
 
 #[test]
 fn test_fixedvec_binary_search() {
@@ -88,7 +88,7 @@ fn test_binary_search_by_key() {
     assert_eq!(vec.binary_search_by_key(&25, |x| (x as u32).pow(2)), Ok(2));
     // Find x where x*x = 100
     assert_eq!(vec.binary_search_by_key(&100, |x| (x as u32).pow(2)), Ok(3));
-    
+
     // Find x where x*x = 9 (not found).
     // The keys are [1, 4, 25, 100, 441]. The insertion point for 9 is at index 2.
     assert_eq!(vec.binary_search_by_key(&9, |x| (x as u32).pow(2)), Err(2));

@@ -1,23 +1,20 @@
 //! Integration tests for capacity and modification methods in `FixedVec`.
 
 use compressed_intvec::fixed::{
-    traits::{Storable, Word}, Error, FixedVec
+    traits::{Storable, Word},
+    Error, FixedVec,
 };
-use dsi_bitstream::{prelude::{BE, LE}, traits::Endianness};
+use dsi_bitstream::{
+    prelude::{BE, LE},
+    traits::Endianness,
+};
 use num_traits::{Bounded, ToPrimitive};
 use std::fmt::Debug;
 
 /// A helper function to run a comprehensive suite of modification tests.
 fn run_modification_tests<T, W, E>()
 where
-    T: Storable<W>
-        + Bounded
-        + ToPrimitive
-        + From<u8>
-        + Ord
-        + Debug
-        + Copy
-        + PartialEq,
+    T: Storable<W> + Bounded + ToPrimitive + From<u8> + Ord + Debug + Copy + PartialEq,
     W: Word,
     E: Endianness + Debug,
     // Bound needed for FixedVec::new() and other builder methods.
@@ -85,7 +82,6 @@ test_modifiers!(modifiers_u64_u64_be, u64, u64, BE);
 test_modifiers!(modifiers_i16_u32_le, i16, u32, LE);
 test_modifiers!(modifiers_u8_u16_be, u8, u16, BE);
 
-
 #[test]
 fn test_with_capacity() {
     // This test is specific and doesn't need to be in the macro.
@@ -102,9 +98,13 @@ fn test_reserve() {
 
     // Reserve space for 100 additional elements.
     vec.reserve(100);
-    
+
     // The capacity must be sufficient for at least len (0) + additional (100) elements.
-    assert!(vec.capacity() >= 100, "Capacity after reserve should be >= 100, but is {}", vec.capacity());
+    assert!(
+        vec.capacity() >= 100,
+        "Capacity after reserve should be >= 100, but is {}",
+        vec.capacity()
+    );
 
     // Add some elements and reserve more.
     for i in 0..50 {
@@ -112,7 +112,11 @@ fn test_reserve() {
     }
     let current_len = vec.len(); // 50
     vec.reserve(100); // Reserve for 100 *additional* elements.
-    assert!(vec.capacity() >= current_len + 100, "Capacity should be >= 150, but is {}", vec.capacity());
+    assert!(
+        vec.capacity() >= current_len + 100,
+        "Capacity should be >= 150, but is {}",
+        vec.capacity()
+    );
 }
 
 #[test]
@@ -123,7 +127,7 @@ fn test_complex_unaligned_shifts() {
     for i in 0..50 {
         vec.push(i);
     }
-    
+
     // Test remove
     let mut expected: Vec<u32> = (0..50).collect();
     let removed = vec.remove(25);
@@ -195,11 +199,11 @@ fn test_replace_value_too_large_panics() {
 #[test]
 fn test_swap() {
     let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
-    
+
     vec.swap(2, 8);
     assert_eq!(vec.get(2), Some(8));
     assert_eq!(vec.get(8), Some(2));
-    
+
     // Test swapping adjacent elements
     vec.swap(0, 1);
     assert_eq!(vec.get(0), Some(1));
@@ -220,7 +224,7 @@ fn test_swap_out_of_bounds_a() {
 #[test]
 fn test_swap_remove() {
     let mut vec: FixedVec<u32, usize, LE> = (0..10u32).collect();
-    
+
     // Remove from the middle
     let removed = vec.swap_remove(3);
     assert_eq!(removed, 3);
@@ -245,19 +249,19 @@ fn test_swap_remove_out_of_bounds() {
 #[test]
 fn test_try_api() {
     let mut vec: FixedVec<u32, usize, LE> = FixedVec::new(4).unwrap(); // bit_width=4, max_val=15
-    
+
     // Test try_push
     assert!(vec.try_push(10).is_ok());
     assert!(vec.try_push(15).is_ok());
     let res_push = vec.try_push(16);
-    assert!(matches!(res_push, Err(Error::ValueTooLarge {..})));
+    assert!(matches!(res_push, Err(Error::ValueTooLarge { .. })));
     assert_eq!(vec.len(), 2); // Push should not have happened
 
     // Test try_set
     assert!(vec.try_set(0, 5).is_ok());
     assert_eq!(vec.get(0), Some(5));
     let res_set = vec.try_set(1, 20);
-    assert!(matches!(res_set, Err(Error::ValueTooLarge {..})));
+    assert!(matches!(res_set, Err(Error::ValueTooLarge { .. })));
     assert_eq!(vec.get(1), Some(15)); // Value should be unchanged
 }
 
@@ -269,7 +273,7 @@ fn test_extend_from_slice() {
 
     let extension = [3, 4, 5, 6, 7, 8, 9, 10];
     vec.extend_from_slice(&extension);
-    
+
     assert_eq!(vec.len(), 10);
     let expected: Vec<u32> = (1..=10).collect();
     assert_eq!(vec, &expected[..]);

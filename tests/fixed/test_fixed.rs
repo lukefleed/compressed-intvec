@@ -37,7 +37,11 @@ where
 
     // We iterate over a set of strategies to test.
     // `Explicit(0)` is a placeholder that will be replaced by the calculated minimal bits.
-    for strategy in [BitWidth::Minimal, BitWidth::PowerOfTwo, BitWidth::Explicit(0)] {
+    for strategy in [
+        BitWidth::Minimal,
+        BitWidth::PowerOfTwo,
+        BitWidth::Explicit(0),
+    ] {
         let bit_width_strategy = if strategy == BitWidth::Explicit(0) {
             let max_val: W = data
                 .iter()
@@ -190,8 +194,10 @@ macro_rules! test_all_types {
         #[test]
         fn $test_name() {
             // Unsigned types
-            let u_data_8: Vec<u8> =
-                generate_random_vec(100, 200).into_iter().map(|x| x as u8).collect();
+            let u_data_8: Vec<u8> = generate_random_vec(100, 200)
+                .into_iter()
+                .map(|x| x as u8)
+                .collect();
             run_test_for_type::<u8, $W, $E>(&u_data_8, "u8");
 
             let u_data_16: Vec<u16> = generate_random_vec(100, 50_000)
@@ -210,8 +216,10 @@ macro_rules! test_all_types {
             run_test_for_type::<u64, $W, $E>(&u_data_64, "u64");
 
             // Signed types
-            let s_data_8: Vec<i8> =
-                generate_random_signed_vec(100, 100).into_iter().map(|x| x as i8).collect();
+            let s_data_8: Vec<i8> = generate_random_signed_vec(100, 100)
+                .into_iter()
+                .map(|x| x as i8)
+                .collect();
             run_test_for_type::<i8, $W, $E>(&s_data_8, "i8");
 
             let s_data_16: Vec<i16> = generate_random_signed_vec(100, 30_000)
