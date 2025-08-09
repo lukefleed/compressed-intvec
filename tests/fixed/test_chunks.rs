@@ -2,9 +2,6 @@
 
 use compressed_intvec::fixed::{FixedVec, UFixedVec};
 
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
-
 #[test]
 fn test_chunks_exact() {
     let vec: UFixedVec<u32> = (0..100u32).collect();
@@ -111,25 +108,4 @@ fn test_chunks_mut_with_remainder() {
     assert_eq!(vec.get(3), Some(99));
     assert_eq!(vec.get(6), Some(99));
     assert_eq!(vec.get(9), Some(99));
-}
-
-#[test]
-#[cfg(feature = "parallel")]
-fn test_chunks_mut_parallel() {
-    // Max value will be 9999 * 2 = 19998. This needs 15 bits.
-    let mut vec: UFixedVec<u32> = FixedVec::with_capacity(15, 10_000).unwrap();
-    for i in 0..10_000u32 {
-        vec.push(i);
-    }
-
-    vec.chunks_mut(100).par_bridge().for_each(|mut chunk| {
-        for i in 0..chunk.len() {
-            let val = chunk.get(i).unwrap();
-            *chunk.at_mut(i).unwrap() = val * 2;
-        }
-    });
-
-    for i in 0..10_000 {
-        assert_eq!(vec.get(i), Some(i as u32 * 2));
-    }
 }

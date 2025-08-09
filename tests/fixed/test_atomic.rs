@@ -18,6 +18,9 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 // --- Test Data Generation Helpers ---
 
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
@@ -368,4 +371,32 @@ fn test_concurrent_fetch_add_contention() {
         vec.load(0, Ordering::SeqCst),
         NUM_THREADS as u32 * INCREMENTS_PER_THREAD
     );
+}
+
+#[test]
+#[cfg(feature = "parallel")]
+fn test_par_iter_mut_contention() {
+    // This test replaces the unsound `test_chunks_mut_parallel`.
+    // It verifies the new, safe parallel mutation API on AtomicFixedVec.
+    let data: Vec<u32> = (0..10_000).collect();
+    // Max value will be 9999 * 2 = 19998. This needs 15 bits.
+    let vec: UAtomicFixedVec<u32> = UAtomicFixedVec::builder()
+        .bit_width(BitWidth::Explicit(15))
+        .build(&data)
+        .unwrap();
+
+    // Use the new parallel iterator to modify the vector in place.
+    vec.par_iter_mut().for_each(|mut proxy| {
+        *proxy *= 2;
+    });
+
+    // Verify the results sequentially.
+    for i in 0..vec.len() {
+        assert_eq!(
+            vec.load(i, Ordering::Relaxed),
+            data[i] * 2,
+            "Mismatch at index {}",
+            i
+        );
+    }
 }

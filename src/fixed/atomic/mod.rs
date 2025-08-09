@@ -22,9 +22,8 @@
 //!
 //! - **Spanning-Word Operations (Locked)**: For elements that may span the
 //!   boundary between two `AtomicU64` words, operations are protected by a lock.
-//!   This ensures that multi-word updates are fully atomic and prevents "torn writes".
-//!   To minimize contention, this implementation uses "lock striping", where a pool
-//!   of locks is used to protect different regions of the vector.
+//!   The lock serializes the multi-word update, ensuring it is performed atomically
+//!   with respect to both other spanning updates and single-word lock-free updates.
 //!
 //! This design ensures that `AtomicFixedVec` is always as space-efficient as
 //! `FixedVec` while providing robust atomic guarantees for all possible bit-widths.
@@ -70,8 +69,11 @@ use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
 use num_traits::{Bounded, ToPrimitive, WrappingAdd, WrappingSub};
 use parking_lot::Mutex;
 use std::marker::PhantomData;
-use std::ops::{BitAnd, BitOr, BitXor};
+use std::ops::{BitAnd, BitOr, BitXor, Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// A thread-safe `FixedVec` for unsigned integers.
 pub type UAtomicFixedVec<T> = AtomicFixedVec<T>;
@@ -84,6 +86,76 @@ const MAX_LOCKS: usize = 1024;
 const MIN_LOCKS: usize = 2;
 /// A heuristic to determine the stripe size: one lock per this many data words.
 const WORDS_PER_LOCK: usize = 64;
+
+/// A proxy object for mutable access to an element within an `AtomicFixedVec`
+/// during parallel iteration.
+///
+/// This struct is returned by the [`par_iter_mut`](AtomicFixedVec::par_iter_mut)
+/// parallel iterator. It holds a temporary copy of an element's value. When the
+/// proxy is dropped, its `Drop` implementation atomically writes the (potentially
+/// modified) value back into the parent vector.
+#[cfg(feature = "parallel")]
+pub struct AtomicMutProxy<'a, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    vec: &'a AtomicFixedVec<T>,
+    index: usize,
+    value: T,
+}
+
+#[cfg(feature = "parallel")]
+impl<'a, T> AtomicMutProxy<'a, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    /// Creates a new `AtomicMutProxy`.
+    ///
+    /// This is called by `par_iter_mut`. It reads the initial value
+    /// from the vector.
+    fn new(vec: &'a AtomicFixedVec<T>, index: usize) -> Self {
+        let value = vec.load(index, Ordering::Relaxed);
+        Self { vec, index, value }
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl<T> Deref for AtomicMutProxy<'_, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl<T> DerefMut for AtomicMutProxy<'_, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.value
+    }
+}
+
+#[cfg(feature = "parallel")]
+impl<T> Drop for AtomicMutProxy<'_, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
+    /// Writes the potentially modified value back to the `AtomicFixedVec` when the
+    /// proxy goes out of scope.
+    fn drop(&mut self) {
+        // The value is copied before being passed to store.
+        // Relaxed ordering is sufficient here because the synchronization is
+        // handled by Rayon's fork-join model. The writes will be visible after
+        // the parallel block completes.
+        self.vec.store(self.index, self.value, Ordering::Relaxed);
+    }
+}
 
 /// A thread-safe, compressed, randomly accessible vector of integers with
 /// fixed-width encoding, backed by `u64` atomic words.
@@ -179,6 +251,43 @@ where
             Ok(w) => Ok(T::from_word(w)),
             Err(w) => Err(T::from_word(w)),
         }
+    }
+
+    /// Returns a parallel iterator that allows modifying elements of the vector in place.
+    ///
+    /// This method provides a safe way to apply a function to all elements of the
+    /// vector in parallel. Each element is accessed via an [`AtomicMutProxy`],
+    /// which ensures that all modifications are written back atomically.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "parallel")] {
+    /// use compressed_intvec::prelude::*;
+    /// use rayon::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .bit_width(BitWidth::Explicit(8)) // 2*99 = 198, needs 8 bits
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// vec.par_iter_mut().for_each(|mut proxy| {
+    ///     *proxy *= 2;
+    /// });
+    ///
+    /// assert_eq!(vec.load(50, Ordering::Relaxed), 100);
+    /// # }
+    /// ```
+    #[cfg(feature = "parallel")]
+    pub fn par_iter_mut(&self) -> impl ParallelIterator<Item = AtomicMutProxy<'_, T>>
+    where
+        T: Send + Sync,
+    {
+        (0..self.len())
+            .into_par_iter()
+            .map(move |i| AtomicMutProxy::new(self, i))
     }
 }
 
@@ -319,7 +428,7 @@ where
 // --- Private Implementation of Atomic Operations ---
 impl<T> AtomicFixedVec<T>
 where
-    T: Storable<u64>,
+    T: Storable<u64> + Copy + ToPrimitive,
 {
     #[inline(always)]
     fn atomic_load(&self, index: usize, order: Ordering) -> u64 {
@@ -351,52 +460,47 @@ where
 
         if bit_offset + self.bit_width <= u64::BITS as usize {
             // Lock-free path for single-word values.
-            // This uses a manual compare-and-swap (CAS) loop, which can be more
-            // performant than `fetch_update` by avoiding closure overhead and
-            // allowing for more fine-grained control over memory orderings.
             let atomic_word_ref = &self.storage[word_index];
             let store_mask = self.mask << bit_offset;
             let store_value = value << bit_offset;
-
-            // Start with a relaxed load, as we only need atomicity for the final write.
             let mut old_word = atomic_word_ref.load(Ordering::Relaxed);
             loop {
-                // Calculate the new word value by clearing the target bits and ORing the new value.
                 let new_word = (old_word & !store_mask) | store_value;
-
-                // Attempt to swap the old word with the new one.
-                // `compare_exchange_weak` is used as it can be faster inside a loop,
-                // even if it fails spuriously. The failure ordering can be relaxed.
                 match atomic_word_ref.compare_exchange_weak(
                     old_word,
                     new_word,
-                    order, // Use the user-specified ordering on success.
-                    Ordering::Relaxed, // Relaxed ordering is sufficient on failure.
+                    order,
+                    Ordering::Relaxed,
                 ) {
-                    Ok(_) => break, // The store was successful.
-                    Err(x) => old_word = x, // The word was modified by another thread; retry.
+                    Ok(_) => break,
+                    Err(x) => old_word = x,
                 }
             }
         } else {
             // Locked path for values spanning two words.
             let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
-            // SAFETY: The lock guarantees exclusive access, so we can perform non-atomic writes.
-            // The pointers are obtained from a valid, owned Vec.
-            unsafe {
-                let low_word_ptr = self.storage.as_ptr().add(word_index) as *mut u64;
-                let high_word_ptr = self.storage.as_ptr().add(word_index + 1) as *mut u64;
+            // The lock guarantees exclusive access to this multi-word operation.
+            // We still use atomic operations inside to prevent races with the
+            // lock-free path, which might be concurrently accessing one of these words.
+            let low_word_ref = &self.storage[word_index];
+            let high_word_ref = &self.storage[word_index + 1];
 
-                // Modify the lower word.
-                *low_word_ptr &= !(u64::MAX << bit_offset);
-                *low_word_ptr |= value << bit_offset;
+            // Modify the lower word.
+            low_word_ref.fetch_update(order, Ordering::Relaxed, |mut w| {
+                w &= !(u64::MAX << bit_offset);
+                w |= value << bit_offset;
+                Some(w)
+            }).unwrap(); // Should not fail under lock.
 
-                // Modify the higher word.
-                let bits_in_high = (bit_offset + self.bit_width) - u64::BITS as usize;
-                let high_mask = (1u64 << bits_in_high).wrapping_sub(1);
-                *high_word_ptr &= !high_mask;
-                *high_word_ptr |= value >> (u64::BITS as usize - bit_offset);
-            }
+            // Modify the higher word.
+            let bits_in_high = (bit_offset + self.bit_width) - u64::BITS as usize;
+            let high_mask = (1u64 << bits_in_high).wrapping_sub(1);
+            high_word_ref.fetch_update(order, Ordering::Relaxed, |mut w| {
+                w &= !high_mask;
+                w |= value >> (u64::BITS as usize - bit_offset);
+                Some(w)
+            }).unwrap(); // Should not fail under lock.
         }
     }
 
@@ -420,9 +524,7 @@ where
                     order,
                     Ordering::Relaxed,
                 ) {
-                    // If the CAS succeeds, extract and return the old value.
                     Ok(_) => return (old_word >> bit_offset) & self.mask,
-                    // Otherwise, retry with the updated value.
                     Err(x) => old_word = x,
                 }
             }
@@ -430,25 +532,9 @@ where
             // Locked path for spanning values.
             let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
-            // SAFETY: The lock guarantees exclusive access.
-            unsafe {
-                let low_word_ptr = self.storage.as_ptr().add(word_index) as *mut u64;
-                let high_word_ptr = self.storage.as_ptr().add(word_index + 1) as *mut u64;
-
-                let combined_old = (*low_word_ptr >> bit_offset)
-                    | (*high_word_ptr << (u64::BITS as usize - bit_offset));
-                let old_val = combined_old & self.mask;
-
-                *low_word_ptr &= !(u64::MAX << bit_offset);
-                *low_word_ptr |= value << bit_offset;
-
-                let bits_in_high = (bit_offset + self.bit_width) - u64::BITS as usize;
-                let high_mask = (1u64 << bits_in_high).wrapping_sub(1);
-                *high_word_ptr &= !high_mask;
-                *high_word_ptr |= value >> (u64::BITS as usize - bit_offset);
-
-                old_val
-            }
+            let old_val = self.atomic_load(index, Ordering::Relaxed);
+            self.atomic_store(index, value, order);
+            old_val
         }
     }
 
@@ -470,116 +556,42 @@ where
             let atomic_word_ref = &self.storage[word_index];
             let store_mask = self.mask << bit_offset;
             let new_value_shifted = new << bit_offset;
-
-            // The `failure` ordering is important here for the initial load.
             let mut old_word = atomic_word_ref.load(failure);
             loop {
-                // Extract the current value from the bitfield.
                 let old_val_extracted = (old_word >> bit_offset) & self.mask;
-
-                // If the value in the bitfield does not match the expected one, fail immediately.
                 if old_val_extracted != current {
                     return Err(old_val_extracted);
                 }
-
-                // Calculate the new word to be written.
                 let new_word = (old_word & !store_mask) | new_value_shifted;
-
-                // Attempt the atomic exchange.
-                match atomic_word_ref.compare_exchange_weak(
-                    old_word,
-                    new_word,
-                    success,
-                    failure, // Use the specified failure ordering.
-                ) {
-                    Ok(_) => return Ok(current), // Success, return the expected value.
-                    Err(x) => old_word = x, // Failure, the word was updated, retry the loop.
+                match atomic_word_ref.compare_exchange_weak(old_word, new_word, success, failure) {
+                    Ok(_) => return Ok(current),
+                    Err(x) => old_word = x,
                 }
             }
         } else {
             // Locked path for spanning values.
             let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
-            // SAFETY: The lock guarantees exclusive access.
-            unsafe {
-                let low_word_ptr = self.storage.as_ptr().add(word_index) as *mut u64;
-                let high_word_ptr = self.storage.as_ptr().add(word_index + 1) as *mut u64;
-
-                let combined_old = (*low_word_ptr >> bit_offset)
-                    | (*high_word_ptr << (u64::BITS as usize - bit_offset));
-                let old_val = combined_old & self.mask;
-
-                if old_val != current {
-                    return Err(old_val);
-                }
-
-                *low_word_ptr &= !(u64::MAX << bit_offset);
-                *low_word_ptr |= new << bit_offset;
-
-                let bits_in_high = (bit_offset + self.bit_width) - u64::BITS as usize;
-                let high_mask = (1u64 << bits_in_high).wrapping_sub(1);
-                *high_word_ptr &= !high_mask;
-                *high_word_ptr |= new >> (u64::BITS as usize - bit_offset);
-
-                Ok(current)
+            let old_val = self.atomic_load(index, failure);
+            if old_val != current {
+                return Err(old_val);
             }
+            self.atomic_store(index, new, success);
+            Ok(current)
         }
     }
 
     /// Generic implementation for all Read-Modify-Write (RMW) operations.
     #[inline(always)]
     fn atomic_rmw(&self, index: usize, val: T, order: Ordering, op: impl Fn(T, T) -> T) -> T {
-        assert!(index < self.len, "RMW index out of bounds");
-        let bit_pos = index * self.bit_width;
-        let word_index = bit_pos / u64::BITS as usize;
-        let bit_offset = bit_pos % u64::BITS as usize;
-
-        if bit_offset + self.bit_width <= u64::BITS as usize {
-            // Lock-free path
-            let atomic_word_ref = &self.storage[word_index];
-            let store_mask = self.mask << bit_offset;
-            let mut old_word = atomic_word_ref.load(Ordering::Relaxed);
-            loop {
-                // 1. Extract the current ENCODED value from the word.
-                let old_val_encoded = (old_word >> bit_offset) & self.mask;
-
-                // 2. DECODE the value to perform the operation on the actual numbers.
-                let old_val_decoded = T::from_word(old_val_encoded);
-
-                // 3. Perform the user-provided operation on the DECODED values.
-                let new_val_decoded = op(old_val_decoded, val);
-
-                // 4. RE-ENCODE the result before storing it.
-                let new_val_encoded = T::into_word(new_val_decoded) & self.mask;
-
-                // 5. Prepare the new word for the CAS operation.
-                let new_word = (old_word & !store_mask) | (new_val_encoded << bit_offset);
-
-                // 6. Attempt the compare-and-swap.
-                match atomic_word_ref.compare_exchange_weak(
-                    old_word,
-                    new_word,
-                    order,
-                    Ordering::Relaxed,
-                ) {
-                    Ok(_) => return old_val_decoded, // Return the *old* DECODED value on success.
-                    Err(x) => old_word = x,
-                }
+        // This RMW is implemented as a CAS loop on top of `compare_exchange`.
+        let mut current = self.load(index, Ordering::Relaxed);
+        loop {
+            let new = op(current, val);
+            match self.compare_exchange(index, current, new, order, Ordering::Relaxed) {
+                Ok(old) => return old,
+                Err(actual) => current = actual,
             }
-        } else {
-            // Locked path
-            let lock_index = word_index & (self.locks.len() - 1);
-            let _guard = self.locks[lock_index].lock();
-
-            // The logic inside the lock is simpler as it's serialized.
-            let old_val_encoded = self.atomic_load(index, Ordering::Relaxed);
-            let old_val_decoded = T::from_word(old_val_encoded);
-
-            let new_val_decoded = op(old_val_decoded, val);
-            let new_val_encoded = T::into_word(new_val_decoded) & self.mask;
-
-            self.atomic_store(index, new_val_encoded, Ordering::Relaxed);
-            old_val_decoded
         }
     }
 }
