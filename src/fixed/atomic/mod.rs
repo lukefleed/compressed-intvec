@@ -38,7 +38,7 @@
 //! use std::sync::atomic::Ordering;
 //!
 //! // Create from a slice using the builder.
-//! let initial_data: Vec<u32> = vec![1, 2, 3, 4, 5];
+//! let initial_data: Vec<u32> = vec!;
 //! let atomic_vec: Arc<UAtomicFixedVec<u32>> = Arc::new(
 //!     AtomicFixedVec::builder()
 //!         .build(&initial_data)
@@ -65,8 +65,9 @@ pub mod macros;
 pub mod builder;
 
 use crate::fixed::traits::Storable;
-use crate::fixed::{BitWidth, Error};
-use num_traits::{ToPrimitive};
+use crate::fixed::{BitWidth, Error, FixedVec};
+use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
+use num_traits::{Bounded, ToPrimitive};
 use parking_lot::Mutex;
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -76,9 +77,12 @@ pub type UAtomicFixedVec<T> = AtomicFixedVec<T>;
 /// A thread-safe `FixedVec` for signed integers.
 pub type SAtomicFixedVec<T> = AtomicFixedVec<T>;
 
-/// The number of locks used for lock striping. A power of two is chosen
-/// to allow fast bitwise AND instead of a slower modulo operation.
-const NUM_LOCKS: usize = 256;
+/// The upper bound on the number of locks to prevent excessive memory usage.
+const MAX_LOCKS: usize = 1024;
+/// The minimum number of locks to create, ensuring some striping even for small vectors.
+const MIN_LOCKS: usize = 2;
+/// A heuristic to determine the stripe size: one lock per this many data words.
+const WORDS_PER_LOCK: usize = 64;
 
 /// A thread-safe, compressed, randomly accessible vector of integers with
 /// fixed-width encoding, backed by `u64` atomic words.
@@ -126,6 +130,12 @@ where
         self.bit_width
     }
 
+    /// Returns a read-only slice of the underlying atomic storage words.
+    #[inline(always)]
+    pub fn as_slice(&self) -> &[AtomicU64] {
+        &self.storage
+    }
+
     /// Atomically loads the value at `index`.
     #[inline(always)]
     pub fn load(&self, index: usize, order: Ordering) -> T {
@@ -171,6 +181,86 @@ where
     }
 }
 
+// Extended atomic RMW operations
+impl<T> AtomicFixedVec<T>
+where
+    T: Storable<u64> + Bounded + Copy + ToPrimitive,
+{
+    /// Atomically adds to the value at `index`, returning the previous value.
+    #[inline(always)]
+    pub fn fetch_add(&self, index: usize, val: T, order: Ordering) -> T {
+        let val_w = T::into_word(val);
+        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a.wrapping_add(b));
+        T::from_word(result_w)
+    }
+
+    /// Atomically subtracts from the value at `index`, returning the previous value.
+    #[inline(always)]
+    pub fn fetch_sub(&self, index: usize, val: T, order: Ordering) -> T {
+        let val_w = T::into_word(val);
+        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a.wrapping_sub(b));
+        T::from_word(result_w)
+    }
+
+    /// Atomically performs a bitwise AND on the value at `index`, returning the previous value.
+    #[inline(always)]
+    pub fn fetch_and(&self, index: usize, val: T, order: Ordering) -> T {
+        let val_w = T::into_word(val);
+        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a & b);
+        T::from_word(result_w)
+    }
+
+    /// Atomically performs a bitwise OR on the value at `index`, returning the previous value.
+    #[inline(always)]
+    pub fn fetch_or(&self, index: usize, val: T, order: Ordering) -> T {
+        let val_w = T::into_word(val);
+        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a | b);
+        T::from_word(result_w)
+    }
+
+    /// Atomically performs a bitwise XOR on the value at `index`, returning the previous value.
+    #[inline(always)]
+    pub fn fetch_xor(&self, index: usize, val: T, order: Ordering) -> T {
+        let val_w = T::into_word(val);
+        let result_w = self.atomic_rmw(index, val_w, order, |a, b| a ^ b);
+        T::from_word(result_w)
+    }
+
+    /// Atomically computes the maximum of the value at `index` and `val`, returning the previous value.
+    #[inline(always)]
+    pub fn fetch_max(&self, index: usize, val: T, order: Ordering) -> T
+    where
+        T: Ord,
+    {
+        let val_w = T::into_word(val);
+        let result_w = self.atomic_rmw(index, val_w, order, |a, b| {
+            if T::from_word(a) > T::from_word(b) {
+                a
+            } else {
+                b
+            }
+        });
+        T::from_word(result_w)
+    }
+
+    /// Atomically computes the minimum of the value at `index` and `val`, returning the previous value.
+    #[inline(always)]
+    pub fn fetch_min(&self, index: usize, val: T, order: Ordering) -> T
+    where
+        T: Ord,
+    {
+        let val_w = T::into_word(val);
+        let result_w = self.atomic_rmw(index, val_w, order, |a, b| {
+            if T::from_word(a) < T::from_word(b) {
+                a
+            } else {
+                b
+            }
+        });
+        T::from_word(result_w)
+    }
+}
+
 // `TryFrom` implementation.
 impl<T> TryFrom<&[T]> for AtomicFixedVec<T>
 where
@@ -212,7 +302,18 @@ where
         let buffer_len = if len == 0 { 0 } else { num_words + 1 }; // +1 for padding
         let storage = (0..buffer_len).map(|_| AtomicU64::new(0)).collect();
 
-        let locks = (0..NUM_LOCKS).map(|_| Mutex::new(())).collect();
+        // Heuristic to determine the number of locks for striping.
+        let num_locks = if len == 0 {
+            MIN_LOCKS
+        } else {
+            let num_cores = std::thread::available_parallelism().map_or(MIN_LOCKS, |n| n.get());
+            let target_locks = (num_words / WORDS_PER_LOCK).max(1);
+            (target_locks.max(num_cores) * 2)
+                .next_power_of_two()
+                .min(MAX_LOCKS)
+        };
+
+        let locks = (0..num_locks).map(|_| Mutex::new(())).collect();
 
         Ok(Self {
             storage,
@@ -242,11 +343,12 @@ where
             (word >> bit_offset) & self.mask
         } else {
             // Locked path for spanning values.
-            let lock_index = word_index & (NUM_LOCKS - 1);
+            let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
             let low_word = self.storage[word_index].load(Ordering::Relaxed);
             let high_word = self.storage[word_index + 1].load(Ordering::Relaxed);
-            let combined = (low_word >> bit_offset) | (high_word << (u64::BITS as usize - bit_offset));
+            let combined =
+                (low_word >> bit_offset) | (high_word << (u64::BITS as usize - bit_offset));
             combined & self.mask
         }
     }
@@ -287,7 +389,7 @@ where
             }
         } else {
             // Locked path for values spanning two words.
-            let lock_index = word_index & (NUM_LOCKS - 1);
+            let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
             // SAFETY: The lock guarantees exclusive access, so we can perform non-atomic writes.
             // The pointers are obtained from a valid, owned Vec.
@@ -336,14 +438,15 @@ where
             }
         } else {
             // Locked path for spanning values.
-            let lock_index = word_index & (NUM_LOCKS - 1);
+            let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
             // SAFETY: The lock guarantees exclusive access.
             unsafe {
                 let low_word_ptr = self.storage.as_ptr().add(word_index) as *mut u64;
                 let high_word_ptr = self.storage.as_ptr().add(word_index + 1) as *mut u64;
 
-                let combined_old = (*low_word_ptr >> bit_offset) | (*high_word_ptr << (u64::BITS as usize - bit_offset));
+                let combined_old = (*low_word_ptr >> bit_offset)
+                    | (*high_word_ptr << (u64::BITS as usize - bit_offset));
                 let old_val = combined_old & self.mask;
 
                 *low_word_ptr &= !(u64::MAX << bit_offset);
@@ -377,7 +480,7 @@ where
             let atomic_word_ref = &self.storage[word_index];
             let store_mask = self.mask << bit_offset;
             let new_value_shifted = new << bit_offset;
-            
+
             // The `failure` ordering is important here for the initial load.
             let mut old_word = atomic_word_ref.load(failure);
             loop {
@@ -405,14 +508,15 @@ where
             }
         } else {
             // Locked path for spanning values.
-            let lock_index = word_index & (NUM_LOCKS - 1);
+            let lock_index = word_index & (self.locks.len() - 1);
             let _guard = self.locks[lock_index].lock();
             // SAFETY: The lock guarantees exclusive access.
             unsafe {
                 let low_word_ptr = self.storage.as_ptr().add(word_index) as *mut u64;
                 let high_word_ptr = self.storage.as_ptr().add(word_index + 1) as *mut u64;
 
-                let combined_old = (*low_word_ptr >> bit_offset) | (*high_word_ptr << (u64::BITS as usize - bit_offset));
+                let combined_old = (*low_word_ptr >> bit_offset)
+                    | (*high_word_ptr << (u64::BITS as usize - bit_offset));
                 let old_val = combined_old & self.mask;
 
                 if old_val != current {
@@ -430,5 +534,168 @@ where
                 Ok(current)
             }
         }
+    }
+
+    /// Generic implementation for all Read-Modify-Write (RMW) operations.
+    #[inline(always)]
+    fn atomic_rmw(
+        &self,
+        index: usize,
+        val: u64,
+        order: Ordering,
+        op: impl Fn(u64, u64) -> u64,
+    ) -> u64 {
+        assert!(index < self.len, "RMW index out of bounds");
+        let bit_pos = index * self.bit_width;
+        let word_index = bit_pos / u64::BITS as usize;
+        let bit_offset = bit_pos % u64::BITS as usize;
+
+        if bit_offset + self.bit_width <= u64::BITS as usize {
+            // Lock-free path
+            let atomic_word_ref = &self.storage[word_index];
+            let store_mask = self.mask << bit_offset;
+            let mut old_word = atomic_word_ref.load(Ordering::Relaxed);
+            loop {
+                let old_val_extracted = (old_word >> bit_offset) & self.mask;
+                let new_val_extracted = op(old_val_extracted, val) & self.mask;
+                let new_word = (old_word & !store_mask) | (new_val_extracted << bit_offset);
+
+                match atomic_word_ref.compare_exchange_weak(
+                    old_word,
+                    new_word,
+                    order,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => return old_val_extracted,
+                    Err(x) => old_word = x,
+                }
+            }
+        } else {
+            // Locked path
+            let lock_index = word_index & (self.locks.len() - 1);
+            let _guard = self.locks[lock_index].lock();
+            let old_val = self.atomic_load(index, Ordering::Relaxed);
+            let new_val = op(old_val, val) & self.mask;
+            self.atomic_store(index, new_val, Ordering::Relaxed);
+            old_val
+        }
+    }
+}
+
+// --- Conversions between AtomicFixedVec and FixedVec ---
+
+impl<T, W, E> From<FixedVec<T, W, E, Vec<W>>> for AtomicFixedVec<T>
+where
+    T: Storable<W> + Storable<u64>,
+    W: crate::fixed::traits::Word,
+    E: dsi_bitstream::prelude::Endianness,
+{
+    /// Creates an `AtomicFixedVec` from an owned `FixedVec`.
+    /// This is a zero-copy operation that re-uses the allocated buffer.
+    fn from(fixed_vec: FixedVec<T, W, E, Vec<W>>) -> Self {
+        // SAFETY: This transmutation is safe because `AtomicU64` and `u64` have
+        // the same in-memory representation. We are taking ownership of the Vec,
+        // ensuring no other references to the non-atomic data exist.
+        let storage = unsafe {
+            let mut md = std::mem::ManuallyDrop::new(fixed_vec.bits);
+            Vec::from_raw_parts(md.as_mut_ptr() as *mut AtomicU64, md.len(), md.capacity())
+        };
+
+        let num_words = (fixed_vec.len * fixed_vec.bit_width).div_ceil(u64::BITS as usize);
+        let num_locks = if fixed_vec.len == 0 {
+            MIN_LOCKS
+        } else {
+            let num_cores = std::thread::available_parallelism().map_or(MIN_LOCKS, |n| n.get());
+            let target_locks = (num_words / WORDS_PER_LOCK).max(1);
+            (target_locks.max(num_cores) * 2)
+                .next_power_of_two()
+                .min(MAX_LOCKS)
+        };
+        let locks = (0..num_locks).map(|_| Mutex::new(())).collect();
+
+        Self {
+            storage,
+            locks,
+            bit_width: fixed_vec.bit_width,
+            mask: fixed_vec.mask.to_u64().unwrap(),
+            len: fixed_vec.len,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> From<AtomicFixedVec<T>> for FixedVec<T, u64, dsi_bitstream::prelude::LE, Vec<u64>>
+where
+    T: Storable<u64>,
+{
+    /// Creates a `FixedVec` from an owned `AtomicFixedVec`.
+    /// This is a zero-copy operation that re-uses the allocated buffer.
+    fn from(atomic_vec: AtomicFixedVec<T>) -> Self {
+        // SAFETY: This transmutation is safe because `u64` and `AtomicU64` have
+        // the same in-memory representation. We are taking ownership of the Vec,
+        // ensuring no other references to the atomic data exist.
+        let bits = unsafe {
+            let mut md = std::mem::ManuallyDrop::new(atomic_vec.storage);
+            Vec::from_raw_parts(md.as_mut_ptr() as *mut u64, md.len(), md.capacity())
+        };
+
+        unsafe { FixedVec::new_unchecked(bits, atomic_vec.len, atomic_vec.bit_width) }
+    }
+}
+
+// --- MemDbg and MemSize Implementations ---
+
+impl<T> MemSize for AtomicFixedVec<T>
+where
+    T: Storable<u64>,
+{
+    fn mem_size(&self, flags: SizeFlags) -> usize {
+        // Since `parking_lot::Mutex` does not implement `CopyType`, we must calculate
+        // the size of the `locks` vector manually.
+        let locks_size = if flags.contains(SizeFlags::CAPACITY) {
+            self.locks.capacity() * core::mem::size_of::<Mutex<()>>()
+        } else {
+            self.locks.len() * core::mem::size_of::<Mutex<()>>()
+        };
+
+        core::mem::size_of::<Self>()
+            + self.storage.mem_size(flags)
+            + core::mem::size_of::<Vec<Mutex<()>>>()
+            + locks_size
+    }
+}
+
+impl<T: Storable<u64>> MemDbgImpl for AtomicFixedVec<T> {
+    fn _mem_dbg_rec_on(
+        &self,
+        writer: &mut impl core::fmt::Write,
+        total_size: usize,
+        max_depth: usize,
+        prefix: &mut String,
+        _is_last: bool,
+        flags: DbgFlags,
+    ) -> core::fmt::Result {
+        // Manual implementation to avoid trying to lock and inspect mutexes.
+        self.bit_width._mem_dbg_rec_on(
+            writer,
+            total_size,
+            max_depth,
+            prefix,
+            false,
+            flags,
+        )?;
+        self.len
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
+        self.mask
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
+
+        // Display the size of the lock vector, but do not recurse into it.
+        let locks_size = core::mem::size_of::<Vec<Mutex<()>>>()
+            + self.locks.capacity() * core::mem::size_of::<Mutex<()>>();
+        locks_size._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
+
+        self.storage
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, true, flags)?;
+        Ok(())
     }
 }

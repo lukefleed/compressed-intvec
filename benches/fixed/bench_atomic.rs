@@ -49,8 +49,25 @@ use std::thread;
 use std::time::Duration;
 use sux::prelude::AtomicBitFieldSlice;
 
-const VECTOR_SIZE: usize = 10_000_000;
-const NUM_ACCESSES: usize = 1_000_000;
+const VECTOR_SIZE: usize = 1_000_000;
+const NUM_ACCESSES: usize = 100_000;
+
+/// Generates a vector with uniformly random values up to a given maximum.
+///
+/// # Arguments
+/// * `size` - The number of elements to generate.
+/// * `max_val_exclusive` - The exclusive upper bound for the random values.
+fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
+    let mut rng = SmallRng::seed_from_u64(42);
+    let limit = if max_val_exclusive == 0 || max_val_exclusive > u64::MAX {
+        u64::MAX
+    } else {
+        max_val_exclusive
+    };
+
+    (0..size).map(|_| rng.random_range(0..limit)).collect()
+}
+
 
 /// Defines the contention pattern for multi-threaded benchmarks.
 #[derive(Debug, Clone, Copy)]
@@ -95,6 +112,9 @@ fn register_single_thread_benches(
         (1u64 << bit_width) - 1
     };
 
+    // Generate a single set of initial data for all structures in this benchmark group.
+    let initial_data = generate_random_vec(VECTOR_SIZE, 1 << bit_width as u32);
+
     for &order in &[Ordering::SeqCst, Ordering::Relaxed] {
         let mut group = c.benchmark_group(format!(
             "AtomicOps/{}bit/SingleThread/{}",
@@ -102,15 +122,19 @@ fn register_single_thread_benches(
             ordering_to_str(order)
         ));
 
-        // Baseline: std::sync::atomic
-        let std_vec: Vec<AtomicU64> = (0..VECTOR_SIZE).map(|_| AtomicU64::new(0)).collect();
-        // Our AtomicFixedVec
-        let initial_data = vec![0u64; VECTOR_SIZE];
+        // Baseline: std::sync::atomic, initialized with random data.
+        let std_vec: Vec<AtomicU64> = initial_data
+            .iter()
+            .map(|&val| AtomicU64::new(val))
+            .collect();
+
+        // Our AtomicFixedVec, initialized with the same random data.
         let vec = UAtomicFixedVec::<u64>::builder()
             .bit_width(BitWidth::Explicit(bit_width))
             .build(&initial_data)
             .unwrap();
-        // sux::bits::AtomicBitFieldVec
+
+        // sux::bits::AtomicBitFieldVec, initialized with the same random data.
         let sux_vec_storage: Vec<AtomicU64> =
             (0..(VECTOR_SIZE * bit_width).div_ceil(u64::BITS as usize) + 2)
                 .map(|_| AtomicU64::new(0))
@@ -122,6 +146,10 @@ fn register_single_thread_benches(
                 VECTOR_SIZE,
             )
         };
+        for (i, &val) in initial_data.iter().enumerate() {
+            unsafe { sux_vec.set_atomic_unchecked(i, val, Ordering::Relaxed) };
+        }
+
 
         // --- Benchmark Load ---
         group.bench_function("Baseline_Vec<AtomicU64>/load", |b| {
@@ -209,6 +237,8 @@ fn register_multi_thread_benches(
     } else {
         (1u64 << bit_width) - 1
     };
+    // Generate a single set of initial data for all structures in this benchmark group.
+    let initial_data = generate_random_vec(VECTOR_SIZE, 1 << bit_width as u32);
     let indices_chunks: Vec<_> = access_indices.chunks(NUM_ACCESSES / num_threads).collect();
     let values_chunks: Vec<_> = access_values.chunks(NUM_ACCESSES / num_threads).collect();
     let high_contention_index = VECTOR_SIZE / 2;
@@ -223,26 +253,40 @@ fn register_multi_thread_benches(
                 ordering_to_str(order)
             ));
 
-            // Baseline: std::sync::atomic
+            // Baseline: std::sync::atomic, initialized with shared random data.
             let std_vec = Arc::new(
-                (0..VECTOR_SIZE)
-                    .map(|_| AtomicU64::new(0))
+                initial_data
+                    .iter()
+                    .map(|&v| AtomicU64::new(v))
                     .collect::<Vec<_>>(),
             );
-            // Our AtomicFixedVec
-            let initial_data = vec![0u64; VECTOR_SIZE];
+
+            // Our AtomicFixedVec, initialized with shared random data.
             let vec = Arc::new(
                 UAtomicFixedVec::<u64>::builder()
                     .bit_width(BitWidth::Explicit(bit_width))
                     .build(&initial_data)
                     .unwrap(),
             );
-            // sux::bits::AtomicBitFieldVec
-            let sux_vec_storage: Arc<Vec<AtomicU64>> = Arc::new(
-                (0..(VECTOR_SIZE * bit_width).div_ceil(u64::BITS as usize) + 2)
+
+            // sux::bits::AtomicBitFieldVec, initialized with shared random data.
+            let sux_vec_storage: Arc<Vec<AtomicU64>> = Arc::new({
+                let storage = (0..(VECTOR_SIZE * bit_width).div_ceil(u64::BITS as usize) + 2)
                     .map(|_| AtomicU64::new(0))
-                    .collect(),
-            );
+                    .collect::<Vec<_>>();
+                let sux_temp = unsafe {
+                    sux::bits::AtomicBitFieldVec::<u64, _>::from_raw_parts(
+                        storage.as_slice(),
+                        bit_width,
+                        VECTOR_SIZE,
+                    )
+                };
+                for (i, &val) in initial_data.iter().enumerate() {
+                    unsafe { sux_temp.set_atomic_unchecked(i, val, Ordering::Relaxed) };
+                }
+                storage
+            });
+
 
             // --- Benchmark Load ---
             group.bench_function("Baseline_Vec<AtomicU64>/load", |b| {
@@ -449,9 +493,9 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(100)
-        .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(5));
+        .sample_size(10)
+        .warm_up_time(Duration::from_millis(10))
+        .measurement_time(Duration::from_secs(1));
 
     targets = benchmark_atomic_ops
 }

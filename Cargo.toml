@@ -63,10 +63,6 @@ name = "bench_atomic"
 harness = false
 path = "benches/fixed/bench_atomic.rs"
 
-[[bench]]
-name = "bench_load_overhead"
-harness = false
-path = "benches/fixed/bench_load_overhead.rs"
 
 [features]
 default = ["parallel"]

@@ -18,9 +18,6 @@
 //!
 //! ## Basic Usage
 //!
-//! You can create a [`FixedVec`] from a slice of data. The builder will
-//! automatically determine the minimal number of bits required.
-//!
 //! ```
 //! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
 //!
@@ -47,10 +44,9 @@
 //! For performance-critical applications, you can specify the bit width strategy.
 //! Using a power of two can lead to faster access times.
 //!
-//! ```
-//! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
+//! ```//! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
 //!
-//! let data: &[u32] = &[10, 20, 30, 40, 50];
+//! let data: &[u32] = &;
 //!
 //! // The values require 6 bits, but we can force it to use 8 (a power of two).
 //! let vec: UFixedVec<u32> = FixedVec::builder()
@@ -214,15 +210,15 @@ pub struct FixedVec<
     B: AsRef<[W]> = Vec<W>,
 > {
     /// The underlying storage for the bit-packed data.
-    bits: B,
+    pub bits: B,
     /// The number of bits used to encode each element.
-    bit_width: usize,
+    pub bit_width: usize,
     /// A bitmask with the lowest `bit_width` bits set to one.
-    mask: W,
+    pub mask: W,
     /// The number of elements in the vector.
-    len: usize,
+    pub len: usize,
     /// Zero-sized markers for the generic type parameters `T`, `W`, and `E`.
-    _phantom: PhantomData<(T, W, E)>,
+    pub _phantom: PhantomData<(T, W, E)>,
 }
 
 // `FixedVec` builder implementation.
@@ -244,7 +240,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
     ///
-    /// let data: &[u32] = &[100, 200, 300, 400];
+    /// let data: &[u32] = &;
     /// let vec: UFixedVec<u32> = FixedVec::builder()
     ///     .bit_width(BitWidth::Minimal)
     ///     .build(data)
@@ -409,7 +405,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let data: &[u32] = &[10, 20, 30];
+    /// let data: &[u32] = &;
     /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
     ///
     /// assert_eq!(vec.get(1), Some(20));
@@ -534,7 +530,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let data: &[u32] = &[10, 20, 30];
+    /// let data: &[u32] = &;
     /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
     /// let mut iter = vec.iter();
     ///
@@ -664,7 +660,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let data: &[u32] = &[10, 20, 30, 40, 50];
+    /// let data: &[u32] = &;
     /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
     ///
     /// assert_eq!(vec.binary_search(&30), Ok(2));
@@ -1391,7 +1387,7 @@ where
     /// ```
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
     ///
-    /// let data: &[u32] = &[10, 20, 30];
+    /// let data: &[u32] = &;
     /// let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(data).unwrap();
     ///
     /// vec.set(1, 99);

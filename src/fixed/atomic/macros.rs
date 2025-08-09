@@ -52,6 +52,10 @@ use crate::fixed::traits::Storable;
 use num_traits::ToPrimitive;
 
 /// A hidden helper function for the `atomic_fixed_vec![...]` macro variant.
+///
+/// This function is not intended for direct use. It is called by the macro
+/// to construct an `AtomicFixedVec` from a slice of elements, using the
+/// default builder settings (`BitWidth::Minimal`).
 #[doc(hidden)]
 pub fn from_slice<T>(slice: &[T]) -> AtomicFixedVec<T>
 where
@@ -62,6 +66,10 @@ where
 }
 
 /// A hidden helper function for the `atomic_fixed_vec![elem; len]` macro variant.
+///
+/// This function is not intended for direct use. It is called by the macro
+/// to construct an `AtomicFixedVec` by repeating an element a specified number
+/// of times.
 #[doc(hidden)]
 pub fn from_repetition<T>(elem: T, len: usize) -> AtomicFixedVec<T>
 where
