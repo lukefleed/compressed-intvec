@@ -21,7 +21,7 @@ exclude = [".github/*", "images/*"]
 atomic = "0.5.3"
 bytemuck = { version = "1.23.1", optional = true }
 common_traits = "0.12.0"
-dsi-bitstream = "0.5.0"
+dsi-bitstream = {version = "0.5.0", features = ["mem_dbg"]}
 mem_dbg = "0.3.0"
 num-traits = "0.2.19"
 parking_lot = "0.12.4"

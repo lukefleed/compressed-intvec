@@ -16,7 +16,7 @@ fn main() {
 
     // Create an IntVec with a generic Gamma encoding.
     let gamma_intvec = LEIntVec::builder(&data)
-        .codec(VariableCodecSpec::Gamma)
+        .codec(VariableCodecSpec::Delta)
         .build()
         .unwrap();
 
