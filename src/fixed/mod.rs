@@ -10,8 +10,8 @@
 //!
 //! ### Genericity
 //! The design is generic over four parameters: `FixedVec<T, W, E, B>`.
-//! - `T`: The element type as seen by the user (e.g., `u32`, `i16`), constrained by the `Storable` trait.
-//! - `W`: The underlying unsigned integer type used for storage (e.g., `u64`, `usize`), constrained by the [`Word`] trait.
+//! - `T`: The element type as seen by the user (e.g., [`u32`], [`i16`]), constrained by the `Storable` trait.
+//! - `W`: The underlying unsigned integer type used for storage (e.g., [`u64`], `usize`), constrained by the [`Word`] trait.
 //! - `E`: The [`Endianness`] (e.g., [`LE`] or [`BE`]) for bit-level operations.
 //! - `B`: The backing buffer, which abstracts over ownership. This allows [`FixedVec`] to be an owned container (e.g., `Vec<W>`) or a zero-copy, borrowed view (e.g., `&[W]`).
 //!
@@ -33,7 +33,7 @@
 //!   concepts of genericity and proxy-based mutability described above.
 //!
 //! - [`AtomicFixedVec`]: A thread-safe variant for concurrent applications. It provides an
-//!   API analogous to Rust's standard atomic types (`load`, `store`, `fetch_add`, etc.).
+//!   API analogous to Rust's standard atomic types ([`load`](AtomicFixedVec::load), [`store`](AtomicFixedVec::store), [`fetch_add`](AtomicFixedVec::fetch_add), etc.).
 //!   It uses lock-free atomic instructions for elements contained within a single machine word and
 //!   a fine-grained locking strategy (lock striping) for elements that span word boundaries. This
 //!   hybrid approach ensures thread safety for any `bit-width` configuration.
@@ -95,12 +95,40 @@
 //!
 //! ## Padding
 //!
-//! To ensure safe and efficient memory access, [`FixedVec`] adds two padding
-//! words at the end of its storage buffer. This padding prevents out-of-bounds
+//! To ensure safe and efficient memory access, [`FixedVec`] adds one padding
+//! word at the end of its storage buffer. This padding prevents out-of-bounds
 //! reads in methods like [`get_unchecked`](FixedVec::get_unchecked) and is a
 //! prerequisite for unaligned access with [`get_unaligned_unchecked`](FixedVec::get_unaligned_unchecked).
 //! The builders handle this padding automatically. When creating a [`FixedVec`] from raw parts,
 //! it is the caller's responsibility to ensure this padding is present.
+//!
+//! # Common Type Aliases
+//!
+//! To simplify usage, this crate provides several type aliases for common [`FixedVec`]
+//! configurations. In most cases, you should prefer using these aliases over the
+//! fully generic `FixedVec<T, W, E, B>` struct.
+//!
+//! ## General-Purpose Aliases
+//!
+//! These aliases use `usize` for the storage word, which is often the most
+//! efficient choice for the target architecture.
+//!
+//! - [`UFixedVec<T>`]: For unsigned integers (e.g., [`u8`], [`u16`], [`u32`]).
+//! - [`SFixedVec<T>`]: For signed integers (e.g., [`i8`], [`i16`], [`i32`]).
+//!
+//! ## Concrete Aliases for [`u64`]/[`i64`]
+//!
+//! These aliases are specialized for [`u64`]/[`i64`] elements stored in [`u64`] words,
+//! which is a common pattern in high-performance computing and data-intensive
+//! applications.
+//!
+//! - [`LEFixedVec`]: [`u64`] elements, Little-Endian.
+//! - [`BEFixedVec`]: [`u64`] elements, Big-Endian.
+//! - [`LESFixedVec`]: [`i64`] elements, Little-Endian.
+//! - [`BESFixedVec`]: [`i64`] elements, Big-Endian.
+//!
+//! The `atomic` module provides a similar set of aliases like [`UAtomicFixedVec`]
+//! and [`SAtomicFixedVec`].
 
 // Declare and export submodules.
 #[macro_use]
@@ -139,26 +167,26 @@ pub use atomic::{AtomicFixedVec, SAtomicFixedVec, UAtomicFixedVec};
 ///
 /// This is a convenient alias for a common configuration. The element type `T`
 /// can be any unsigned integer that implements [`Storable`], such as `u8`, `u16`,
-/// `u32`, `u64`, `u128`, or `usize`.
+/// `u32`, [`u64`], `u128`, or `usize`.
 pub type UFixedVec<T, B = Vec<usize>> = FixedVec<T, usize, LE, B>;
 
 /// A [`FixedVec`] for signed integers with a `usize` word and Little-Endian layout.
 ///
 /// This alias is suitable for general-purpose use with signed types like `i8`,
-/// `i16`, `i32`, `i64`, `i128`, or `isize`.
+/// `i16`, `i32`, [`i64`], `i128`, or `isize`.
 pub type SFixedVec<T, B = Vec<usize>> = FixedVec<T, usize, LE, B>;
 
-// --- Concrete Aliases for `u64`/`i64` elements ---
+// --- Concrete Aliases for [`u64`]/[`i64`] elements ---
 // These are provided for common use cases and backward compatibility.
 
-/// A [`FixedVec`] for `u64` elements with a `u64` backend and Little-Endian layout.
+/// A [`FixedVec`] for [`u64`] elements with a [`u64`] backend and Little-Endian layout.
 pub type LEFixedVec<B = Vec<u64>> = FixedVec<u64, u64, LE, B>;
-/// A [`FixedVec`] for `i64` elements with a `u64` backend and Little-Endian layout.
+/// A [`FixedVec`] for [`i64`] elements with a [`u64`] backend and Little-Endian layout.
 pub type LESFixedVec<B = Vec<u64>> = FixedVec<i64, u64, LE, B>;
 
-/// A [`FixedVec`] for `u64` elements with a `u64` backend and Big-Endian layout.
+/// A [`FixedVec`] for [`u64`] elements with a [`u64`] backend and Big-Endian layout.
 pub type BEFixedVec<B = Vec<u64>> = FixedVec<u64, u64, BE, B>;
-/// A [`FixedVec`] for `i64` elements with a `u64` backend and Big-Endian layout.
+/// A [`FixedVec`] for [`i64`] elements with a [`u64`] backend and Big-Endian layout.
 pub type BESFixedVec<B = Vec<u64>> = FixedVec<i64, u64, BE, B>;
 
 /// Specifies the strategy for determining the number of bits for each integer.
@@ -166,6 +194,18 @@ pub type BESFixedVec<B = Vec<u64>> = FixedVec<i64, u64, BE, B>;
 /// This enum controls how the bit width of a [`FixedVec`] is determined during
 /// its construction. The choice of strategy involves a trade-off between memory
 /// usage and random access performance.
+///
+/// # Performance Considerations
+///
+/// - **[`Minimal`](BitWidth::Minimal) vs. [`PowerOfTwo`](BitWidth::PowerOfTwo)**: While [`Minimal`](BitWidth::Minimal) provides the most compact
+///   storage, [`PowerOfTwo`](BitWidth::PowerOfTwo) can offer better performance for certain operations.
+///   When the `bit_width` is a power of two (e.g., 8, 16, 32) and aligns with
+///   word boundaries, some in-place operations like [`map_in_place`](FixedVec::map_in_place) can use a
+///   faster, word-at-a-time algorithm.
+///
+/// - **[`Explicit`](BitWidth::Explicit)**: This is the fastest strategy at construction time, as it
+///   avoids the need to iterate through the input data to find the maximum
+///   value. Use this when the required bit width is known in advance.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BitWidth {
     /// Use the minimum number of bits required to store the largest value.
@@ -177,9 +217,8 @@ pub enum BitWidth {
 
     /// Round the bit width up to the next power of two (e.g., 8, 16, 32).
     ///
-    /// This strategy can improve random access performance, as operations on
-    /// power-of-two bit widths can be implemented more efficiently with bit-shift
-    /// operations.
+    /// This strategy can improve random access performance for some in-place
+    /// operations, as they can be implemented more efficiently with bit-shift operations on aligned data.
     PowerOfTwo,
 
     /// Use a specific number of bits.
@@ -239,7 +278,7 @@ impl StdError for Error {}
 ///
 /// - `T`: The integer type for the elements (e.g., `u32`, `i16`). It must
 ///   implement the [`Storable`] trait.
-/// - `W`: The underlying storage word (e.g., `u64`, `usize`). It must implement
+/// - `W`: The underlying storage word (e.g., [`u64`], `usize`). It must implement
 ///   the [`Word`] trait.
 /// - `E`: The [`Endianness`] (e.g., [`LE`] or [`BE`]) for bit-level operations.
 /// - `B`: The backend storage buffer, such as `Vec<W>` for an owned vector or
@@ -347,8 +386,8 @@ where
     ///
     /// # Implementation Notes
     ///
-    /// The provided `bits` buffer must contain at least two extra "padding"
-    /// words at the end. This padding is essential to prevent out-of-bounds
+    /// The provided `bits` buffer must contain at least one extra "padding"
+    /// word at the end. This padding is essential to prevent out-of-bounds
     /// memory access in methods like `get_unchecked`.
     ///
     /// # Examples
@@ -357,8 +396,8 @@ where
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// // 3 elements * 5 bits = 15 bits. This requires 1 data word.
-    /// // We need 2 extra words for padding.
-    /// let mut buffer = vec![0_usize; 3];
+    /// // We need 1 extra word for padding.
+    /// let mut buffer = vec![0_usize; 2];
     ///
     /// // Manually encode data into the first word.
     /// // 10 (01010), 20 (10100), 30 (11110)
@@ -382,10 +421,10 @@ where
         let data_words = total_bits.div_ceil(<W as traits::Word>::BITS);
 
         // Essential safety check: ensure the buffer is large enough for the data
-        // AND the 2 padding words required.
-        if bits.as_ref().len() < data_words + 2 {
+        // AND the 1 padding word required.
+        if bits.as_ref().len() < data_words + 1 {
             return Err(Error::InvalidParameters(format!(
-                "The provided buffer is too small. It has {} words, but {} data words + 2 padding words are required.",
+                "The provided buffer is too small. It has {} words, but {} data words + 1 padding word are required.",
                 bits.as_ref().len(),
                 data_words
             )));
@@ -436,7 +475,7 @@ where
     ///
     /// The caller must ensure that the following invariants are met:
     /// 1. The `bits` buffer must be large enough to hold `len * bit_width` bits.
-    /// 2. The `bits` buffer must have at least two extra padding words at the end
+    /// 2. The `bits` buffer must have at least one extra padding word at the end
     ///    to prevent out-of-bounds reads during access.
     /// 3. `bit_width` must not be greater than the number of bits in `W`.
     pub(crate) unsafe fn new_unchecked(bits: B, len: usize, bit_width: usize) -> Self {
@@ -537,19 +576,33 @@ where
     /// Returns the element at `index` using unaligned memory access.
     ///
     /// This method can be significantly faster for random access. It performs a
-    /// single, potentially unaligned read of a `Word` and extracts the value.
+    /// single, potentially unaligned read of a [`Word`] and extracts the value.
+    ///
+    /// # Performance
+    ///
+    /// This method is generally the fastest way to perform random reads on
+    /// Little-Endian architectures, especially when the `bit_width` is not a
+    /// power of two.
+    ///
+    /// - [`get_unchecked`](Self::get_unchecked): May require reading one or two separate machine words
+    ///   and combining them with bit shifts. This is fast if the data is already
+    ///   in the CPU cache.
+    /// - [`get_unaligned_unchecked`](Self::get_unaligned_unchecked): Performs a single memory read that may
+    ///   cross word boundaries. It often results in fewer instructions and better throughput than the two
+    ///   separate reads of [`get_unchecked`](Self::get_unchecked), especially in memory-bound scenarios.
+    ///
     ///
     /// # Safety
     ///
     /// Calling this method with an out-of-bounds `index` is undefined behavior.
-    /// The `FixedVec` must have been constructed with sufficient padding (at
-    /// least two `Word`s) to guarantee that the unaligned read does not go
+    /// The [`FixedVec`] must have been constructed with sufficient padding (at
+    /// least one [`Word`]) to guarantee that the unaligned read does not go
     /// past the allocated buffer. This padding is guaranteed by the default
     /// builders.
     ///
     /// # Implementation Notes
     ///
-    /// For Big-Endian, this method falls back to the standard `get_unchecked` implementation.
+    /// For Big-Endian, this method falls back to the standard [`get_unchecked`](Self::get_unchecked) implementation.
     #[inline(always)]
     pub unsafe fn get_unaligned_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len);
@@ -918,6 +971,18 @@ where
     /// strategy. This requires collecting the iterator into a temporary `Vec<T>`
     /// to analyze its contents before compression.
     ///
+    /// # Memory Usage
+    ///
+    /// Because this implementation must first collect all items into a temporary
+    /// `Vec<T>` to determine the optimal `bit_width`, it may lead to a temporary
+    /// peak in memory usage that is roughly double the size of the uncompressed
+    /// data.
+    ///
+    /// For very large datasets where this memory overhead is a concern, it is
+    /// recommended to use [`FixedVec::from_iter_builder`] instead. The builder
+    /// allows for streaming construction but requires the `bit_width` to be
+    /// specified manually.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1089,7 +1154,7 @@ where
         let buffer = if capacity == 0 {
             Vec::new()
         } else {
-            Vec::with_capacity(num_words + 2) // +2 for padding
+            Vec::with_capacity(num_words + 1) // +1 for padding
         };
 
         Ok(unsafe { Self::new_unchecked(buffer, 0, bit_width) })
@@ -1101,11 +1166,11 @@ where
             return usize::MAX;
         }
         let word_capacity = self.bits.capacity();
-        if word_capacity <= 2 {
+        if word_capacity <= 1 {
             return 0; // Not enough for data + padding.
         }
         // Subtract padding words before calculating element capacity.
-        ((word_capacity - 2) * <W as traits::Word>::BITS) / self.bit_width
+        ((word_capacity - 1) * <W as traits::Word>::BITS) / self.bit_width
     }
 
     /// Returns the capacity of the underlying storage in words.
@@ -1136,7 +1201,7 @@ where
         let bits_per_word = <W as Word>::BITS;
         let required_total_bits = target_element_capacity.saturating_mul(self.bit_width);
         let required_data_words = required_total_bits.div_ceil(bits_per_word);
-        let required_word_capacity = required_data_words + 2; // +2 for padding
+        let required_word_capacity = required_data_words + 1; // +1 for padding
 
         let current_len = self.bits.len();
         if self.bits.capacity() < required_word_capacity {
@@ -1187,7 +1252,7 @@ where
             let bits_per_word = <W as traits::Word>::BITS;
             let required_total_bits = new_len * self.bit_width;
             let required_data_words = required_total_bits.div_ceil(bits_per_word);
-            let required_vec_len = required_data_words.saturating_add(2); // Padding
+            let required_vec_len = required_data_words.saturating_add(1); // Padding
 
             if self.bits.len() < required_vec_len {
                 self.bits.resize(required_vec_len, W::ZERO);
@@ -1212,7 +1277,7 @@ where
             let bits_per_word = <W as traits::Word>::BITS;
             let required_total_bits = self.len.saturating_mul(self.bit_width);
             let required_words = required_total_bits.div_ceil(bits_per_word);
-            required_words + 2 // +2 for padding
+            required_words + 1 // +1 for padding
         };
 
         if self.bits.len() > min_word_len {
@@ -1225,6 +1290,17 @@ where
     /// it to the left.
     ///
     /// This operation is O(n), where n is the number of elements after `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds.
+    ///
+    /// # Complexity
+    ///
+    /// This operation has a complexity of O(L), where L is the number of bits
+    /// that need to be shifted. In the worst case (removing the first element),
+    /// this is proportional to the total number of bits in the vector
+    /// (`self.len() * self.bit_width()`).
     ///
     /// # Panics
     ///
@@ -1250,6 +1326,18 @@ where
     /// Inserts an element at `index`, shifting all elements after it to the right.
     ///
     /// This operation is O(n), where n is the number of elements after `index`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `index` is out of bounds or if the `element` is too large to
+    /// be represented by the configured `bit_width`.
+    ///
+    /// # Complexity
+    ///
+    /// This operation has a complexity of O(L), where L is the number of bits
+    /// that need to be shifted. In the worst case (inserting at the beginning),
+    /// this is proportional to the total number of bits in the vector
+    /// (`self.len() * self.bit_width()`).
     ///
     /// # Panics
     ///
@@ -1353,7 +1441,7 @@ where
         // Ensure the vector has enough capacity and is resized to accommodate the shift.
         let required_end_bit = start_bit + shift_amount + num_bits_to_move;
         let required_words = required_end_bit.div_ceil(bits_per_word);
-        let required_vec_len = required_words.saturating_add(2); // +2 for padding
+        let required_vec_len = required_words.saturating_add(1); // +1 for padding
         if self.bits.len() < required_vec_len {
             self.bits.resize(required_vec_len, W::ZERO);
         }
@@ -1520,7 +1608,7 @@ where
         // Ensure the underlying Vec has enough initialized words to write into.
         let required_total_bits = new_len * self.bit_width;
         let required_data_words = required_total_bits.div_ceil(bits_per_word);
-        let required_vec_len = required_data_words.saturating_add(2); // Padding
+        let required_vec_len = required_data_words.saturating_add(1); // Padding
         if self.bits.len() < required_vec_len {
             self.bits.resize(required_vec_len, W::ZERO);
         }
@@ -1564,7 +1652,7 @@ where
     /// Modifying the returned slice is logically unsafe. Any change to the bits
     /// can violate the invariants of the `FixedVec`, leading to panics or
     /// incorrect results on subsequent method calls.
-    pub fn as_mut_limbs(&mut self) -> &mut [W] {
+    pub unsafe fn as_mut_limbs(&mut self) -> &mut [W] {
         self.bits.as_mut()
     }
 

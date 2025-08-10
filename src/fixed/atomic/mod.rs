@@ -82,7 +82,7 @@
 //!
 //! ## Storing Signed Integers
 //!
-//! `AtomicFixedVec` can also store signed integers. The underlying [`Storable`]
+//! [`AtomicFixedVec`] can also store signed integers. The underlying [`Storable`]
 //! trait uses zig-zag encoding to store signed values efficiently, so that
 //! small negative numbers require few bits, just like small positive numbers.
 //!

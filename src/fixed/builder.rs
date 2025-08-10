@@ -139,7 +139,7 @@ where
         // Allocate the buffer for the bit-packed data.
         let total_bits = input.len() * final_bit_width;
         let num_words = total_bits.div_ceil(bits_per_word);
-        let buffer = vec![W::ZERO; num_words + 2]; // +2 for padding.
+        let buffer = vec![W::ZERO; num_words + 1]; // +1 for padding.
 
         let mut writer = BufBitWriter::new(MemWordWriterVec::new(buffer));
 
@@ -249,10 +249,9 @@ where
 
         writer.flush().unwrap();
         let mut data = writer.into_inner().unwrap().into_inner();
-        
-        // Add padding words to the end of the buffer.
+
+        // Add padding word to the end of the buffer.
         if len > 0 {
-            data.push(W::ZERO);
             data.push(W::ZERO);
         }
         data.shrink_to_fit();

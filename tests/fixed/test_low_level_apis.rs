@@ -120,7 +120,7 @@ where
     let corruption_pattern: W = corruption_pattern_u64.as_();
 
     {
-        let limbs = vec.as_mut_limbs();
+        let limbs = unsafe { vec.as_mut_limbs() };
         let corruption_mask = corruption_pattern << offset_in_word;
         limbs[word_idx] ^= corruption_mask;
         if offset_in_word + bit_width > word_bits && word_idx + 1 < limbs.len() {
@@ -136,7 +136,7 @@ where
     );
 
     {
-        let limbs = vec.as_mut_limbs();
+        let limbs = unsafe { vec.as_mut_limbs() };
         let corruption_mask = corruption_pattern << offset_in_word;
         limbs[word_idx] ^= corruption_mask;
 
