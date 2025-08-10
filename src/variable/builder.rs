@@ -89,7 +89,8 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
     ///
     /// # Examples
     ///
-    /// ```    /// use compressed_intvec::variable::{IntVec, SIntVec, VariableCodecSpec};
+    /// ```
+    /// use compressed_intvec::variable::{IntVec, SIntVec, VariableCodecSpec};
     ///
     /// let data: &[i16] = &[-100, 0, 50, -2, 1000];
     ///
@@ -184,14 +185,14 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
 
 /// A builder for creating an [`IntVec`] from an iterator.
 ///
-/// This builder is designed for constructing an `IntVec` from a data source that
+/// This builder is designed for constructing an [`IntVec`] from a data source that
 /// is an iterator. It consumes the iterator and compresses its elements on the fly.
 /// It is obtained by calling [`IntVec::from_iter_builder`].
 ///
 /// # Limitations
 ///
 /// This builder does **not** support automatic codec selection (i.e., [`VariableCodecSpec::Auto`])
-/// or automatic parameter estimation for codecs like `Rice` or `Golomb`. Since the
+/// or automatic parameter estimation for codecs like [`Rice`](VariableCodecSpec::Rice) or [`Golomb`](VariableCodecSpec::Golomb). Since the
 /// iterator is consumed in a single pass, the data cannot be pre-analyzed to
 /// determine its statistical properties. The user must specify a concrete codec.
 #[derive(Debug)]
@@ -226,7 +227,7 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> IntVecFromIterBuilde
     ///
     /// # Errors
     ///
-    /// The `build` method will return an error if a codec specification that
+    /// The [`build`](Self::build) method will return an error if a codec specification that
     /// requires data analysis is provided (e.g., [`VariableCodecSpec::Auto`]).
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
