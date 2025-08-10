@@ -37,6 +37,15 @@ impl Distribution {
             }
         }
     }
+
+    fn name(&self) -> &'static str {
+        match self {
+            Distribution::UniformLow => "UniformLow",
+            Distribution::UniformHigh => "UniformHigh",
+            Distribution::RiceImplied => "RiceImplied",
+            Distribution::ZetaImplied => "ZetaImplied",
+        }
+    }
 }
 
 /// Generates a vector with uniformly random values.
@@ -53,14 +62,14 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 /// The main benchmark function that orchestrates all tests.
 fn benchmark_random_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
-    const NUM_ACCESSES: usize = 10_000;
-    const K_VALUES: [usize; 4] = [16, 32, 64, 128];
+    const NUM_ACCESSES: usize = 100_000;
+    const K_VALUES: [usize; 1] = [32];
 
     let distributions = [
-        (Distribution::UniformLow, "UniformLow"),
-        (Distribution::UniformHigh, "UniformHigh"),
-        (Distribution::RiceImplied, "RiceImplied"),
-        (Distribution::ZetaImplied, "ZetaImplied"),
+        Distribution::UniformLow,
+        Distribution::UniformHigh,
+        Distribution::RiceImplied,
+        Distribution::ZetaImplied,
     ];
 
     // Codecs for IntVec (k-dependent).
@@ -80,14 +89,11 @@ fn benchmark_random_access(c: &mut Criterion) {
         .map(|_| rng.random_range(0..VECTOR_SIZE))
         .collect();
 
-    for (distribution, dist_name) in distributions {
-        let mut group = c.benchmark_group(format!("RandomAccess/{}", dist_name));
+    for distribution in distributions {
+        let mut group = c.benchmark_group(format!("RandomAccess/{}", distribution.name()));
 
         // Configure the benchmark group settings.
-        group
-            .sample_size(10)
-            .warm_up_time(Duration::from_millis(1))
-            .throughput(Throughput::Elements(NUM_ACCESSES as u64));
+        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
 
         let data = distribution.generate(VECTOR_SIZE);
 
@@ -102,9 +108,11 @@ fn benchmark_random_access(c: &mut Criterion) {
         });
 
         // --- Benchmark FixedVec (k-independent) ---
-        let fixed_vec = LEFixedVec::builder(&data)
-            .build()
+        let fixed_vec = LEFixedVec::builder()
+            .bit_width(BitWidth::PowerOfTwo)
+            .build(&data)
             .expect("Failed to build FixedVec");
+
         group.bench_function("FixedVec/get_unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
@@ -131,9 +139,9 @@ fn benchmark_random_access(c: &mut Criterion) {
                 distribution,
                 Distribution::UniformHigh | Distribution::ZetaImplied
             ) && matches!(
-                    codec_spec,
-                    VariableCodecSpec::Unary | VariableCodecSpec::Rice { .. }
-                ) {
+                codec_spec,
+                VariableCodecSpec::Unary | VariableCodecSpec::Rice { .. }
+            ) {
                 continue;
             }
 
@@ -144,7 +152,8 @@ fn benchmark_random_access(c: &mut Criterion) {
                     .build()
                     .expect("Failed to build IntVec");
 
-                group.bench_function(format!("{}/k={}/get_unchecked", spec_name, k_value), |b| {
+                let bench_name = format!("{}/k={}/get_unchecked", spec_name, k_value);
+                group.bench_function(bench_name, |b| {
                     b.iter(|| {
                         for &index in black_box(&access_indices) {
                             black_box(unsafe { intvec.get_unchecked(index) });
@@ -161,8 +170,8 @@ criterion_group!(
     name = benches;
     config = Criterion::default()
         .sample_size(10)
-        .warm_up_time(Duration::from_millis(1))
-        .measurement_time(Duration::from_secs(10));
+        .warm_up_time(Duration::from_millis(10))
+        .measurement_time(Duration::from_secs(2));
     targets = benchmark_random_access
 );
 

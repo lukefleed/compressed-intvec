@@ -54,8 +54,8 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 /// The main benchmark function that orchestrates all tests.
 fn benchmark_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
-    const NUM_ACCESSES: usize = 10_000;
-    const K_VALUE: usize = 64; // Fixed k for this benchmark suite
+    const NUM_ACCESSES: usize = 100_000;
+    const K_VALUE: usize = 32; // Fixed k for this benchmark suite
 
     let distributions = [
         (Distribution::UniformLow, "UniformLow"),
@@ -104,11 +104,11 @@ fn benchmark_access(c: &mut Criterion) {
                 distribution,
                 Distribution::UniformHigh | Distribution::ZetaImplied
             ) && matches!(
-                    codec_spec,
-                    VariableCodecSpec::Unary
-                        | VariableCodecSpec::Rice { .. }
-                        | VariableCodecSpec::Golomb { .. }
-                ) {
+                codec_spec,
+                VariableCodecSpec::Unary
+                    | VariableCodecSpec::Rice { .. }
+                    | VariableCodecSpec::Golomb { .. }
+            ) {
                 println!(
                     "\n- Skipping codec: {} for {} distribution",
                     spec_name, dist_name
@@ -159,8 +159,8 @@ criterion_group!(
     name = benches;
     config = Criterion::default()
         .sample_size(10)
-        .warm_up_time(Duration::from_millis(1))
-        .measurement_time(Duration::from_secs(10));
+        .warm_up_time(Duration::from_millis(10))
+        .measurement_time(Duration::from_secs(2));
     targets = benchmark_access
 );
 

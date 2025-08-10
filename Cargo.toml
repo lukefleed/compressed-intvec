@@ -63,6 +63,31 @@ name = "bench_atomic"
 harness = false
 path = "benches/fixed/bench_atomic.rs"
 
+[[bench]]
+name = "bench_iter_access"
+harness = false
+path = "benches/variable/bench_iter_access.rs"
+
+[[bench]]
+name = "bench_var_sequential_ops"
+harness = false
+path = "benches/variable/bench_sequential_ops.rs"
+
+[[bench]]
+name = "bench_construction"
+harness = false
+path = "benches/variable/bench_construction.rs"
+
+[[bench]]
+name = "bench_var_random_access"
+harness = false
+path = "benches/variable/bench_random_access.rs"
+
+[[bench]]
+name = "bench_var_parallel"
+harness = false
+path = "benches/variable/bench_parallel.rs"
+
 
 [features]
 default = ["parallel"]

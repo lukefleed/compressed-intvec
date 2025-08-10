@@ -1,28 +1,31 @@
 //! # Benchmark for Iterator-Based Access Strategies
 //!
-//! This benchmark suite focuses on the performance of accessing `IntVec` data
-//! when the indices are provided by a streaming source (an iterator), a common
-//! scenario in applications like inverted indexes where materializing the full
-//! list of indices into a vector is undesirable due to memory constraints.
+//! This benchmark suite evaluates the performance of different strategies for
+//! accessing `IntVec` data when lookup indices are provided by a streaming
+//! source (an iterator). This is a common scenario in applications like inverted
+//! indexes, where materializing all indices into a `Vec` is not feasible.
 //!
 //! ## Methodology
 //!
-//! The benchmark compares the two most relevant strategies for handling a stream
-//! of indices:
+//! The benchmark compares three key strategies:
 //!
-//! 1.  **`get_many_from_iter`**: The library's dedicated method for this scenario.
-//!     It uses a stateful `IntVecSeqReader` internally to process the entire
-//!     iterator stream in a single pass, reusing the reader's state to minimize
-//!     expensive seek operations when indices have locality.
+//! 1.  **`get_many_from_iter`**: The library's dedicated high-level method for this
+//!     scenario. It processes the entire iterator stream in a single pass,
+//!     internally using a stateful `IntVecSeqReader` to optimize for locality.
 //!
-//! 2.  **`loop_reader_get_from_iter`**: The most reasonable alternative an application
-//!     developer would implement. It creates a single, reusable `IntVecReader`
-//!     (which is stateless) and calls `get` on it for each index from the
-//!     iterator. This amortizes reader creation cost but does not benefit from
-//!     sequential access optimizations.
+//! 2.  **`loop_seq_reader_get`**: A loop that manually calls `get` on a reusable
+//!     *stateful* `IntVecSeqReader`. This measures the raw performance of the
+//!     stateful reader logic without the overhead of the `get_many_from_iter`
+//!     wrapper, making it a good baseline for sequential access.
 //!
-//! This comparison will precisely isolate the performance difference between a
-//! stateful (`SeqReader`) and a stateless (`Reader`) access logic in a streaming context.
+//! 3.  **`loop_reader_get`**: A loop that manually calls `get` on a reusable
+//!     *stateless* `IntVecReader`. This simulates a naive but reasonable
+//!     implementation and serves to highlight the performance benefits of the
+//!     state-aware `IntVecSeqReader` when access patterns have locality.
+//!
+//! This three-way comparison provides a comprehensive view of the trade-offs
+//! between high-level convenience (`get_many_from_iter`) and the raw performance
+//! of stateful vs. stateless access logic in a streaming context.
 
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
@@ -121,7 +124,7 @@ impl AccessPattern {
 /// The main benchmark function.
 fn benchmark_iter_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 10_000_000;
-    const NUM_ACCESSES: usize = 1_000_000;
+    const NUM_ACCESSES: usize = 100_000;
     const K_VALUE: usize = 32;
 
     // --- Setup Data and IntVec ---
@@ -146,7 +149,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
         let mut rng = SmallRng::seed_from_u64(1337);
         let access_indices = pattern.generate_indices(&mut rng, NUM_ACCESSES, VECTOR_SIZE, K_VALUE);
 
-        // 1. Benchmark `get_many_from_iter` (our stateful, streaming method).
+        // 1. Benchmark `get_many_from_iter` (high-level, optimized streaming method).
         group.bench_function("get_many_from_iter", |b| {
             b.iter(|| {
                 let results = intvec
@@ -156,7 +159,19 @@ fn benchmark_iter_access(c: &mut Criterion) {
             })
         });
 
-        // 2. Benchmark the loop with a reusable but stateless `IntVecReader`.
+        // 2. Benchmark the loop with a reusable and STATEFUL `IntVecSeqReader`.
+        group.bench_function("loop_seq_reader_get", |b| {
+            b.iter(|| {
+                let mut results = Vec::with_capacity(access_indices.len());
+                let mut reader = intvec.seq_reader();
+                for index in black_box(access_indices.iter().copied()) {
+                    results.push(reader.get(index).unwrap().unwrap());
+                }
+                black_box(results);
+            })
+        });
+
+        // 3. Benchmark the loop with a reusable but STATELESS `IntVecReader`.
         group.bench_function("loop_reader_get", |b| {
             b.iter(|| {
                 let mut results = Vec::with_capacity(access_indices.len());
@@ -176,8 +191,8 @@ criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(10)
-        .warm_up_time(Duration::from_millis(500))
-        .measurement_time(Duration::from_secs(15));
+        .warm_up_time(Duration::from_millis(10))
+        .measurement_time(Duration::from_secs(5));
     targets = benchmark_iter_access
 }
 criterion_main!(benches);
