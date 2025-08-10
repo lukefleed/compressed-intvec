@@ -7,7 +7,7 @@
 //! # Performance
 //!
 //! [`IntVecSeqReader`] maintains an internal state of the current decoding position.
-//! When a new [`get`](super::IntVec::get) request is made, it intelligently decides whether to:
+//! When a new [`get`](super::IntVec::get) request is made, it decides whether to:
 //!
 //! 1.  **Decode Forward (Fast Path):** If the requested index is at or after the
 //!     current position and within the same sample block, the reader decodes
@@ -18,16 +18,19 @@
 //!     requires moving backward, the reader falls back to seeking to the
 //!     nearest sample point and decoding from there, just like [`IntVecReader`].
 //!
-//! This makes it exceptionally efficient for iterating through indices that are
+//! This makes it very efficient for iterating through indices that are
 //! sorted or clustered together.
 //!
 //! [`IntVec`]: crate::variable::IntVec
 //! [`IntVecReader`]: crate::variable::reader::IntVecReader
 
-use super::traits::Storable;
-use super::{IntVec, IntVecBitReader, IntVecError};
+use super::{
+    reader::CodecReader, // Import the robust hybrid dispatcher
+    traits::Storable,
+    IntVec, IntVecBitReader, IntVecError,
+};
 use dsi_bitstream::{
-    dispatch::{CodesRead, FuncCodeReader, StaticCodeRead},
+    dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 
@@ -62,7 +65,7 @@ use dsi_bitstream::{
 /// let data: Vec<u32> = (0..100).collect();
 /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
 ///
-/// // Create a reusable sequential reader
+/// // Create a reader optimized for sequential access
 /// let mut seq_reader = vec.seq_reader();
 ///
 /// // Accessing indices in increasing order is very efficient
@@ -80,9 +83,10 @@ where
     intvec: &'a IntVec<T, E, B>,
     /// The stateful, reusable bitstream reader.
     reader: IntVecBitReader<'a, E>,
-    /// The pre-configured code reader, created once to avoid overhead.
-    code_reader: FuncCodeReader<E, IntVecBitReader<'a, E>>,
-    /// The index of the element *after* the one most recently read.
+    /// The hybrid dispatcher that handles codec reading robustly.
+    code_reader: CodecReader<'a, T, E, B>,
+    /// The index of the element *after* the one most recently read. This acts
+    /// as a cursor for the current decoding position.
     current_index: usize,
 }
 
@@ -94,8 +98,10 @@ where
 {
     /// Creates a new `IntVecSeqReader`.
     pub(super) fn new(intvec: &'a IntVec<T, E, B>) -> Self {
-        let code_reader = FuncCodeReader::new(intvec.encoding)
-            .expect("Failed to create code reader for DSI encoding.");
+        // Instantiate the hybrid dispatcher. This will not panic, as it falls
+        // back to a slower but universally compatible method if the codec's
+        // parameters are not supported by the fast path.
+        let code_reader = CodecReader::new(intvec.encoding);
         Self {
             intvec,
             reader: IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
@@ -121,7 +127,9 @@ where
     /// Retrieves the element at `index` without bounds checking.
     ///
     /// # Safety
+    ///
     /// Calling this method with an out-of-bounds index is undefined behavior.
+    /// The caller must ensure that `index < self.intvec.len()`.
     pub unsafe fn get_unchecked(&mut self, index: usize) -> T {
         debug_assert!(
             index < self.intvec.len,
@@ -146,12 +154,15 @@ where
         if index < self.current_index || target_sample_block != current_sample_block {
             // Slow Path: A seek is required because we are moving backward or
             // jumping to a different sample block.
+            // SAFETY: The public-facing get() performs bounds checks, and
+            // internal callers are expected to uphold the same contract.
             let start_bit = self.intvec.samples.get_unchecked(target_sample_block);
             self.reader.set_bit_pos(start_bit).unwrap();
             self.current_index = target_sample_block * k;
         }
 
-        // Decode and discard intermediate elements.
+        // Decode and discard intermediate elements. The hybrid dispatcher
+        // will use the fastest available method.
         for _ in self.current_index..index {
             self.code_reader.read(&mut self.reader).unwrap();
         }

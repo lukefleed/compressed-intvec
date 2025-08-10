@@ -6,9 +6,13 @@
 //!
 //! [`IntVec`]: crate::variable::IntVec
 
-use super::{traits::Storable, IntVec, IntVecBitReader};
+use super::{
+    reader::CodecReader, // Import the robust hybrid dispatcher
+    traits::Storable,
+    IntVec, IntVecBitReader,
+};
 use dsi_bitstream::{
-    dispatch::{CodesRead, FuncCodeReader, StaticCodeRead},
+    dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 use std::marker::PhantomData;
@@ -34,7 +38,7 @@ use std::marker::PhantomData;
 ///
 /// assert_eq!(sum, 100);
 /// ```
-pub(super) struct IntVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
+pub struct IntVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
@@ -42,7 +46,8 @@ where
 {
     len: usize,
     reader: IntVecBitReader<'a, E>,
-    code_reader: FuncCodeReader<E, IntVecBitReader<'a, E>>,
+    /// The hybrid dispatcher that handles codec reading robustly.
+    code_reader: CodecReader<'a, T, E, B>,
     current_index: usize,
     _markers: PhantomData<(&'a B, T)>,
 }
@@ -58,8 +63,8 @@ where
         let reader = IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
             intvec.data.as_ref(),
         ));
-        let code_reader = FuncCodeReader::new(intvec.encoding)
-            .expect("Failed to create code reader for DSI encoding.");
+        // Instantiate the robust hybrid dispatcher. This will not panic.
+        let code_reader = CodecReader::new(intvec.encoding);
 
         Self {
             len: intvec.len,
@@ -84,7 +89,8 @@ where
         if self.current_index >= self.len {
             return None;
         }
-        let value = self.code_reader.read(&mut self.reader).ok()?;
+        // The read operation is infallible due to the robust dispatcher.
+        let value = self.code_reader.read(&mut self.reader).unwrap();
         self.current_index += 1;
         Some(Storable::from_word(value))
     }

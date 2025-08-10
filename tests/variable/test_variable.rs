@@ -11,7 +11,6 @@ use compressed_intvec::variable::codec::VariableCodecSpec;
 use compressed_intvec::variable::traits::Storable;
 use compressed_intvec::variable::{IntVec, IntVecError, LEIntVec, SIntVec, UIntVec};
 
-// FIX: Import i tipi completi da dsi-bitstream per usarli nei trait bounds
 use dsi_bitstream::prelude::{
     BitRead, BitSeek, BitWrite, BufBitReader, BufBitWriter, CodesRead, CodesWrite, Endianness,
     MemWordReader, MemWordWriterVec, BE, LE,
@@ -33,7 +32,6 @@ where
     T: Storable + Debug + PartialEq + PrimInt + AsPrimitive<u64> + Send + Sync + Ord + 'static,
     for<'a> IntVec<T, E, &'a [u64]>: PartialEq<&'a [T]>,
     E: Endianness + Send + Sync,
-    // FIX: Sostituito gli alias privati con i loro tipi pubblici completi.
     for<'a> BufBitReader<E, MemWordReader<u64, &'a [u64]>>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>
@@ -226,3 +224,124 @@ fn test_binary_search() {
     assert_eq!(intvec.binary_search(&198), Ok(99));
     assert_eq!(intvec.binary_search(&199), Err(100));
 }
+
+/// Macro to generate a round-trip test for a specific codec configuration.
+/// This is the core of the fallback mechanism test.
+macro_rules! test_roundtrip_with_codec {
+    ($test_name:ident, $E:ty, $codec_spec:expr) => {
+        #[test]
+        fn $test_name() {
+            let data: Vec<u32> = (0..100).collect();
+            println!(
+                "Testing round-trip for {:?} on <{}>",
+                $codec_spec,
+                std::any::type_name::<$E>()
+            );
+
+            // Build the vector. This should always succeed.
+            let vec = IntVec::<u32, $E>::builder(&data)
+                .codec($codec_spec)
+                .build()
+                .expect("Build failed");
+
+            // 1. Test full iteration using .iter() -> IntVecIter
+            assert_eq!(
+                vec.iter().collect::<Vec<_>>(),
+                data,
+                "Mismatch during full iteration"
+            );
+
+            // 2. Test random access using .get() -> IntVecReader
+            assert_eq!(vec.get(10), Some(data[10]), "Mismatch on .get(10)");
+            assert_eq!(vec.get(99), Some(data[99]), "Mismatch on .get(99)");
+
+            // 3. Test sequential access using .seq_reader() -> IntVecSeqReader
+            let mut seq_reader = vec.seq_reader();
+            assert_eq!(
+                seq_reader.get(15).unwrap(),
+                Some(data[15]),
+                "Mismatch on seq_reader.get(15)"
+            );
+            // This should use the fast-forward path
+            assert_eq!(
+                seq_reader.get(20).unwrap(),
+                Some(data[20]),
+                "Mismatch on seq_reader.get(20)"
+            );
+            // This should use the slow-path (seek)
+            assert_eq!(
+                seq_reader.get(5).unwrap(),
+                Some(data[5]),
+                "Mismatch on seq_reader.get(5) after forward"
+            );
+        }
+    };
+}
+
+// --- Test Suite for Codec Dispatch Fallback ---
+
+// Test a standard, fast-path codec to prevent regressions.
+test_roundtrip_with_codec!(
+    fallback_le_gamma_fast_path,
+    LE,
+    VariableCodecSpec::Gamma
+);
+test_roundtrip_with_codec!(
+    fallback_be_gamma_fast_path,
+    BE,
+    VariableCodecSpec::Gamma
+);
+
+// Test edge cases that require the slow-path fallback.
+// These parameters are chosen because they are outside the range supported
+// by dsi-bitstream's FuncCodeReader.
+test_roundtrip_with_codec!(
+    fallback_le_golomb_15,
+    LE,
+    VariableCodecSpec::Golomb { b: Some(15) }
+);
+test_roundtrip_with_codec!(
+    fallback_be_golomb_15,
+    BE,
+    VariableCodecSpec::Golomb { b: Some(15) }
+);
+test_roundtrip_with_codec!(
+    fallback_le_zeta_12,
+    LE,
+    VariableCodecSpec::Zeta { k: Some(12) }
+);
+test_roundtrip_with_codec!(
+    fallback_be_zeta_12,
+    BE,
+    VariableCodecSpec::Zeta { k: Some(12) }
+);
+test_roundtrip_with_codec!(
+    fallback_le_rice_11,
+    LE,
+    VariableCodecSpec::Rice { log2_b: Some(11) }
+);
+test_roundtrip_with_codec!(
+    fallback_be_rice_11,
+    BE,
+    VariableCodecSpec::Rice { log2_b: Some(11) }
+);
+test_roundtrip_with_codec!(
+    fallback_le_pi_11,
+    LE,
+    VariableCodecSpec::Pi { k: Some(11) }
+);
+test_roundtrip_with_codec!(
+    fallback_be_pi_11,
+    BE,
+    VariableCodecSpec::Pi { k: Some(11) }
+);
+test_roundtrip_with_codec!(
+    fallback_le_expgolomb_11,
+    LE,
+    VariableCodecSpec::ExpGolomb { k: Some(11) }
+);
+test_roundtrip_with_codec!(
+    fallback_be_expgolomb_11,
+    BE,
+    VariableCodecSpec::ExpGolomb { k: Some(11) }
+);
