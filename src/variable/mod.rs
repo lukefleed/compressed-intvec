@@ -122,7 +122,7 @@
 //!
 //! ## Storing Signed Integers
 //!
-//! `IntVec` handles signed integers, such as `i16`, by mapping them to unsigned
+//! [`IntVec`] handles signed integers, such as [`i16`], by mapping them to unsigned
 //! values using zig-zag encoding.
 //!
 //! ```
@@ -157,7 +157,39 @@
 //! ```
 //!
 //! Best performance is achieved when the sampling rate `k` is a power of two. Usually a value of `32` or `16` is a good trade-off between speed and compression ratio.
+//! 
+//! ## Codec Selection and Performance
 //!
+//! The choice of compression codec is critical for performance and space efficiency.
+//! [`IntVecBuilder`](builder::IntVecBuilder) offers automatic codec selection via 
+//! [`VariableCodecSpec::Auto`]. When enabled, the builder analyzes the entire input
+//! dataset to find the codec that offers the best compression ratio.
+//!
+//! This analysis involves calculating the compressed size for the data with
+//! approximately 70 different codec configurations. This process introduces a
+//! significant, one-time **construction overhead**.
+//! 
+//! Use [`Auto`](VariableCodecSpec::Auto) for read-heavy workloads where the [`IntVec`] 
+//! is built once and then accessed many times. The initial cost is easily amortized by
+//! the long-term space savings.
+//! 
+//! If your application creates many small [`IntVec`]s or accesses them frequently,
+//! the repeated cost of analysis can become a performance
+//! bottleneck. In such scenarios, it is better to explicitly specify a codec
+//! (e.g., [`VariableCodecSpec::Gamma`] or [`VariableCodecSpec::Delta`]) that is known
+//! to be a good general-purpose choice for your data.
+//! 
+//! ```
+//! use compressed_intvec::prelude::*;
+//! 
+//! let data: Vec<u32> = (0..100).collect();
+//! 
+//! // Create an IntVec with automatic codec selection
+//! let vec: UIntVec<u32> = IntVec::builder(&data)
+//!     .build()
+//!     .unwrap();
+//!```
+//!  
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
 #[macro_use]
