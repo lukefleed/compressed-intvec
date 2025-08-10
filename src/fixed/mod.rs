@@ -546,7 +546,7 @@ where
     /// least two `Word`s) to guarantee that the unaligned read does not go
     /// past the allocated buffer. This padding is guaranteed by the default
     /// builders.
-    /// 
+    ///
     /// # Implementation Notes
     ///
     /// For Big-Endian, this method falls back to the standard `get_unchecked` implementation.
@@ -647,7 +647,7 @@ where
     /// # Panics
     ///
     /// Panics if `chunk_size` is 0.
-    /// 
+    ///
     /// [`FixedVecSlice`]: slice::FixedVecSlice
     pub fn chunks(&self, chunk_size: usize) -> iter::Chunks<'_, T, W, E, B> {
         iter::Chunks::new(self, chunk_size)
@@ -820,7 +820,7 @@ where
             let mid = low + (high - low) / 2;
             // SAFETY: The loop invariants ensure `mid` is always in bounds.
             let mid_val = unsafe { self.get_unchecked(mid) };
-            
+
             match f(&mid_val) {
                 std::cmp::Ordering::Less => low = mid + 1,
                 std::cmp::Ordering::Equal => return Ok(mid),
@@ -854,7 +854,7 @@ where
     {
         let mut len = self.len();
         let mut left = 0;
-        
+
         while len > 0 {
             let half = len / 2;
             let mid = left + half;
@@ -2250,7 +2250,6 @@ where
     }
 }
 
-
 impl<T, W, E> From<FixedVec<T, W, E, Vec<W>>> for FixedVec<T, W, E, Box<[W]>>
 where
     T: Storable<W>,
@@ -2259,9 +2258,7 @@ where
 {
     /// Converts a `Vec`-backed `FixedVec` into a `Box<[]>`-backed `FixedVec`.
     fn from(vec: FixedVec<T, W, E, Vec<W>>) -> Self {
-        unsafe {
-            Self::new_unchecked(vec.bits.into_boxed_slice(), vec.len, vec.bit_width)
-        }
+        unsafe { Self::new_unchecked(vec.bits.into_boxed_slice(), vec.len, vec.bit_width) }
     }
 }
 
@@ -2273,8 +2270,6 @@ where
 {
     /// Converts a `Box<[]>`-backed `FixedVec` into a `Vec`-backed `FixedVec`.
     fn from(vec: FixedVec<T, W, E, Box<[W]>>) -> Self {
-        unsafe {
-            Self::new_unchecked(vec.bits.into_vec(), vec.len, vec.bit_width)
-        }
+        unsafe { Self::new_unchecked(vec.bits.into_vec(), vec.len, vec.bit_width) }
     }
 }

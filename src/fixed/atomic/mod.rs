@@ -32,7 +32,7 @@
 //! respect to other threads, while still allowing concurrent operations on
 //! different parts of the vector. This approach avoids a single global lock,
 //! preserving a high degree of parallelism.
-//! 
+//!
 //! > Future version may introduce a more sophisticated locking strategy
 //!
 //! ### Performance Considerations
@@ -361,7 +361,7 @@ where
     /// Returns an iterator over the elements of the vector.
     ///
     /// The iterator atomically loads each element using `Ordering::SeqCst`.
-    pub fn iter(&self) -> AtomicFixedVecIter<'_, T> {
+    pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
         AtomicFixedVecIter {
             vec: self,
             current_index: 0,
@@ -405,7 +405,6 @@ where
             .map(move |i| AtomicMutProxy::new(self, i))
     }
 }
-
 
 // Extended atomic RMW operations
 impl<T> AtomicFixedVec<T>
@@ -732,11 +731,7 @@ where
             }
         }
     }
-
-
-
 }
-
 
 // `TryFrom` implementation.
 impl<T> TryFrom<&[T]> for AtomicFixedVec<T>
@@ -1142,7 +1137,10 @@ where
     type IntoIter = AtomicFixedVecIter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+        AtomicFixedVecIter {
+            vec: self,
+            current_index: 0,
+        }
     }
 }
 
@@ -1160,9 +1158,7 @@ where
             return false;
         }
         // Use SeqCst for a strong guarantee in tests.
-        self.iter()
-            .zip(other.iter())
-            .all(|(a, b)| a == b)
+        self.iter().zip(other.iter()).all(|(a, b)| a == b)
     }
 }
 

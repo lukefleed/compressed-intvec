@@ -4,9 +4,6 @@
 //! variable-length encoding, an [`IntVec`] is immutable once created, as
 //! modifying an element would require re-encoding the rest of the data stream.
 //!
-//! The provided iterators, [`IntVecIter`] and [`IntVecIntoIter`], offer efficient,
-//! read-only access to the compressed data by decompressing values on the fly.
-//!
 //! [`IntVec`]: crate::variable::IntVec
 
 use super::{traits::Storable, IntVec, IntVecBitReader};
@@ -37,7 +34,7 @@ use std::marker::PhantomData;
 ///
 /// assert_eq!(sum, 100);
 /// ```
-pub struct IntVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
+pub(super) struct IntVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>

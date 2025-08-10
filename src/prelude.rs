@@ -19,14 +19,13 @@ pub use crate::fixed::{
 pub use crate::variable::{
     builder::{IntVecBuilder, IntVecFromIterBuilder},
     codec::VariableCodecSpec,
-    iter::{IntVecIntoIter, IntVecIter},
     reader::IntVecReader,
     seq_reader::IntVecSeqReader,
     slice::IntVecSlice,
     traits::Storable as VariableStorable,
-    BEIntVec, BESIntVec, IntVecError, IntVec, LEIntVec, LESIntVec, SIntVec, UIntVec,
+    BEIntVec, BESIntVec, IntVec, IntVecError, LEIntVec, LESIntVec, SIntVec, UIntVec,
 };
 
 // --- Macros Prelude ---
-pub use crate::sint_vec;
 pub use crate::int_vec;
+pub use crate::sint_vec;

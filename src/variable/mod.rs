@@ -89,9 +89,8 @@
 //!     forward from its last position, avoiding a costly seek operation.
 //!   - **Fallback Path**: If the requested `index` is before the cursor or in a
 //!     different sample block, the reader falls back to the standard behavior of
-//!     seeking to the nearest sample and decoding from there.
-//!   This makes it exceptionally efficient for iterating through sorted or clustered
-//!   indices.
+//!     seeking to the nearest sample and decoding from there. This makes it very
+//!     efficient for iterating through sorted or clustered indices.
 //!
 //! # Main Components
 //!
@@ -115,7 +114,7 @@
 //!
 //! let data: Vec<u32> = vec![100, 200, 300, 1024];
 //! let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
-//! 
+//!
 //! assert_eq!(vec.len(), 4);
 //! // Accessing an element
 //! assert_eq!(vec.get(1), Some(200));
@@ -156,7 +155,7 @@
 //! assert_eq!(vec.get_sampling_rate(), 8);
 //! assert_eq!(vec.get(10), Some(100));
 //! ```
-//! 
+//!
 //! Best performance is achieved when the sampling rate `k` is a power of two. Usually a value of `32` or `16` is a good trade-off between speed and compression ratio.
 //!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
@@ -176,8 +175,8 @@ pub mod serde;
 pub mod slice;
 pub mod traits;
 
-use crate::fixed::{Error as FixedVecError, FixedVec};
 pub use self::{codec::VariableCodecSpec, traits::Storable};
+use crate::fixed::{Error as FixedVecError, FixedVec};
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
     dispatch::StaticCodeRead,
@@ -188,10 +187,14 @@ use dsi_bitstream::{
     traits::{BitWrite, BE, LE},
 };
 use mem_dbg::{MemDbg, MemSize};
-use std::{error::Error, fmt::{self}, marker::PhantomData};
+use std::{
+    error::Error,
+    fmt::{self},
+    marker::PhantomData,
+};
 
 pub use builder::{IntVecBuilder, IntVecFromIterBuilder};
-pub use iter::{IntVecIntoIter, IntVecIter};
+use iter::{IntVecIntoIter, IntVecIter};
 pub use reader::IntVecReader;
 pub use seq_reader::IntVecSeqReader;
 pub use slice::IntVecSlice;
@@ -290,7 +293,6 @@ pub(crate) type IntVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u
 pub(crate) type IntVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
 
-
 impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
     /// Creates a builder for constructing an owned [`IntVec`] from a slice of data.
     ///
@@ -382,11 +384,8 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         len: usize,
         encoding: Codes,
     ) -> Result<Self, IntVecError> {
-        let samples = FixedVec::<u64, u64, LE, B>::from_parts(
-            samples_data,
-            samples_len,
-            samples_num_bits,
-        )?;
+        let samples =
+            FixedVec::<u64, u64, LE, B>::from_parts(samples_data, samples_len, samples_num_bits)?;
 
         if k == 0 {
             return Err(IntVecError::InvalidParameters(
@@ -457,7 +456,10 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
     ///
     /// Returns `None` if `mid` is out of bounds.
     #[allow(clippy::type_complexity)]
-    pub fn split_at(&'_ self, mid: usize) -> Option<(IntVecSlice<'_, T, E, B>, IntVecSlice<'_, T, E, B>)> {
+    pub fn split_at(
+        &'_ self,
+        mid: usize,
+    ) -> Option<(IntVecSlice<'_, T, E, B>, IntVecSlice<'_, T, E, B>)> {
         if mid > self.len {
             return None;
         }
@@ -514,7 +516,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
     }
 
     /// Returns an iterator over the decompressed values.
-    pub fn iter(&'_ self) -> IntVecIter<'_, T, E, B>
+    pub fn iter(&'_ self) -> impl Iterator<Item = T> + '_
     where
         for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
