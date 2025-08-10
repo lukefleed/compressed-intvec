@@ -2377,10 +2377,10 @@ where
 {
     type Error = Error;
 
-    /// Creates a `FixedVec` from a slice using `BitWidth::Minimal` and default parameters.
+    /// Creates a [`FixedVec`] from a slice using [`BitWidth::Minimal`] and default parameters.
     ///
     /// This is a convenience method equivalent to `FixedVec::builder().build(slice)`.
-    /// It uses the default `Word` (`usize`) and `Endianness` (`LE`) associated with the element type `T`.
+    /// It uses the default [`Word`] ([`usize`]) and [`Endianness`] ([`LE`]) associated with the element type `T`.
     ///
     /// # Examples
     ///
@@ -2389,7 +2389,7 @@ where
     /// use std::convert::TryFrom;
     ///
     /// // For unsigned types
-    /// let data_u: &[u32] = &;
+    /// let data_u: &[u32] = &[10, 20, 30];
     /// let vec_u = UFixedVec::<u32>::try_from(data_u).unwrap();
     /// assert_eq!(vec_u.bit_width(), 5);
     ///
