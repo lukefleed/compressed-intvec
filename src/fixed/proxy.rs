@@ -6,8 +6,8 @@
 //! Because [`FixedVec`] stores its elements in a compressed, bit-packed format,
 //! it is not possible to return a direct mutable reference (`&mut T`) to an
 //! element. Instead, methods like [`at_mut`](super::FixedVec::at_mut) return a
-//! `MutProxy`. This proxy holds a temporary, decoded copy of an element's value.
-//! When the proxy is dropped (goes out of scope), its `Drop` implementation
+//! [`MutProxy`]. This proxy holds a temporary, decoded copy of an element's value.
+//! When the proxy is dropped (goes out of scope), its [`Drop`] implementation
 //! automatically writes the (potentially modified) value back into the vector.
 //!
 //! # Examples
@@ -32,12 +32,15 @@ use super::{
     FixedVec,
 };
 use dsi_bitstream::prelude::Endianness;
-use std::ops::{Deref, DerefMut};
+use std::{
+    mem,
+    ops::{Deref, DerefMut},
+};
 
 /// A proxy object for mutable access to an element within a [`FixedVec`].
 ///
 /// This struct is returned by [`FixedVec::at_mut`]. It holds a temporary copy
-/// of an element's value. When the proxy is dropped, its `Drop` implementation
+/// of an element's value. When the proxy is dropped, its [`Drop`] implementation
 /// writes the (potentially modified) value back into the parent vector.
 /// This "copy-on-read, write-on-drop" mechanism allows for an API that feels
 /// like direct mutable access.
@@ -63,15 +66,27 @@ where
     E: Endianness,
     B: AsRef<[W]> + AsMut<[W]>,
 {
-    /// Creates a new `MutProxy`.
+    /// Creates a new [`MutProxy`].
     ///
-    /// This is called by `FixedVec::at_mut`. It reads the initial value
+    /// This is called by [`at_mut`](FixedVec::at_mut). It reads the initial value
     /// from the vector and stores it in the `value` field.
     pub(super) fn new(vec: &'a mut FixedVec<T, W, E, B>, index: usize) -> Self {
         let value = vec
             .get(index)
             .expect("Index out of bounds in MutProxy creation");
         Self { vec, index, value }
+    }
+
+    /// Consumes the proxy, returning the current value without writing it back.
+    ///
+    /// This can be used to avoid the overhead of a write operation if the value
+    /// was read but not modified.
+    pub fn into_inner(self) -> T {
+        // Take ownership of the value.
+        let value = self.value;
+        // Prevent the Drop implementation from running, thus skipping the write-back.
+        mem::forget(self);
+        value
     }
 }
 
@@ -110,7 +125,7 @@ where
     E: Endianness,
     B: AsRef<[W]> + AsMut<[W]>,
 {
-    /// Writes the potentially modified value back to the `FixedVec` when the
+    /// Writes the potentially modified value back to the [`FixedVec`] when the
     /// proxy goes out of scope.
     fn drop(&mut self) {
         // The `value` field is copied here before being passed to `set`.

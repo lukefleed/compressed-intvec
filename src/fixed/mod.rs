@@ -1291,7 +1291,7 @@ where
         let bits_per_word = <W as Word>::BITS;
 
         // Fast path for word-aligned shifts, using `copy_within`.
-        if shift_amount.is_multiple_of(bits_per_word) {
+        if shift_amount % bits_per_word == 0 {
             let start_write_word = start_bit / bits_per_word;
             let start_read_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
@@ -1359,7 +1359,7 @@ where
         }
 
         // Fast path for word-aligned shifts.
-        if shift_amount.is_multiple_of(bits_per_word) {
+        if shift_amount % bits_per_word == 0 {
             let start_read_word = start_bit / bits_per_word;
             let start_write_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);

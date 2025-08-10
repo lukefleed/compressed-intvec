@@ -1,7 +1,7 @@
-//! # Macros for `AtomicFixedVec`
+//! # Macros for [`AtomicFixedVec`]
 /// Creates an [`AtomicFixedVec`] with default parameters.
 ///
-/// This macro simplifies the creation of an [`AtomicFixedVec`]. It uses a `u64`
+/// This macro simplifies the creation of an [`AtomicFixedVec`]. It uses a [`u64`]
 /// storage backend and [`BitWidth::Minimal`](crate::fixed::BitWidth::Minimal) for space efficiency.
 ///
 /// There are two forms of this macro:

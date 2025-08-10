@@ -1,4 +1,4 @@
-//! # `AtomicFixedVec` Builder
+//! # [`AtomicFixedVec`] Builder
 //!
 //! This module provides a builder for constructing an owned [`AtomicFixedVec`]
 //! from a slice of data (`&[T]`). It mirrors the functionality of the standard
@@ -9,7 +9,7 @@
 //!
 //! ## Building from a slice
 //!
-//! ```
+//! ```rust
 //! use compressed_intvec::prelude::*;
 //! use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
 //!
@@ -42,6 +42,38 @@ use std::sync::atomic::AtomicU64;
 ///
 /// This builder analyzes a slice to determine the `bit_width` based on
 /// the selected [`BitWidth`] strategy and then constructs the thread-safe vector.
+///
+/// # Example
+///
+/// ```
+/// use compressed_intvec::prelude::*;
+/// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
+///
+/// let data: &[u32] = &[10, 20, 30, 40, 50];
+///
+/// // The builder can infer the minimal bit width (6 bits for 50).
+/// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+///     .build(data)
+///     .unwrap();
+///
+/// assert_eq!(vec.bit_width(), 6);
+///
+/// // Or a specific strategy can be chosen.
+/// let vec_pow2: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+///     .bit_width(BitWidth::PowerOfTwo)
+///     .build(data)
+///     .unwrap();
+///
+/// assert_eq!(vec_pow2.bit_width(), 8);
+///
+/// // You can also specify an explicit bit width.
+/// let vec_explicit: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+///    .bit_width(BitWidth::Explicit(10))
+///    .build(data)
+///    .unwrap();
+///
+/// assert_eq!(vec_explicit.bit_width(), 10);
+/// ```
 #[derive(Debug, Clone)]
 pub struct AtomicFixedVecBuilder<T: Storable<u64>> {
     bit_width_strategy: BitWidth,
@@ -70,6 +102,21 @@ where
     }
 
     /// Sets the strategy for determining the number of bits for each element.
+    ///
+    /// This can be one of:
+    /// - [`BitWidth::Minimal`]: Automatically determines the minimal bit width needed.
+    /// - [`BitWidth::PowerOfTwo`]: Rounds up to the next power of two.
+    /// - [`BitWidth::Explicit`]: Uses the specified number of bits explicitly.
+    ///
+    /// # Note
+    ///
+    /// Choosing [`BitWidth::Minimal`] and [`BitWidth::PowerOfTwo`] introduces a one-time overhead
+    /// at construction time to find the maximum value in the input slice.
+    ///
+    /// # Performance
+    ///
+    /// Choosing [`BitWidth::PowerOfTwo`] allows for true atomic operations on the vector, resulting in
+    /// better performance for concurrent access patterns. However, it may use more space than necessary.
     pub fn bit_width(mut self, strategy: BitWidth) -> Self {
         self.bit_width_strategy = strategy;
         self
@@ -158,7 +205,7 @@ where
     }
 }
 
-/// A non-atomic, unsafe helper to set a value in a slice of `AtomicU64`.
+/// A non-atomic, unsafe helper to set a value in a slice of [`AtomicU64`].
 /// This is only used during the initial construction of the vector.
 ///
 /// # Safety

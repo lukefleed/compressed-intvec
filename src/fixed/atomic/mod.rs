@@ -18,10 +18,10 @@
 //!   (e.g., 2, 4, 8, 16, 32), and it evenly divides the 64-bit word size,
 //!   most operations can be performed with lock-free atomic instructions.
 //!   This is because each element is guaranteed to be fully contained within a
-//!   single `AtomicU64` word.
+//!   single [`AtomicU64`] word.
 //!
 //! - **Non-Power-of-Two `bit_width`**: When the `bit_width` is not a power of
-//!   two, an element's value may span across the boundary of two `AtomicU64`
+//!   two, an element's value may span across the boundary of two [`AtomicU64`]
 //!   words. Modifying such an element requires updating two words simultaneously,
 //!   which cannot be done in a single atomic hardware instruction.
 //!
@@ -82,7 +82,7 @@
 //!
 //! ## Storing Signed Integers
 //!
-//! `AtomicFixedVec` can also store signed integers. The underlying `Storable`
+//! `AtomicFixedVec` can also store signed integers. The underlying [`Storable`]
 //! trait uses zig-zag encoding to store signed values efficiently, so that
 //! small negative numbers require few bits, just like small positive numbers.
 //!
@@ -108,6 +108,53 @@
 //! atomic_vec.store(0, -3, Ordering::SeqCst);
 //! assert_eq!(atomic_vec.load(0, Ordering::SeqCst), -3);
 //! ```
+//!
+//! //! ## Parallel Iteration
+//!
+//! When the `parallel` feature is enabled (by default is enabled), you can use [`par_iter`](AtomicFixedVec::par_iter) to process
+//! the vector's elements concurrently.
+//!
+//! ```
+//! # #[cfg(feature = "parallel")] {
+//! use compressed_intvec::prelude::*;
+//! use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec};
+//! use rayon::prelude::*;
+//!
+//! let data: Vec<u32> = (0..10_000).collect();
+//! let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+//!     .build(&data)
+//!     .unwrap();
+//!
+//! // Use the parallel iterator to find the sum of all even numbers.
+//! let sum_of_evens: u32 = vec.par_iter()
+//!     .filter(|&x| x % 2 == 0)
+//!     .sum();
+//!
+//! let expected_sum: u32 = (0..10_000).filter(|&x| x % 2 == 0).sum();
+//! assert_eq!(sum_of_evens, expected_sum);
+//! # }
+//! ```
+//!
+//! ### Memory Ordering and Locking
+//!
+//! The memory [`Ordering`] specified in methods like [`load`](AtomicFixedVec::load), [`store`](AtomicFixedVec::store), or
+//! [`fetch_add`](AtomicFixedVec::fetch_add) is always respected, but its interaction with the internal locking
+//! mechanism is important to understand.
+//!
+//! -   **Lock-Free Path**: When an element is fully contained within a single
+//!     [`u64`] word, the specified [`Ordering`] is applied directly to the underlying
+//!     atomic instructions, providing the standard guarantees described in the
+//!     Rust documentation.
+//!
+//! -   **Locked Path**: When an element spans two [`u64`] words, a fine-grained
+//!     mutex is acquired. This lock ensures that the two-word operation is
+//!     atomic with respect to other locked operations on the same memory region.
+//!     The specified [`Ordering`] is then applied to the atomic writes performed
+//!     within the locked critical section. This guarantees that the effects of
+//!     the operation become visible to other threads according to the chosen
+//!     ordering, but the visibility is still mediated by the mutual exclusion
+//!     provided by the lock.
+//!
 
 #[macro_use]
 pub mod macros;
@@ -137,7 +184,7 @@ const MIN_LOCKS: usize = 2;
 /// A heuristic to determine the stripe size: one lock per this many data words.
 const WORDS_PER_LOCK: usize = 64;
 
-/// A proxy object for mutable access to an element within an `AtomicFixedVec`
+/// A proxy object for mutable access to an element within an [`AtomicFixedVec`]
 /// during parallel iteration.
 ///
 /// This struct is returned by the [`par_iter_mut`](AtomicFixedVec::par_iter_mut)
@@ -166,6 +213,18 @@ where
     fn new(vec: &'a AtomicFixedVec<T>, index: usize) -> Self {
         let value = vec.load(index, Ordering::Relaxed);
         Self { vec, index, value }
+    }
+
+    /// Consumes the proxy, returning the current value without writing it back.
+    ///
+    /// This can be used to avoid the overhead of a write operation if the value
+    /// was read but not modified.
+    pub fn into_inner(self) -> T {
+        use std::mem;
+
+        let value = self.value;
+        mem::forget(self); // Prevent the proxy from writing back
+        value
     }
 }
 
@@ -196,7 +255,7 @@ impl<T> Drop for AtomicMutProxy<'_, T>
 where
     T: Storable<u64> + Copy + ToPrimitive,
 {
-    /// Writes the potentially modified value back to the `AtomicFixedVec` when the
+    /// Writes the potentially modified value back to the [`AtomicFixedVec`] when the
     /// proxy goes out of scope.
     fn drop(&mut self) {
         // The value is copied before being passed to store.
@@ -208,7 +267,7 @@ where
 }
 
 /// A thread-safe, compressed, randomly accessible vector of integers with
-/// fixed-width encoding, backed by `u64` atomic words.
+/// fixed-width encoding, backed by [`u64`] atomic words.
 #[derive(Debug)]
 pub struct AtomicFixedVec<T>
 where
@@ -229,7 +288,7 @@ impl<T> AtomicFixedVec<T>
 where
     T: Storable<u64> + Copy + ToPrimitive,
 {
-    /// Creates a builder for constructing an `AtomicFixedVec` from a slice.
+    /// Creates a builder for constructing an [`AtomicFixedVec`] from a slice.
     ///
     /// # Examples
     ///
@@ -277,7 +336,7 @@ where
 
     /// Atomically loads the value at `index`.
     ///
-    /// `load` takes an `Ordering` argument which describes the memory ordering
+    /// [`load`](AtomicFixedVec::load) takes an [`Ordering`] argument which describes the memory ordering
     /// of this operation. For more information, see the [Rust documentation on
     /// memory ordering](https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html).
     ///
@@ -287,6 +346,22 @@ where
     #[inline(always)]
     pub fn load(&self, index: usize, order: Ordering) -> T {
         assert!(index < self.len, "load index out of bounds");
+        let loaded_word = self.atomic_load(index, order);
+        T::from_word(loaded_word)
+    }
+
+    /// Atomically loads the value at `index` without bounds checking.
+    ///
+    /// [`load_unchecked`](AtomicFixedVec::load_unchecked) takes an [`Ordering`] argument which describes the memory ordering
+    /// of this operation. For more information, see the [Rust documentation on
+    /// memory ordering](https://doc.rust-lang.org/std/sync/atomic/enum.Ordering.html).
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline(always)]
+    pub unsafe fn load_unchecked(&self, index: usize, order: Ordering) -> T {
+        debug_assert!(index < self.len, "load_unchecked index out of bounds");
         let loaded_word = self.atomic_load(index, order);
         T::from_word(loaded_word)
     }
@@ -305,6 +380,20 @@ where
         self.atomic_store(index, value_w, order);
     }
 
+    /// Atomically stores `value` at `index` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    /// Note that the stored value is not checked for whether it fits in the
+    /// configured `bit_width` and will be truncated if it is too large.
+    #[inline(always)]
+    pub unsafe fn store_unchecked(&self, index: usize, value: T, order: Ordering) {
+        debug_assert!(index < self.len, "store_unchecked index out of bounds");
+        let value_w = T::into_word(value);
+        self.atomic_store(index, value_w, order);
+    }
+
     /// Atomically swaps the value at `index` with `value`, returning the
     /// previous value.
     ///
@@ -314,6 +403,19 @@ where
     #[inline(always)]
     pub fn swap(&self, index: usize, value: T, order: Ordering) -> T {
         assert!(index < self.len, "swap index out of bounds");
+        let value_w = T::into_word(value);
+        let old_word = self.atomic_swap(index, value_w, order);
+        T::from_word(old_word)
+    }
+
+    /// Atomically swaps the value at `index` with `value` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline(always)]
+    pub unsafe fn swap_unchecked(&self, index: usize, value: T, order: Ordering) -> T {
+        debug_assert!(index < self.len, "swap_unchecked index out of bounds");
         let value_w = T::into_word(value);
         let old_word = self.atomic_swap(index, value_w, order);
         T::from_word(old_word)
@@ -347,9 +449,40 @@ where
         }
     }
 
+    /// Atomically compares the value at `index` with `current` and, if they are
+    /// equal, replaces it with `new`, without bounds checking.
+    ///
+    /// Returns `Ok` with the previous value on success, or `Err` with the
+    /// actual value if the comparison fails. This is also known as a
+    /// "compare-and-set" (CAS) operation.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline(always)]
+    pub unsafe fn compare_exchange_unchecked(
+        &self,
+        index: usize,
+        current: T,
+        new: T,
+        success: Ordering,
+        failure: Ordering,
+    ) -> Result<T, T> {
+        debug_assert!(
+            index < self.len,
+            "compare_exchange_unchecked index out of bounds"
+        );
+        let current_w = T::into_word(current);
+        let new_w = T::into_word(new);
+        match self.atomic_compare_exchange(index, current_w, new_w, success, failure) {
+            Ok(w) => Ok(T::from_word(w)),
+            Err(w) => Err(T::from_word(w)),
+        }
+    }
+
     /// Returns the element at `index`, or `None` if out of bounds.
     ///
-    /// This is an ergonomic wrapper around `load` that uses `Ordering::SeqCst`.
+    /// This is an ergonomic wrapper around [`load`](AtomicFixedVec::load) that uses [`Ordering::SeqCst`].
     #[inline(always)]
     pub fn get(&self, index: usize) -> Option<T> {
         if index >= self.len {
@@ -358,14 +491,59 @@ where
         Some(self.load(index, Ordering::SeqCst))
     }
 
+    /// Returns the element at `index` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline(always)]
+    pub unsafe fn get_unchecked(&self, index: usize) -> T {
+        self.load_unchecked(index, Ordering::SeqCst)
+    }
+
     /// Returns an iterator over the elements of the vector.
     ///
-    /// The iterator atomically loads each element using `Ordering::SeqCst`.
+    /// The iterator atomically loads each element using [`Ordering::SeqCst`].
     pub fn iter(&self) -> impl Iterator<Item = T> + '_ {
         AtomicFixedVecIter {
             vec: self,
             current_index: 0,
         }
+    }
+
+    /// Returns a parallel iterator over the elements of the vector.
+    ///
+    /// The iterator atomically loads each element using [`Ordering::Relaxed`].
+    /// This operation is highly parallelizable as each element can be loaded
+    /// independently.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "parallel")] {
+    /// use compressed_intvec::prelude::*;
+    /// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
+    /// use rayon::prelude::*;
+    /// use std::sync::atomic::Ordering;
+    ///
+    /// let data: Vec<u32> = (0..1000).collect();
+    /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
+    ///     .build(&data)
+    ///     .unwrap();
+    ///
+    /// // Sum the elements in parallel.
+    /// let sum: u32 = vec.par_iter().sum();
+    /// assert_eq!(sum, (0..1000).sum());
+    /// # }
+    /// ```
+    #[cfg(feature = "parallel")]
+    pub fn par_iter(&self) -> impl ParallelIterator<Item = T> + '_
+    where
+        T: Send + Sync,
+    {
+        (0..self.len())
+            .into_par_iter()
+            .map(move |i| self.load(i, Ordering::Relaxed))
     }
 
     /// Returns a parallel iterator that allows modifying elements of the vector in place.
@@ -984,7 +1162,7 @@ where
     /// Creates an `AtomicFixedVec` from an owned `FixedVec`.
     /// This is a zero-copy operation that re-uses the allocated buffer.
     fn from(fixed_vec: FixedVec<T, W, E, Vec<W>>) -> Self {
-        // SAFETY: This transmutation is safe because `AtomicU64` and `u64` have
+        // SAFETY: This transmutation is safe because [`AtomicU64`] and [`u64`] have
         // the same in-memory representation. We are taking ownership of the Vec,
         // ensuring no other references to the non-atomic data exist.
         let storage = unsafe {
@@ -1022,7 +1200,7 @@ where
     /// Creates a `FixedVec` from an owned `AtomicFixedVec`.
     /// This is a zero-copy operation that re-uses the allocated buffer.
     fn from(atomic_vec: AtomicFixedVec<T>) -> Self {
-        // SAFETY: This transmutation is safe because `u64` and `AtomicU64` have
+        // SAFETY: This transmutation is safe because [`u64`] and [`AtomicU64`] have
         // the same in-memory representation. We are taking ownership of the Vec,
         // ensuring no other references to the atomic data exist.
         let bits = unsafe {
@@ -1148,7 +1326,7 @@ impl<T> PartialEq for AtomicFixedVec<T>
 where
     T: Storable<u64> + PartialEq + Copy + ToPrimitive,
 {
-    /// Checks for equality between two `AtomicFixedVec` instances.
+    /// Checks for equality between two [`AtomicFixedVec`] instances.
     ///
     /// This comparison is performed by iterating over both vectors and comparing
     /// their elements one by one. The reads are done atomically but the overall
