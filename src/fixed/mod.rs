@@ -156,7 +156,7 @@ use num_traits::ToPrimitive;
 use std::{error::Error as StdError, fmt, iter::FromIterator, marker::PhantomData};
 use traits::{Storable, Word};
 
-use crate::fixed::proxy::MutProxy;
+use crate::fixed::{proxy::MutProxy, traits::DefaultParams};
 
 // Re-export atomic aliases for convenience.
 pub use atomic::{AtomicFixedVec, SAtomicFixedVec, UAtomicFixedVec};
@@ -2359,5 +2359,46 @@ where
     /// Converts a `Box<[]>`-backed `FixedVec` into a `Vec`-backed `FixedVec`.
     fn from(vec: FixedVec<T, W, E, Box<[W]>>) -> Self {
         unsafe { Self::new_unchecked(vec.bits.into_vec(), vec.len, vec.bit_width) }
+    }
+}
+
+impl<'a, T> TryFrom<&'a [T]> for FixedVec<T, <T as DefaultParams>::W, <T as DefaultParams>::E>
+where
+    T: Storable<<T as DefaultParams>::W> + DefaultParams,
+    <T as DefaultParams>::W: Word,
+    <T as DefaultParams>::E: Endianness,
+    dsi_bitstream::impls::BufBitWriter<
+        <T as DefaultParams>::E,
+        dsi_bitstream::impls::MemWordWriterVec<
+            <T as DefaultParams>::W,
+            Vec<<T as DefaultParams>::W>,
+        >,
+    >: dsi_bitstream::prelude::BitWrite<<T as DefaultParams>::E, Error = std::convert::Infallible>,
+{
+    type Error = Error;
+
+    /// Creates a `FixedVec` from a slice using `BitWidth::Minimal` and default parameters.
+    ///
+    /// This is a convenience method equivalent to `FixedVec::builder().build(slice)`.
+    /// It uses the default `Word` (`usize`) and `Endianness` (`LE`) associated with the element type `T`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed::{UFixedVec, SFixedVec};
+    /// use std::convert::TryFrom;
+    ///
+    /// // For unsigned types
+    /// let data_u: &[u32] = &;
+    /// let vec_u = UFixedVec::<u32>::try_from(data_u).unwrap();
+    /// assert_eq!(vec_u.bit_width(), 5);
+    ///
+    /// // For signed types
+    /// let data_s: &[i16] = &[-10, 0, 10];
+    /// let vec_s = SFixedVec::<i16>::try_from(data_s).unwrap();
+    /// assert_eq!(vec_s.bit_width(), 5);
+    /// ```
+    fn try_from(slice: &'a [T]) -> Result<Self, Self::Error> {
+        Self::builder().bit_width(BitWidth::Minimal).build(slice)
     }
 }

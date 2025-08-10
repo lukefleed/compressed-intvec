@@ -1,33 +1,3 @@
-// benches/variable/bench_sequential_ops.rs
-
-//! # Benchmark for Sequential and Parallel Iteration Performance
-//!
-//! This benchmark suite is designed to measure the throughput of iterating over
-//! an `IntVec`, both sequentially with `iter()` and in parallel with `par_iter()`.
-//! It provides a comprehensive comparison of all sensible variable-length codecs
-//! across a range of different data distributions.
-//!
-//! ## Methodology
-//!
-//! The benchmark evaluates performance along two key dimensions:
-//!
-//! 1.  **Data Distribution**: To understand how codecs perform under different
-//!     conditions, several data distributions are tested:
-//!     - `UniformLow`: Small, uniformly distributed integers.
-//!     - `UniformHigh`: Large, uniformly distributed integers.
-//!     - `RiceImplied`: Data with a geometric-like distribution, ideal for
-//!       Rice and Golomb codes.
-//!     - `ZetaImplied`: Data with a power-law distribution, ideal for Zeta codes.
-//!
-//! 2.  **Compression Codec**: A wide variety of codecs from `VariableCodecSpec` are
-//!     tested to measure their raw decoding speed. This includes fundamental codes
-//!     like Gamma and Delta, as well as specialized ones like Zeta and fast,
-//!     byte-aligned codes like VByte.
-//!
-//! The results are compared against a baseline of iterating over an uncompressed
-//! `Vec<u64>`, providing a clear measure of the decompression overhead for each
-//! codec and scenario.
-
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use dsi_bitstream::{
@@ -86,7 +56,6 @@ impl Distribution {
     }
 }
 
-/// The main benchmark function for sequential and parallel iteration.
 fn benchmark_sequential_ops(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
     const K_VALUE: usize = 32; // A typical k value
@@ -183,7 +152,7 @@ criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(10)
-        .warm_up_time(Duration::from_millis(10))
+        .warm_up_time(Duration::from_millis(100))
         .measurement_time(Duration::from_secs(2));
     targets = benchmark_sequential_ops
 }

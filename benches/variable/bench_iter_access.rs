@@ -1,32 +1,3 @@
-//! # Benchmark for Iterator-Based Access Strategies
-//!
-//! This benchmark suite evaluates the performance of different strategies for
-//! accessing `IntVec` data when lookup indices are provided by a streaming
-//! source (an iterator). This is a common scenario in applications like inverted
-//! indexes, where materializing all indices into a `Vec` is not feasible.
-//!
-//! ## Methodology
-//!
-//! The benchmark compares three key strategies:
-//!
-//! 1.  **`get_many_from_iter`**: The library's dedicated high-level method for this
-//!     scenario. It processes the entire iterator stream in a single pass,
-//!     internally using a stateful `IntVecSeqReader` to optimize for locality.
-//!
-//! 2.  **`loop_seq_reader_get`**: A loop that manually calls `get` on a reusable
-//!     *stateful* `IntVecSeqReader`. This measures the raw performance of the
-//!     stateful reader logic without the overhead of the `get_many_from_iter`
-//!     wrapper, making it a good baseline for sequential access.
-//!
-//! 3.  **`loop_reader_get`**: A loop that manually calls `get` on a reusable
-//!     *stateless* `IntVecReader`. This simulates a naive but reasonable
-//!     implementation and serves to highlight the performance benefits of the
-//!     state-aware `IntVecSeqReader` when access patterns have locality.
-//!
-//! This three-way comparison provides a comprehensive view of the trade-offs
-//! between high-level convenience (`get_many_from_iter`) and the raw performance
-//! of stateful vs. stateless access logic in a streaming context.
-
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
@@ -121,13 +92,11 @@ impl AccessPattern {
     }
 }
 
-/// The main benchmark function.
 fn benchmark_iter_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 10_000_000;
     const NUM_ACCESSES: usize = 100_000;
     const K_VALUE: usize = 32;
 
-    // --- Setup Data and IntVec ---
     let data = generate_random_vec(VECTOR_SIZE, 1 << 20);
     let intvec = LEIntVec::builder(&data)
         .k(K_VALUE)
@@ -149,7 +118,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
         let mut rng = SmallRng::seed_from_u64(1337);
         let access_indices = pattern.generate_indices(&mut rng, NUM_ACCESSES, VECTOR_SIZE, K_VALUE);
 
-        // 1. Benchmark `get_many_from_iter` (high-level, optimized streaming method).
+        // 1. Benchmark `get_many_from_iter`
         group.bench_function("get_many_from_iter", |b| {
             b.iter(|| {
                 let results = intvec
@@ -192,7 +161,7 @@ criterion_group! {
     config = Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_millis(10))
-        .measurement_time(Duration::from_secs(5));
+        .measurement_time(Duration::from_secs(2));
     targets = benchmark_iter_access
 }
 criterion_main!(benches);

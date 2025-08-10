@@ -36,7 +36,6 @@ impl Distribution {
     }
 }
 
-/// The main benchmark function for construction speed.
 fn benchmark_construction(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
     const K_VALUE: usize = 32;
@@ -53,9 +52,9 @@ fn benchmark_construction(c: &mut Criterion) {
         ("Omega", VariableCodecSpec::Omega),
         ("VByteLe", VariableCodecSpec::VByteLe),
         ("VByteBe", VariableCodecSpec::VByteBe),
-        ("Pi", VariableCodecSpec::Pi { k: Some(3) }),
+        ("Pi", VariableCodecSpec::Pi { k: None }),
         ("Golomb_Auto", VariableCodecSpec::Golomb { b: None }),
-        ("ExpGolomb", VariableCodecSpec::ExpGolomb { k: Some(2) }),
+        ("ExpGolomb", VariableCodecSpec::ExpGolomb { k: None }),
     ];
 
     for distribution in distributions {
@@ -64,7 +63,6 @@ fn benchmark_construction(c: &mut Criterion) {
 
         let data = distribution.generate(VECTOR_SIZE);
 
-        // --- Benchmark `build` from slice for various codecs ---
         for (spec_name, codec_spec) in codecs_to_test {
             // Skip Unary codec for RiceImplied distribution as it's too slow
             if distribution == Distribution::RiceImplied

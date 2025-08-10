@@ -51,7 +51,6 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
         .collect()
 }
 
-/// The main benchmark function that orchestrates all tests.
 fn benchmark_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
     const NUM_ACCESSES: usize = 100_000;
@@ -89,13 +88,6 @@ fn benchmark_access(c: &mut Criterion) {
 
     for (distribution, dist_name) in distributions {
         let mut group = c.benchmark_group(dist_name);
-
-        // Configure the benchmark group settings.
-        group
-            .sample_size(10)
-            .warm_up_time(Duration::from_millis(1))
-            .throughput(Throughput::Elements(NUM_ACCESSES as u64));
-
         let data = distribution.generate(VECTOR_SIZE);
 
         for (spec_name, codec_spec) in codecs_to_test {
