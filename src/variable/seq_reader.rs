@@ -39,7 +39,7 @@ use dsi_bitstream::{
 /// mostly-forward access patterns.
 ///
 /// It is a more specialized tool than [`IntVecReader`](super::reader::IntVecReader).
-/// 
+///
 /// # Performance
 ///
 /// [`IntVecSeqReader`] maintains an internal state of the current decoding position.
@@ -157,7 +157,7 @@ where
         }
         // Read the target value.
         let word = self.code_reader.read(&mut self.reader).unwrap();
-        // Update the cursor to the position *after* the read element.
+        // Update the current index to the next position.
         self.current_index = index + 1;
         Storable::from_word(word)
     }

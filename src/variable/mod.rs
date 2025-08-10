@@ -806,6 +806,13 @@ where
     /// matching element. If the value is not found, returns `Err(usize)` with
     /// the index where the value could be inserted to maintain order.
     ///
+    /// # Complexity
+    ///
+    /// The time complexity of this operation is O(k * log n), where `n` is the
+    /// number of elements in the vector and `k` is the sampling rate. This is
+    /// because each of the O(log n) probes during the search requires an
+    /// element access, which has a cost proportional to `k` in the worst case.
+    ///
     /// # Examples
     ///
     /// ```
@@ -822,6 +829,11 @@ where
     }
 
     /// Binary searches this vector with a custom comparison function.
+    ///
+    /// # Complexity
+    ///
+    /// The time complexity of this operation is O(k * log n), where `n` is the
+    /// number of elements in the vector and `k` is the sampling rate.
     #[inline]
     pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
     where
@@ -846,6 +858,11 @@ where
     }
 
     /// Binary searches this vector with a key extraction function.
+    ///
+    /// # Complexity
+    ///
+    /// The time complexity of this operation is O(k * log n), where `n` is the
+    /// number of elements in the vector and `k` is the sampling rate.
     #[inline]
     pub fn binary_search_by_key<K: Ord, F>(&self, b: &K, mut f: F) -> Result<usize, usize>
     where

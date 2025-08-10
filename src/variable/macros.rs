@@ -7,7 +7,7 @@
 //! [`IntVec`]: crate::variable::IntVec
 //! [`IntVec::builder`]: crate::variable::IntVec::builder
 
-/// Creates a [`LEIntVec`] (a vector of `u64`s) containing the given elements.
+/// Creates a [`LEIntVec`] (an `IntVec` of [`u64`]s) containing the given elements.
 ///
 /// `int_vec!` allows for concise initialization of a [`LEIntVec`], which is an
 /// alias for `IntVec<u64, LE>`. It uses a set of reasonable defaults for its
@@ -15,8 +15,13 @@
 ///
 /// - **Codec**: [`VariableCodecSpec::Auto`] is used to automatically select the
 ///   most space-efficient codec for the provided data.
-/// - **Sampling Rate (`k`)**: A default value of `32` is used, offering a
+/// - **Sampling Rate (`k`)**: A default value of `16` is used, offering a
 ///   good balance between random access speed and memory overhead.
+///
+/// # Note on Types
+///
+/// All input elements are automatically cast to [`u64`]. To avoid ambiguity, it is
+/// good practice to use a type suffix on at least the first literal (e.g., `100u64`).
 ///
 /// For more control over these parameters, or to use a different integer type,
 /// please use the [`IntVec::builder`](crate::variable::IntVec::builder).
@@ -48,7 +53,7 @@
 /// assert_eq!(v.len(), 100);
 /// assert_eq!(v.get(50), Some(42));
 /// ```
-/// 
+///
 /// [`LEIntVec`]: crate::variable::LEIntVec
 /// [`VariableCodecSpec::Auto`]: crate::variable::VariableCodecSpec::Auto
 #[macro_export]
@@ -59,7 +64,7 @@ macro_rules! int_vec {
     ($($elem:expr),* $(,)?) => {
         $crate::variable::IntVec::builder(&[$($elem as u64),*])
             .codec($crate::variable::VariableCodecSpec::Auto)
-            .k(32)
+            .k(16)
             .build()
             .unwrap()
     };
@@ -69,21 +74,25 @@ macro_rules! int_vec {
             v.resize($len, $elem as u64);
             $crate::variable::IntVec::builder(&v)
                 .codec($crate::variable::VariableCodecSpec::Auto)
-                .k(32)
+                .k(16)
                 .build()
                 .unwrap()
         }
     };
 }
 
-/// Creates a [`LESIntVec`] (a vector of `i64`s) containing the given elements.
+/// Creates a [`LESIntVec`] (an `IntVec` of [`i64`]s) containing the given elements.
 ///
 /// `sint_vec!` allows for concise initialization of a [`LESIntVec`], which is an
 /// alias for `IntVec<i64, LE>`. It uses a set of reasonable defaults:
 ///
 /// - **Codec**: [`VariableCodecSpec::Auto`] is used to automatically select the
 ///   best codec based on the data's properties (via zig-zag encoding).
-/// - **Sampling Rate (`k`)**: A default value of `32` is used.
+/// - **Sampling Rate (`k`)**: A default value of `16` is used.
+///
+/// # Note on Types
+///
+/// All input elements are automatically cast to [`i64`].
 ///
 /// For more control over these parameters, or to use a different integer type,
 /// please use the [`IntVec::builder`](crate::variable::IntVec::builder).
@@ -115,7 +124,7 @@ macro_rules! int_vec {
 /// assert_eq!(v.len(), 100);
 /// assert_eq!(v.get(50), Some(-42));
 /// ```
-/// 
+///
 /// [`LESIntVec`]: crate::variable::LESIntVec
 /// [`VariableCodecSpec::Auto`]: crate::variable::VariableCodecSpec::Auto
 #[macro_export]
@@ -126,7 +135,7 @@ macro_rules! sint_vec {
     ($($elem:expr),* $(,)?) => {
         $crate::variable::IntVec::builder(&[$($elem as i64),*])
             .codec($crate::variable::VariableCodecSpec::Auto)
-            .k(32)
+            .k(16)
             .build()
             .unwrap()
     };
@@ -136,7 +145,7 @@ macro_rules! sint_vec {
             v.resize($len, $elem as i64);
             $crate::variable::IntVec::builder(&v)
                 .codec($crate::variable::VariableCodecSpec::Auto)
-                .k(32)
+                .k(16)
                 .build()
                 .unwrap()
         }
