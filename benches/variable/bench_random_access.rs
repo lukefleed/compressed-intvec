@@ -1,11 +1,12 @@
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
 };
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::time::Duration;
+use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector};
 use sux::prelude::{BitFieldSlice, BitFieldVec};
 
 /// Enum to define the data distributions for testing.
@@ -62,7 +63,7 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 fn benchmark_random_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
     const NUM_ACCESSES: usize = 100_000;
-    const K_VALUES: [usize; 1] = [32];
+    const K_VALUES: [usize; 8] = [2, 4, 8, 16, 32, 64, 128, 256];
 
     let distributions = [
         Distribution::UniformLow,
@@ -128,6 +129,24 @@ fn benchmark_random_access(c: &mut Criterion) {
             });
         }
 
+        // --- Benchmark succinct::IntVector (k-independent) ---
+        if !data.is_empty() {
+            let mut succinct_iv =
+                IntVector::<u64>::with_capacity(fixed_vec.bit_width(), VECTOR_SIZE as u64);
+            for &val in &data {
+                succinct_iv.push(val);
+            }
+            group.bench_function("succinct::IntVector/get", |b| {
+                b.iter(|| {
+                    for &index in black_box(&access_indices) {
+                        // The `get` method in succinct performs bounds checking.
+                        // We use UFCS here to avoid ambiguity with compressed_intvec's IntVec struct.
+                        black_box(SuccinctIntVec::get(&succinct_iv, index as u64));
+                    }
+                })
+            });
+        }
+
         // --- Benchmark IntVec (k-dependent codecs) ---
         for (spec_name, codec_spec) in variable_codecs {
             if matches!(
@@ -141,17 +160,19 @@ fn benchmark_random_access(c: &mut Criterion) {
             }
 
             for &k_value in &K_VALUES {
-                let intvec = LEIntVec::builder(&data)
+                let intvec = LEIntVec::builder()
                     .k(k_value)
                     .codec(codec_spec)
-                    .build()
+                    .build(&data)
                     .expect("Failed to build IntVec");
+
+                let mut reader = intvec.reader();
 
                 let bench_name = format!("{}/k={}/get_unchecked", spec_name, k_value);
                 group.bench_function(bench_name, |b| {
                     b.iter(|| {
                         for &index in black_box(&access_indices) {
-                            black_box(unsafe { intvec.get_unchecked(index) });
+                            black_box(unsafe { reader.get_unchecked(index) });
                         }
                     })
                 });
@@ -161,13 +182,13 @@ fn benchmark_random_access(c: &mut Criterion) {
     }
 }
 
-criterion_group!(
+criterion_group! {
     name = benches;
     config = Criterion::default()
         .sample_size(10)
         .warm_up_time(Duration::from_millis(10))
-        .measurement_time(Duration::from_secs(2));
+        .measurement_time(Duration::from_secs(1));
     targets = benchmark_random_access
-);
+}
 
 criterion_main!(benches);

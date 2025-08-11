@@ -4,6 +4,7 @@ use std::time::Duration;
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
+use succinct::int_vec::{IntVec, IntVector};
 use sux::prelude::{BitFieldSlice, BitFieldSliceMut, BitFieldVec};
 
 /// Generates a vector with uniformly random values up to a given maximum.
@@ -64,14 +65,16 @@ fn benchmark_random_access(c: &mut Criterion) {
             .bit_width(BitWidth::Explicit(bit_width as usize))
             .build(&data)
             .unwrap();
-        // let be_fixed_vec = BEFixedVec::builder()
-        //     .bit_width(BitWidth::Explicit(bit_width as usize))
-        //     .build(&data)
-        //     .unwrap();
 
         // `from_slice` correctly infers the bit width from the data.
         let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
         assert_eq!(sux_bfv.bit_width(), le_fixed_vec.bit_width());
+
+        // Create succinct::IntVector by pushing elements.
+        let mut succinct_iv = IntVector::<u64>::new(bit_width as usize);
+        for &val in &data {
+            succinct_iv.push(val);
+        }
 
         // --- 3. Benchmark Our LEFixedVec ---
         group.bench_function("LEFixedVec/Unchecked", |b| {
@@ -92,15 +95,15 @@ fn benchmark_random_access(c: &mut Criterion) {
             })
         });
 
-        // // --- 4. Benchmark Our BEFixedVec ---
-        // group.bench_function("BEFixedVec/Unchecked", |b| {
-        //     b.iter(|| {
-        //         for &index in black_box(&access_indices) {
-        //             // SAFETY: Indices are generated within bounds.
-        //             black_box(unsafe { be_fixed_vec.get_unchecked(index) });
-        //         }
-        //     })
-        // });
+        // --- 4. Benchmark succinct::IntVector ---
+        group.bench_function("succinct::IntVector/get", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    // The `get` method in succinct performs bounds checking.
+                    black_box(succinct_iv.get(index as u64));
+                }
+            })
+        });
 
         // --- 5. Benchmark sux::BitFieldVec ---
         group.bench_function("sux::BitFieldVec/Unchecked", |b| {

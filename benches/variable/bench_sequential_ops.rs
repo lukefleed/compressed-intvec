@@ -123,10 +123,10 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
                 continue;
             }
 
-            let intvec = LEIntVec::builder(&data)
+            let intvec = LEIntVec::builder()
                 .k(K_VALUE)
                 .codec(codec_spec)
-                .build()
+                .build(&data)
                 .expect("Failed to build IntVec");
 
             // 1. Sequential Iteration

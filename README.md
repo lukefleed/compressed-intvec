@@ -52,8 +52,6 @@ Implements a vector using variable-length instantaneous codes (e.g., Gamma, Delt
 | **Random Access**   | O(1) (direct computation)                      | O(k) (amortized via sampling)                |
 | **Mutability**      | Yes (`push`, `set`, etc.)                      | No (immutable after creation)                |
 | **Atomic Support**  | Yes ([`AtomicFixedVec`])                       | No (read-only concurrency)                   |
-| **Ideal Data**      | Uniformly distributed                          | Non-uniformly (skewed) distributed           |
-| **Primary Goal**    | Speed and flexibility                          | Compression ratio                            |
 
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`IntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.IntVec.html
@@ -128,19 +126,25 @@ For most use cases, the recommended strategy is [`VariableCodecSpec::Auto`], whi
 | `VariableCodecSpec` Variant | Description & Encoding Strategy | Optimal Data Distribution |
 | :--- | :--- | :--- |
 | **`Auto`** | **Recommended default.** Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
-| `Gamma` (γ) | A universal, parameter-free code. Encodes `n` by representing its length in unary, followed by the value itself. | Data skewed towards small non-negative integers. |
-| `Delta` (δ) | A universal, parameter-free code. Encodes `n` by representing its length in γ-code, making it more efficient than γ for larger values. | Data skewed towards small non-negative integers. |
-| `Rice` | A fast, tunable code. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored in binary). | Data with a geometric distribution. |
-| `Golomb` | A tunable code, more general than Rice, that splits `n` into a quotient and remainder. | Data with a geometric distribution. |
-| `Zeta` (ζ) | A tunable code for power-law data. Encodes `n` by breaking it into blocks and storing the number of blocks in unary. | Word frequencies, node degrees in scale-free networks. |
-| `VByteLe`/`Be`| A byte-aligned code that uses a continuation bit to store integers in a variable number of bytes. Fast decoding. | General-purpose integer data. |
-| `Omega` (ω) | A universal, recursive code that encodes the length of the number's binary representation. Compact for very large numbers. | Implied distribution is approximately 1/x. |
-| `Unary` | The simplest code. Encodes `n` as `n` zero-bits followed by a one. | Extremely skewed distributions (e.g., boolean flags). |
+| `Gamma` (γ) | A universal, parameter-free code. Encodes `n` using the unary code of ⌊log₂(*n*+1)⌋, followed by the remaining bits of `n`+1. | Implied distribution is ≈ 1/(2*x*²). Optimal for data skewed towards small non-negative integers. |
+| `Delta` (δ) | A universal, parameter-free code. Encodes `n` using the γ code of ⌊log₂(*n*+1)⌋, making it more efficient than γ for larger values. | Implied distribution is ≈ 1/(2*x*(log *x*)²). |
+| `Rice` | A fast, tunable version of Golomb codes where the parameter *b* must be a power of two. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored in binary). | Geometric distributions. |
+| `Golomb` | A tunable code, more general than Rice. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored using a minimal binary code). | Geometric distributions. Implied distribution is ≈ 1/*r*ˣ. |
+| `Zeta` (ζ) | A tunable code for power-law data. Encodes `n` based on ⌊⌊log₂(*n*+1)⌋/*k*⌋ in unary, followed by a minimal binary code for the remainder. | Power-law distributions (e.g., word frequencies, node degrees). Implied distribution is ≈ 1/*x*<sup>1+1/*k*</sup>. |
+| `VByteLe`/`Be`| A byte-aligned code that uses a continuation bit to store integers in a variable number of bytes. Fast to decode. The big-endian variant is lexicographical. | Implied distribution is ≈ 1/*x*<sup>8/7</sup>. Good for general-purpose integer data. |
+| `Omega` (ω) | A universal, parameter-free code that recursively encodes the length of the binary representation of `n`. | Implied distribution is approximately 1/*x*. Compact for very large numbers. |
+| `Unary` | The simplest code. Encodes `n` as `n` zero-bits followed by a one-bit. | Geometric distributions with a very high probability of small values (e.g., boolean flags). |
 | `Explicit` | An escape hatch to use any code from the [`dsi-bitstream::codes::Codes`][dsi-bitstream-codes] enum. | Advanced use cases requiring specific, unlisted codes. |
+
+[dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/enum.Codes.html
 
 ### Automatic Selection with `VariableCodecSpec::Auto`
 
-The `Auto` strategy removes the guesswork from codec selection. During the build phase, it analyzes a sample of the input data and selects the codec that offers the best compression ratio. This one-time analysis cost often leads to significant memory savings.
+The `Auto` strategy removes the guesswork from codec selection. During the build phase, it analyzes the input data and selects the codec that offers the best compression ratio. This introduces a (non negligible) one-time cost for the analysis at construction time. Use the `Auto` codec when you want to create an [`IntVec`] once and read it many times, as the amortized cost of the analysis is negligible compared to the space savings and the performance of subsequent reads.
+
+If you need to create multiple [`IntVec`] instances at run-time, consider using a specific codec that matches your data distribution to avoid the overhead of analysis.
+
+
 
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`IntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.IntVec.html

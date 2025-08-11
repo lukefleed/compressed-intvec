@@ -326,6 +326,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "succinct",
  "sux",
 ]
 
@@ -1385,6 +1386,16 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
+
+[[package]]
+name = "succinct"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7798b62081a999bcf090b2f220fee8845dd1c6ffeb17e1bc6ca783825f62a418"
+dependencies = [
+ "byteorder",
+ "num-traits",
+]
 
 [[package]]
 name = "sux"

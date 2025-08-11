@@ -4,6 +4,7 @@ use std::time::Duration;
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
+use succinct::int_vec::{IntVec, IntVecMut, IntVector};
 use sux::prelude::{BitFieldSliceMut, BitFieldVec};
 
 #[cfg(feature = "parallel")]
@@ -23,7 +24,7 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 fn benchmark_sequential_ops(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 5_000_000;
 
-    let bit_widths_to_test: Vec<u32> = (8..64).step_by(8).collect();
+    let bit_widths_to_test: Vec<u32> = (8..=64).step_by(8).collect();
 
     for &bit_width in &bit_widths_to_test {
         let mut group = c.benchmark_group(format!("SequentialOps/{}bit", bit_width));
@@ -37,6 +38,12 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
             .build(&data)
             .unwrap();
         let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
+
+        // Create succinct::IntVector by pushing elements.
+        let mut succinct_iv = IntVector::<u64>::new(bit_width as usize);
+        for &val in &data {
+            succinct_iv.push(val);
+        }
 
         // --- 1. Sequential Iteration Benchmarks ---
         group.bench_function("Baseline_Vec<u64>/iter_sum", |b| {
@@ -55,6 +62,12 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
         group.bench_function("sux::BitFieldVec/iter_sum", |b| {
             b.iter(|| {
                 black_box(black_box(&sux_bfv).iter().sum::<u64>());
+            })
+        });
+
+        group.bench_function("succinct::IntVector/iter_sum", |b| {
+            b.iter(|| {
+                black_box(black_box(&succinct_iv).iter().sum::<u64>());
             })
         });
 
@@ -109,6 +122,21 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
                 |mut vec| {
                     unsafe {
                         vec.apply_in_place_unchecked(map_fn);
+                    }
+                    black_box(vec);
+                },
+            );
+        });
+
+        group.bench_function("succinct::IntVector/map_in_place_loop", |b| {
+            b.iter_with_setup(
+                || succinct_iv.clone(),
+                |mut vec| {
+                    // succulent does not have a dedicated map_in_place, so we simulate
+                    // it with a get/set loop.
+                    for i in 0..vec.len() {
+                        let val = vec.get(i);
+                        vec.set(i, map_fn(val));
                     }
                     black_box(vec);
                 },

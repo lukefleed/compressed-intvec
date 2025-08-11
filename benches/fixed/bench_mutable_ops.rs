@@ -1,9 +1,8 @@
 use std::time::Duration;
-
-// benches/fixed/bench_mutable_ops.rs
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
+use succinct::int_vec::{IntVecMut, IntVector};
 use sux::prelude::{BitFieldSliceMut, BitFieldVec};
 
 /// Generates a vector with uniformly random values up to a given maximum.
@@ -25,7 +24,7 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 /// The main benchmark function for mutable and construction operations.
 fn benchmark_mutable_ops(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 1_000_000;
-    const BIT_WIDTH: u32 = 16; // A non-power-of-two width to stress the logic.
+    const BIT_WIDTH: u32 = 16; // A power-of-two width.
 
     let mut group = c.benchmark_group(format!("MutableOps/{}bit", BIT_WIDTH));
     group.sample_size(10);
@@ -81,6 +80,16 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("succinct::IntVector/push_loop", |b| {
+        b.iter(|| {
+            let mut vec = IntVector::<u64>::with_capacity(BIT_WIDTH as usize, VECTOR_SIZE as u64);
+            for &val in black_box(&data) {
+                vec.push(val);
+            }
+            black_box(vec);
+        })
+    });
+
     // --- 3. Resize ---
     const RESIZE_FROM: usize = VECTOR_SIZE / 2;
     const RESIZE_TO: usize = VECTOR_SIZE;
@@ -127,6 +136,23 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
         );
     });
 
+    group.bench_function("succinct::IntVector/resize", |b| {
+        b.iter_with_setup(
+            || {
+                let mut vec =
+                    IntVector::<u64>::with_capacity(BIT_WIDTH as usize, RESIZE_FROM as u64);
+                for &val in &data[..RESIZE_FROM] {
+                    vec.push(val);
+                }
+                vec
+            },
+            |mut vec| {
+                vec.resize(RESIZE_TO as u64, resize_value);
+                black_box(vec);
+            },
+        );
+    });
+
     // --- 4. Set at Random Index ---
     const NUM_SETS: usize = 100_000;
     let mut rng = SmallRng::seed_from_u64(1338);
@@ -140,6 +166,11 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
         .build(&data)
         .unwrap();
     let base_sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
+    let mut base_succinct_iv =
+        IntVector::<u64>::with_capacity(BIT_WIDTH as usize, VECTOR_SIZE as u64);
+    for &val in &data {
+        base_succinct_iv.push(val);
+    }
 
     group.bench_function("LEFixedVec/set_unchecked_random", |b| {
         b.iter_with_setup(
@@ -159,6 +190,19 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
             |mut vec| {
                 for i in 0..NUM_SETS {
                     unsafe { vec.set_unchecked(set_indices[i], set_values[i]) };
+                }
+                black_box(vec);
+            },
+        );
+    });
+
+    group.bench_function("succinct::IntVector/set_random", |b| {
+        b.iter_with_setup(
+            || base_succinct_iv.clone(),
+            |mut vec| {
+                for i in 0..NUM_SETS {
+                    // succinct::IntVector::set performs bounds checks
+                    vec.set(set_indices[i] as u64, set_values[i]);
                 }
                 black_box(vec);
             },

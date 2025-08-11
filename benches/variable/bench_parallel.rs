@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
@@ -108,10 +108,10 @@ fn benchmark_access(c: &mut Criterion) {
                 continue;
             }
 
-            let intvec = LEIntVec::builder(&data)
+            let intvec = LEIntVec::builder()
                 .k(K_VALUE)
                 .codec(codec_spec)
-                .build()
+                .build(&data)
                 .expect("Failed to build IntVec");
 
             // 1. Benchmark 'get_unchecked' in a loop.

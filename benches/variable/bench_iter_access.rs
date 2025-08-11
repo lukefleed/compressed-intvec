@@ -98,10 +98,10 @@ fn benchmark_iter_access(c: &mut Criterion) {
     const K_VALUE: usize = 32;
 
     let data = generate_random_vec(VECTOR_SIZE, 1 << 20);
-    let intvec = LEIntVec::builder(&data)
+    let intvec = LEIntVec::builder()
         .k(K_VALUE)
         .codec(VariableCodecSpec::Delta)
-        .build()
+        .build(&data)
         .expect("Failed to build IntVec");
 
     let patterns = [

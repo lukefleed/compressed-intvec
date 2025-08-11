@@ -175,10 +175,10 @@ fn run_space_measurements() {
                 }
 
                 for &k in &k_values {
-                    let intvec = LEIntVec::builder(&data)
+                    let intvec = LEIntVec::builder()
                         .k(k)
                         .codec(*codec_spec)
-                        .build()
+                        .build(&data)
                         .unwrap();
 
                     let name = format!("{:?}", intvec.encoding())
