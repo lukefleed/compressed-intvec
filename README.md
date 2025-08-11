@@ -427,3 +427,23 @@ This feature is not enabled by default.
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`IntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.IntVec.html
 [`AtomicFixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/atomic/struct.AtomicFixedVec.html
+
+## Benchmarks
+
+The library includes benchmarks for both [`FixedVec`] and [`IntVec`]. It also tests the performance against two other libraries implementation of a fixed-width vector: [`sux::BitFieldVec`] and [`succinct::IntVector`]. These benchmarks are in the `benches` directory and can be run via
+
+```bash
+cargo bench
+```
+
+The benchmarks measure the performance of random access, batch access, iter_access, and memory usage for various data distributions and vector sizes. For a visual representation of the random_access performance, you can then run the following command:
+
+```bash
+pip3 install -r python/requirements.txt
+python3 python/plot.py --random-access
+```
+
+The resulting SVGs file will be saved in the `images` directory.
+
+[`sux::BitFieldVec`]: https://docs.rs/sux/latest/sux/bits/bit_field_vec/index.htmll
+[`succinct::IntVector`]: https://docs.rs/succinct/latest/succinct/int_vec/trait.IntVec.html
