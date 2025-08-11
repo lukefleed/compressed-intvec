@@ -7,11 +7,11 @@
 ![license](https://img.shields.io/crates/l/compressed-intvec)
 [![Line count](https://tokei.rs/b1/github/lukefleed/compressed-intvec?type=Rust,Python)](https://github.com/lukefleed/compressed-intvec)
 
-A Rust library providing space-efficient, in-memory representations for integer vectors. It offers two complementary data structures: [`FixedVec`], which uses fixed-width encoding for O(1) mutable and atomic access, and [`IntVec`], which uses variable-length instantaneous codes for high-ratio compression.
+A Rust library that provides space-efficient, in-memory representations for integer vectors. It offers two complementary data structures: [`FixedVec`], which uses fixed-width encoding for O(1) mutable and atomic access, and [`IntVec`], which uses variable-length instantaneous codes for high-ratio compression and amortized O(1) random access.
 
-The library is designed to reduce the memory footprint of standard [`std::vec::Vec`] collections of integers while retaining performant access patterns suitable for data-intensive applications.
+The library is designed to reduce the memory footprint of standard [`std::vec::Vec`] collections of integers while retaining performant access patterns.
 
-## Core Structures: `FixedVec` vs. `IntVec`
+## Core Structures: `FixedVec` and `IntVec`
 
 The library provides two distinct vector types, each based on a different encoding principle. Choosing the right one depends on your specific use case, performance requirements, and data characteristics.
 
@@ -20,7 +20,7 @@ The library provides two distinct vector types, each based on a different encodi
 Implements a vector where every integer occupies the same, predetermined number of bits.
 
 *   **Key Features**:
-    *   **O(1) Random Access**: The memory location of any element is determined by a direct bit-offset calculation (`index * bit_width`), resulting in minimal-overhead access.
+    *   **O(1) Random Access**: The memory location of any element is determined by a direct bit-offset calculation, resulting in minimal-overhead access. With low bit widths (e.g., 8, 16, 32), `FixedVec` can be 2-3x faster than `std::vec::Vec` for random access.
     *   **Mutability**: Supports in-place modifications after creation through an API similar to [`std::vec::Vec`] (e.g., `push`, `set`, `pop`).
     *   **Atomic Operations**: Provides [`AtomicFixedVec`], a thread-safe variant that supports atomic read-modify-write operations for concurrent environments.
 
@@ -29,7 +29,6 @@ Implements a vector where every integer occupies the same, predetermined number 
     *   Applications where low-latency random access is the primary performance requirement.
     *   Scenarios requiring in-place vector modification or concurrent atomic updates.
 
-With low bit widths (e.g., 8, 16, 32), `FixedVec` is 2-3x faster than `std::vec::Vec` for random access.
 
 ### `IntVec`: Variable-Width Encoding
 
@@ -116,7 +115,7 @@ assert_eq!(intvec.get(3), Some(1000));
 [`LEIntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/type.LEIntVec.html
 [`VariableCodecSpec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.VariableCodecSpec.html#variant.Auto
 
-## Deep Dive: Maximizing Compression with `IntVec`
+## Compression with `IntVec`
 
 [`IntVec`] is the optimal choice when data that is not uniformly distributed and we want to minimize memory usage. It uses variable-length codes to represent integers, allowing for significant space savings compared to fixed-width encodings.
 
@@ -142,85 +141,6 @@ For most use cases, the recommended strategy is [`VariableCodecSpec::Auto`], whi
 ### Automatic Selection with `VariableCodecSpec::Auto`
 
 The `Auto` strategy removes the guesswork from codec selection. During the build phase, it analyzes a sample of the input data and selects the codec that offers the best compression ratio. This one-time analysis cost often leads to significant memory savings.
-
-The library integrates [`mem-dbg`] to provide memory usage statistics, allowing you to compare the size of different encoding strategies easily.
-
-```rust
-use compressed_intvec::prelude::*;
-use mem_dbg::{DbgFlags, MemDbg};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
-
-// Generates a vector with uniformly random values.
-fn generate_random_vec(size: usize, max: u64) -> Vec<u64> {
-    let mut rng = SmallRng::seed_from_u64(42);
-    (0..size).map(|_| rng.random_range(0..max)).collect()
-}
-
-fn main() {
-    let data = generate_random_vec(10_000, 1 << 20);
-
-    println!("Size of the uncompressed Vec<u64>:");
-    data.mem_dbg(DbgFlags::PERCENTAGE | DbgFlags::HUMANIZE);
-
-    // Create an IntVec with a generic Gamma encoding.
-    let gamma_intvec = LEIntVec::builder(&data)
-        .codec(VariableCodecSpec::Gamma)
-        .build()
-        .unwrap();
-
-    println!("\nSize of the IntVec with Gamma encoding:");
-    gamma_intvec.mem_dbg(DbgFlags::PERCENTAGE | DbgFlags::HUMANIZE);
-
-    // Let the library analyze the data and choose the best codec.
-    let auto_intvec = LEIntVec::builder(&data)
-        .codec(VariableCodecSpec::Auto)
-        .build()
-        .unwrap();
-
-    println!("\nSize of the IntVec with Auto encoding:");
-    auto_intvec.mem_dbg(DbgFlags::PERCENTAGE | DbgFlags::HUMANIZE);
-    println!("\nCodec selected by Auto: {:?}", auto_intvec.encoding());
-}
-```
-
-This produces the following output:
-
-```text
-Size of the uncompressed Vec<u64>:
-80.02 kB 100.00% ⏺
-
-Size of the IntVec with Gamma encoding:
-47.10 kB 100.00% ⏺
-46.27 kB  98.23% ├╴data
-  800  B   1.70% ├╴samples
-  776  B   1.65% │ ├╴bits
-    8  B   0.02% │ ├╴bit_width
-    8  B   0.02% │ ├╴mask
-    8  B   0.02% │ ├╴len
-    0  B   0.00% │ ╰╴_phantom
-    8  B   0.02% ├╴k
-    8  B   0.02% ├╴len
-   16  B   0.03% ├╴encoding
-                 │ ╰╴Variant: Gamma
-    0  B   0.00% ╰╴_markers
-
-Size of the IntVec with Auto encoding:
-28.33 kB 100.00% ⏺
-27.53 kB  97.18% ├╴data
-  768  B   2.71% ├╴samples
-  744  B   2.63% │ ├╴bits
-    8  B   0.03% │ ├╴bit_width
-    8  B   0.03% │ ├╴mask
-    8  B   0.03% │ ├╴len
-    0  B   0.00% │ ╰╴_phantom
-    8  B   0.03% ├╴k
-    8  B   0.03% ├╴len
-   16  B   0.06% ├╴encoding
-                 │ ╰╴Variant: Zeta { k: 10 }
-    0  B   0.00% ╰╴_markers
-
-Codec selected by Auto: Zeta { k: 10 }
-```
 
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`IntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.IntVec.html
@@ -376,6 +296,109 @@ for handle in handles {
 
 let final_value = vec.get(0).unwrap();
 assert_eq!(final_value, NUM_THREADS * INCREMENTS_PER_THREAD);
+```
+
+## Memory Analysis
+
+The library integrates [`mem-dbg`] to provide memory usage statistics, allowing you to compare the size of different encoding strategies easily. This is particularly useful for understanding the trade-offs between [`FixedVec`] and [`IntVec`] in terms of memory efficiency.
+
+```rust
+use compressed_intvec::prelude::*;
+use mem_dbg::{DbgFlags, MemDbg};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
+
+// Generates a vector with uniformly random values.
+fn generate_random_vec(size: usize, max: u64) -> Vec<u64> {
+    let mut rng = SmallRng::seed_from_u64(42);
+    (0..size).map(|_| rng.random_range(0..max)).collect()
+}
+
+fn main() {
+    let data = generate_random_vec(1_000_000, 1 << 20);
+
+    println!("Size of the uncompressed Vec<u64>:");
+    data.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
+
+    // Create an IntVec with a generic Gamma encoding.
+    let gamma_intvec = LEIntVec::builder(&data)
+        .codec(VariableCodecSpec::Gamma)
+        .build()
+        .unwrap();
+
+    println!("\nSize of the IntVec with gamma encoding:");
+    gamma_intvec.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
+
+    // Let the library analyze the data and choose the best codec.
+    let auto_intvec = LEIntVec::builder(&data)
+        .codec(VariableCodecSpec::Auto)
+        .build()
+        .unwrap();
+
+    println!("\nSize of the IntVec with Auto encoding:");
+    auto_intvec.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
+    println!("\nCodec selected by Auto: {:?}", auto_intvec.encoding());
+
+    // Create a FixedVec with minimal bit width (20 bits)
+    let fixed_intvec = LEFixedVec::builder()
+        .bit_width(BitWidth::Minimal)
+        .build(&data)
+        .unwrap();
+
+    println!("\nSize of the FixedVec with minimal bit width:");
+    fixed_intvec.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
+}
+```
+
+The output displays memory breakdown for a 1,000,000-element vector of `u64` integers, uniformly distributed between 0 and 2<sup>20</sup>
+
+- Standard `Vec<u64>`: 80.02 kB (8 bytes per element)
+- [`IntVec`] with Gamma encoding: 47.10 kB (41% reduction)
+- [`IntVec`] with Auto codec selection: 28.33 kB (65% reduction, selected Zeta k=10)
+- [`FixedVec`] with minimal bit width: 25.06 kB (69% reduction, 20 bits per element)
+
+The memory analysis reveals the internal structure of each data type, including storage overhead for metadata, sampling structures, and encoding parameters.
+
+```text
+Size of the uncompressed Vec<u64>:
+8.000 MB 100.00% ⏺
+
+Size of the IntVec with gamma encoding:
+4.727 MB 100.00% ⏺
+4.625 MB  97.85% ├╴data
+101.6 kB   2.15% ├╴samples
+101.6 kB   2.15% │ ├╴bits
+    8  B   0.00% │ ├╴bit_width
+    8  B   0.00% │ ├╴mask
+    8  B   0.00% │ ├╴len
+    0  B   0.00% │ ╰╴_phantom
+    8  B   0.00% ├╴k
+    8  B   0.00% ├╴len
+   16  B   0.00% ├╴encoding
+    0  B   0.00% ╰╴_markers
+
+Size of the IntVec with Auto encoding:
+2.846 MB 100.00% ⏺
+2.749 MB  96.57% ├╴data
+97.72 kB   3.43% ├╴samples
+97.70 kB   3.43% │ ├╴bits
+    8  B   0.00% │ ├╴bit_width
+    8  B   0.00% │ ├╴mask
+    8  B   0.00% │ ├╴len
+    0  B   0.00% │ ╰╴_phantom
+    8  B   0.00% ├╴k
+    8  B   0.00% ├╴len
+   16  B   0.00% ├╴encoding
+    0  B   0.00% ╰╴_markers
+
+Codec selected by Auto: Zeta { k: 10 }
+
+Size of the FixedVec with minimal bit width:
+2.500 MB 100.00% ⏺
+2.500 MB 100.00% ├╴bits
+    8  B   0.00% ├╴bit_width
+    8  B   0.00% ├╴mask
+    8  B   0.00% ├╴len
+    0  B   0.00% ╰╴_phantom
 ```
 
 ## Cargo Features

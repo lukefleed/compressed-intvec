@@ -104,7 +104,7 @@
 use super::IntVecError;
 use dsi_bitstream::prelude::{Codes, CodesStats};
 
-/// Specifies the compression codec and its parameters for an [`IntVec`].
+/// Specifies the compression codec and its parameters for an [`IntVec`](super::IntVec).
 ///
 /// This enum allows for either explicitly setting the parameters for codes
 /// like Rice and Zeta, or requesting that the [`IntVecBuilder`](super::builder::IntVecBuilder)

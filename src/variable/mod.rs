@@ -161,7 +161,7 @@
 //! ## Codec Selection and Performance
 //!
 //! The choice of compression codec is critical for performance and space efficiency.
-//! [`IntVecBuilder`](builder::IntVecBuilder) offers automatic codec selection via 
+//! [`IntVecBuilder`] offers automatic codec selection via 
 //! [`VariableCodecSpec::Auto`]. When enabled, the builder analyzes the entire input
 //! dataset to find the codec that offers the best compression ratio.
 //!
