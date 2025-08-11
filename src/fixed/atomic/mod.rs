@@ -1275,7 +1275,7 @@ where
     current_index: usize,
 }
 
-impl<'a, T> Iterator for AtomicFixedVecIter<'a, T>
+impl<T> Iterator for AtomicFixedVecIter<'_, T>
 where
     T: Storable<u64> + Copy + ToPrimitive,
 {

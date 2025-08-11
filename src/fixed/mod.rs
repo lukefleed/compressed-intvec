@@ -8,10 +8,9 @@
 //!
 //! # Core Concepts
 //!
-//! ### Genericity
 //! The design is generic over four parameters: `FixedVec<T, W, E, B>`.
-//! - `T`: The element type as seen by the user (e.g., [`u32`], [`i16`]), constrained by the `Storable` trait.
-//! - `W`: The underlying unsigned integer type used for storage (e.g., [`u64`], `usize`), constrained by the [`Word`] trait.
+//! - `T`: The element type as seen by the user (e.g., [`u32`], [`i16`]), constrained by the [`Storable`] trait.
+//! - `W`: The underlying unsigned integer type used for storage (e.g., [`u64`], [`usize`]), constrained by the [`Word`] trait.
 //! - `E`: The [`Endianness`] (e.g., [`LE`] or [`BE`]) for bit-level operations.
 //! - `B`: The backing buffer, which abstracts over ownership. This allows [`FixedVec`] to be an owned container (e.g., `Vec<W>`) or a zero-copy, borrowed view (e.g., `&[W]`).
 //!
@@ -23,15 +22,13 @@
 //! ### Mutability via Proxy Objects
 //! Direct mutable references (`&mut T`) to individual bit-packed elements are not possible, as
 //! elements do not align with byte boundaries and may not even exist as discrete entities in memory.
-//! Instead, mutability is managed through the **proxy object pattern**. Methods like [`at_mut`](FixedVec::at_mut) return a temporary proxy ([`MutProxy`]) that holds a decoded copy of the value.
+//! Instead, mutability is managed through the proxy object pattern. Methods like [`at_mut`](FixedVec::at_mut) return a temporary proxy ([`MutProxy`]) that holds a decoded copy of the value.
 //! Modifications are applied to this copy, and the value is automatically encoded and written
 //! back into the vector's bitstream when the proxy object goes out of scope (i.e., is dropped).
 //!
 //! # Core Data Structures
 //!
-//! - [`FixedVec`]: The primary implementation for single-threaded contexts, which leverages the
-//!   concepts of genericity and proxy-based mutability described above.
-//!
+//! - [`FixedVec`]: The primary implementation for single-threaded contexts.
 //! - [`AtomicFixedVec`]: A thread-safe variant for concurrent applications. It provides an
 //!   API analogous to Rust's standard atomic types ([`load`](AtomicFixedVec::load), [`store`](AtomicFixedVec::store), [`fetch_add`](AtomicFixedVec::fetch_add), etc.).
 //!   It uses lock-free atomic instructions for elements contained within a single machine word and
@@ -40,18 +37,15 @@
 //!
 //! # Main Components
 //!
-//! - [`FixedVec`] and [`AtomicFixedVec`]: The core data structures.
+//! - [`FixedVec`] and [`AtomicFixedVec`]
 //! - [`BitWidth`]: An enum to control the bit-width selection strategy. Options include:
 //!     - [`BitWidth::Minimal`]: Selects the minimal bit-width required.
 //!     - [`BitWidth::PowerOfTwo`]: Rounds up to the nearest power of two.
 //!     - [`BitWidth::Explicit`]: Allows specifying a fixed bit-width.
-//! - **Builders**: [`FixedVecBuilder`](builder::FixedVecBuilder) and [`FixedVecFromIterBuilder`](builder::FixedVecFromIterBuilder) for
-//!   flexible vector construction.
+//! - **Builders**: [`FixedVecBuilder`](builder::FixedVecBuilder) and [`FixedVecFromIterBuilder`](builder::FixedVecFromIterBuilder) 
 //! - **Slices**: [`FixedVecSlice`](slice::FixedVecSlice) for creating immutable or mutable views.
 //!
 //! # Examples
-//!
-//! ## Basic Usage
 //!
 //! Create a [`FixedVec`] from a slice of data. The builder will
 //! automatically determine the minimal number of bits required.
@@ -93,8 +87,6 @@
 //!
 //! # Implementation Notes
 //!
-//! ## Padding
-//!
 //! To ensure safe and efficient memory access, [`FixedVec`] adds one padding
 //! word at the end of its storage buffer. This padding prevents out-of-bounds
 //! reads in methods like [`get_unchecked`](FixedVec::get_unchecked) and is a
@@ -108,26 +100,24 @@
 //! configurations. In most cases, you should prefer using these aliases over the
 //! fully generic `FixedVec<T, W, E, B>` struct.
 //!
-//! ## General-Purpose Aliases
+//! ### General-Purpose Aliases
 //!
-//! These aliases use `usize` for the storage word, which is often the most
+//! These aliases use [`usize`] for the storage word, which is often the most
 //! efficient choice for the target architecture.
 //!
 //! - [`UFixedVec<T>`]: For unsigned integers (e.g., [`u8`], [`u16`], [`u32`]).
 //! - [`SFixedVec<T>`]: For signed integers (e.g., [`i8`], [`i16`], [`i32`]).
 //!
-//! ## Concrete Aliases for [`u64`]/[`i64`]
+//! ### Concrete Aliases for [`u64`]/[`i64`]
 //!
-//! These aliases are specialized for [`u64`]/[`i64`] elements stored in [`u64`] words,
-//! which is a common pattern in high-performance computing and data-intensive
-//! applications.
+//! These aliases are specialized for [`u64`]/[`i64`] elements stored in [`u64`] words:
 //!
 //! - [`LEFixedVec`]: [`u64`] elements, Little-Endian.
 //! - [`BEFixedVec`]: [`u64`] elements, Big-Endian.
 //! - [`LESFixedVec`]: [`i64`] elements, Little-Endian.
 //! - [`BESFixedVec`]: [`i64`] elements, Big-Endian.
 //!
-//! The `atomic` module provides a similar set of aliases like [`UAtomicFixedVec`]
+//! The [`atomic`] module provides a similar set of aliases like [`UAtomicFixedVec`]
 //! and [`SAtomicFixedVec`].
 
 // Declare and export submodules.

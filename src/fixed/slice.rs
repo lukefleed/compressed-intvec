@@ -8,7 +8,7 @@
 //!
 //! ## Creating and using an immutable slice
 //!
-//! ```
+//! ```rust
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec};
 //!
 //! let data: Vec<u32> = (0..10).collect();
@@ -28,7 +28,7 @@
 //!
 //! ## Creating and using a mutable slice
 //!
-//! ```
+//! ```rust
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
 //!
 //! let data: Vec<u32> = (0..10).collect();
@@ -56,7 +56,7 @@ use std::ops::{Deref, DerefMut, Range};
 
 /// A zero-copy view into a contiguous portion of a [`FixedVec`].
 ///
-/// A slice is a view that allows for operations on a sub-region of a `FixedVec`
+/// A slice is a view that allows for operations on a sub-region of a [`FixedVec`]
 /// without copying the underlying data. It can be created from both immutable
 /// and mutable vectors.
 ///
@@ -65,8 +65,8 @@ use std::ops::{Deref, DerefMut, Range};
 /// mutable slice).
 #[derive(Debug)]
 pub struct FixedVecSlice<V> {
-    parent: V,
-    range: Range<usize>,
+    pub(super) parent: V,
+    pub(super) range: Range<usize>,
 }
 
 // Common implementation for both immutable and mutable slices.

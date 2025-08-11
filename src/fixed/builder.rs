@@ -1,4 +1,4 @@
-//! # `FixedVec` Builders
+//! # [`FixedVec`] Builders
 //!
 //! This module provides builders for constructing an owned [`FixedVec`].
 //!

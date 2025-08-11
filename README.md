@@ -410,3 +410,8 @@ The resulting SVGs file will be saved in the `images` directory.
 
 [`sux::BitFieldVec`]: https://docs.rs/sux/latest/sux/bits/bit_field_vec/index.htmll
 [`succinct::IntVector`]: https://docs.rs/succinct/latest/succinct/int_vec/trait.IntVec.html
+
+# TODO
+
+* [ ] Add support for [`epsilon-serde`](https://crates.io/crates/epserde)
+* [ ] Add SIMD feature

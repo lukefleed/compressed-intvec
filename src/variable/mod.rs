@@ -531,7 +531,7 @@ pub(crate) type IntVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u
 pub(crate) type IntVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
 
-impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
+impl<T: Storable + 'static, E: Endianness> IntVec<T, E, Vec<u64>> {
     /// Creates a builder for constructing an owned [`IntVec`] from a slice of data.
     ///
     /// This is the most flexible way to create an [`IntVec`], allowing customization
@@ -1110,14 +1110,14 @@ where
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntoIterator for IntVec<T, E, B>
+impl<T: Storable + 'static, E: Endianness + 'static> IntoIterator for IntVec<T, E, Vec<u64>>
 where
     for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     type Item = T;
-    type IntoIter = IntVecIntoIter<T, E, B>;
+    type IntoIter = IntVecIntoIter<T, E>;
 
     fn into_iter(self) -> Self::IntoIter {
         IntVecIntoIter::new(self)
@@ -1128,13 +1128,13 @@ where
 pub type UIntVec<T> = IntVec<T, LE>;
 /// An [`IntVec`] for signed integers with Little-Endian bit layout.
 pub type SIntVec<T> = IntVec<T, LE>;
-/// An [`IntVec`] for `u64` elements with Big-Endian bit layout.
+/// An [`IntVec`] for [`u64`] elements with Big-Endian bit layout.
 pub type BEIntVec = IntVec<u64, BE>;
-/// An [`IntVec`] for `u64` elements with Little-Endian bit layout.
+/// An [`IntVec`] for [`u64`] elements with Little-Endian bit layout.
 pub type LEIntVec = IntVec<u64, LE>;
-/// An [`IntVec`] for `i64` elements with Big-Endian bit layout.
+/// An [`IntVec`] for [`i64`] elements with Big-Endian bit layout.
 pub type BESIntVec = IntVec<i64, BE>;
-/// An [`IntVec`] for `i64` elements with Little-Endian bit layout.
+/// An [`IntVec`] for [`i64`] elements with Little-Endian bit layout.
 pub type LESIntVec = IntVec<i64, LE>;
 
 impl<T, E, B, O> PartialEq<O> for IntVec<T, E, B>
@@ -1147,7 +1147,7 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Checks for equality between an `IntVec` and a standard slice.
+    /// Checks for equality between an [`IntVec`] and a standard slice.
     ///
     /// The comparison is done by iterating over both and comparing elements
     /// one by one. The overall comparison is not a single atomic operation.

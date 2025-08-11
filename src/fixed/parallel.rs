@@ -1,8 +1,8 @@
-//! # `FixedVec` Parallel Operations
+//! # [`FixedVec`] Parallel Operations
 //!
 //! This module provides parallel implementations for [`FixedVec`] operations,
-//! enabled by the `parallel` feature flag. These methods leverage the [Rayon]
-//! library to accelerate data decompression and access.
+//! enabled by the `parallel` feature flag. These methods are based on the [Rayon]
+//! library.
 //!
 //! # Examples
 //!
@@ -66,9 +66,6 @@ where
     }
 
     /// Retrieves multiple elements in parallel.
-    ///
-    /// This method is designed for random access on multi-core systems,
-    /// making it suitable for large batches of indices.
     ///
     /// # Errors
     ///

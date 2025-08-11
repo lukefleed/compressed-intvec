@@ -125,7 +125,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSlice<'a, T, E, B> {
     }
 }
 
-impl<'a, T, E, B> IntVecSlice<'a, T, E, B>
+impl<T, E, B> IntVecSlice<'_, T, E, B>
 where
     T: Storable + Ord,
     E: Endianness,
@@ -196,7 +196,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSliceIter<'a, T, E, 
     }
 }
 
-impl<'a, T, E, B> Iterator for IntVecSliceIter<'a, T, E, B>
+impl<T, E, B> Iterator for IntVecSliceIter<'_, T, E, B>
 where
     T: Storable,
     E: Endianness,
@@ -224,7 +224,7 @@ where
     }
 }
 
-impl<'a, T, E, B> ExactSizeIterator for IntVecSliceIter<'a, T, E, B>
+impl<T, E, B> ExactSizeIterator for IntVecSliceIter<'_, T, E, B>
 where
     T: Storable,
     E: Endianness,

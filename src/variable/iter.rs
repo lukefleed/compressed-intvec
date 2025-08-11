@@ -28,7 +28,7 @@ use std::marker::PhantomData;
 /// ```
 /// use compressed_intvec::variable::{IntVec, UIntVec};
 ///
-/// let data: &[u32] = &[10, 20, 30, 40];
+/// let data: &[u32] = &[10, 20, 30, 40, 50];
 /// let vec: UIntVec<u32> = IntVec::from_slice(data).unwrap();
 ///
 /// let mut sum = 0;
@@ -36,7 +36,7 @@ use std::marker::PhantomData;
 ///     sum += value;
 /// }
 ///
-/// assert_eq!(sum, 100);
+/// assert_eq!(sum, 150);
 /// ```
 pub struct IntVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
@@ -76,7 +76,7 @@ where
     }
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> Iterator for IntVecIter<'a, T, E, B>
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Iterator for IntVecIter<'_, T, E, B>
 where
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
@@ -101,7 +101,7 @@ where
     }
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for IntVecIter<'a, T, E, B>
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for IntVecIter<'_, T, E, B>
 where
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
@@ -132,23 +132,62 @@ where
 ///
 /// assert_eq!(collected, &[-2, -4, -6, -8]);
 /// ```
-pub struct IntVecIntoIter<T: Storable, E: Endianness, B: AsRef<[u64]>> {
-    vec: IntVec<T, E, B>,
+pub struct IntVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// The number of elements remaining in the iterator.
+    len: usize,
+    /// The current position in the sequence.
     current_index: usize,
+    /// A stateful reader that borrows from `_data_owner`.
+    reader: IntVecBitReader<'static, E>,
+    /// The hybrid dispatcher for decoding.
+    code_reader: CodecReader<'static, T, E, Vec<u64>>,
+    /// This field owns the data buffer, ensuring it lives as long as the iterator.
+    _data_owner: Vec<u64>,
+    /// Phantom data to hold the generic type `T`.
+    _markers: PhantomData<T>,
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecIntoIter<T, E, B> {
-    /// Creates a new owning iterator.
-    pub(super) fn new(vec: IntVec<T, E, B>) -> Self {
+impl<T, E> IntVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// Creates a new, efficient owning iterator from an `IntVec`.
+    pub(super) fn new(vec: IntVec<T, E, Vec<u64>>) -> Self {
+        // This is a self-referential struct. We move the owned data buffer into `_data_owner`.
+        // Then, we create a 'static reference to that data to initialize the reader.
+        // This is safe because `_data_owner` is part of the same struct as `reader`,
+        // guaranteeing that the data outlives the reference.
+        let data_ref: &'static [u64] = unsafe { std::mem::transmute(vec.data.as_slice()) };
+
+        let reader = IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(data_ref));
+        let code_reader = CodecReader::new(vec.encoding);
+
         Self {
-            vec,
+            len: vec.len,
             current_index: 0,
+            reader,
+            code_reader,
+            _data_owner: vec.data,
+            _markers: PhantomData,
         }
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Iterator for IntVecIntoIter<T, E, B>
+impl<T, E> Iterator for IntVecIntoIter<T, E>
 where
+    T: Storable + 'static,
+    E: Endianness + 'static,
     for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
@@ -157,28 +196,29 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.vec.len() {
+        if self.current_index >= self.len {
             return None;
         }
-        // This get is amortized O(1), but less efficient for full scans than IntVecIter
-        let value = self.vec.get(self.current_index);
+        let value = self.code_reader.read(&mut self.reader).unwrap();
         self.current_index += 1;
-        value
+        Some(Storable::from_word(value))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.vec.len().saturating_sub(self.current_index);
+        let remaining = self.len.saturating_sub(self.current_index);
         (remaining, Some(remaining))
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for IntVecIntoIter<T, E, B>
+impl<T, E> ExactSizeIterator for IntVecIntoIter<T, E>
 where
+    T: Storable + 'static,
+    E: Endianness + 'static,
     for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     fn len(&self) -> usize {
-        self.vec.len().saturating_sub(self.current_index)
+        self.len.saturating_sub(self.current_index)
     }
 }

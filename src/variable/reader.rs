@@ -66,7 +66,7 @@ where
     _Phantom(PhantomData<(&'a B, T)>),
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> CodecReader<'a, T, E, B>
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> CodecReader<'_, T, E, B>
 where
     for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
