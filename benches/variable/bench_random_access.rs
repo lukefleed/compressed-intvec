@@ -185,9 +185,9 @@ fn benchmark_random_access(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(100)
         .warm_up_time(Duration::from_millis(10))
-        .measurement_time(Duration::from_secs(1));
+        .measurement_time(Duration::from_secs(10));
     targets = benchmark_random_access
 }
 
