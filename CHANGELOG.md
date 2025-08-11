@@ -2,7 +2,76 @@
 
 All notable changes to this project will be documented in this file.
 
-## [4.0.0] - 2025-07-27
+## [0.5.0] - 11-08-2025
+
+This release introduces a fundamental architectural restructuring of the library, splitting the implementation into two distinct data structures: `FixedVec` for fixed-width encoding and `IntVec` for variable-width encoding. This separation enables significant new features, including full mutability, atomic operations, and improved performance, but constitutes a major breaking change to the public API.
+
+### BREAKING
+
+*   **Architectural Separation of Encodings**: The core `IntVec` structure has been split into two distinct implementations based on the encoding strategy.
+    *   **`fixed::FixedVec`**: A new data structure exclusively for fixed-width integer encoding. It provides a mutable, `Vec`-like API, O(1) random access, and a thread-safe atomic variant (`AtomicFixedVec`). This component replaces the previous `CodecSpec::FixedLength` functionality.
+    *   **`variable::IntVec`**: The refactored successor to the original `IntVec`, now located in the `variable` module. It is dedicated exclusively to variable-length instantaneous codes (e.g., Gamma, Delta, Zeta). It remains immutable after creation.
+
+*   **Module and API Restructuring**: The project's module structure has been fundamentally changed.
+    *   The top-level `intvec` and `sintvec` source modules have been removed. All functionality is now organized under the `fixed` and `variable` modules.
+    *   The `CodecSpec` enum has been renamed to `VariableCodecSpec` and is now located in `src/variable/codec.rs`. It is used only for `variable::IntVec`.
+    *   `fixed::FixedVec` is now configured using a new `BitWidth` enum, which is distinct from `VariableCodecSpec`.
+
+*   **Removal of `SIntVec` and Introduction of Generic Types**: The standalone `SIntVec` struct has been removed.
+    *   Both `FixedVec` and `IntVec` are now fully generic over all primitive integer types (e.g., `u8`, `i16`, `u32`, `i64`).
+    *   Signed integer support is now provided directly through the `Storable` trait, which transparently handles ZigZag encoding.
+    *   New type aliases such as `SFixedVec<T>` (for signed `FixedVec`) and `SIntVec<T>` (for signed `IntVec`) are provided.
+
+*   **Builder API Modification**: The builder pattern has been changed for all vector types. The input data slice is now passed to the final `.build()` method instead of the constructor.
+    *   **Old**: `LEIntVec::builder(&data).codec(...).build()`
+    *   **New**: `LEIntVec::builder().codec(...).build(&data)`
+
+*   **Codec Analysis Behavior Change**: The analysis strategy for `VariableCodecSpec::Auto` has been changed.
+    *   It now analyzes the **entire** input dataset to determine the optimal codec, whereas the previous implementation used a 10,000-element sample for large datasets.
+    *   This change improves compression ratio accuracy at the cost of increased construction time for large inputs.
+
+### New
+
+*   **`fixed::FixedVec` Data Structure**: Introduced a new vector implementation for fixed-width integer encoding, located in the `fixed` module.
+    *   **Mutable API**: Provides a mutable interface including methods such as `push`, `pop`, `set`, `insert`, `remove`, `resize`, `map_in_place`, and `fill`.
+    *   **Generic Implementation**: The structure is generic over the element type `T` (e.g., `u16`, `i32`), the storage word `W` (e.g., `u64`, `usize`), the endianness `E`, and the backing buffer `B` (`Vec<W>` or `&[W]`).
+    *   **Zero-Copy Slicing**: Added an extensive API for creating immutable and mutable zero-copy views (`slice`, `split_at`, `chunks`, `windows`).
+    *   **Unaligned Access**: A new method, `get_unaligned_unchecked`, was added for random access via unaligned memory reads.
+    *   **Convenience Constructors**: Implements `FromIterator`, `TryFrom<&[T]>`, and is supported by a new `fixed_vec!` macro.
+
+*   **`fixed::atomic::AtomicFixedVec` Data Structure**: Added a thread-safe variant of `FixedVec` for concurrent applications.
+    *   **Atomic Operations**: Provides an API analogous to standard atomic types, including `load`, `store`, `swap`, `compare_exchange`.
+    *   **Atomic RMW Operations**: Implements atomic Read-Modify-Write (RMW) methods such as `fetch_add`, `fetch_sub`, `fetch_and`, `fetch_or`, `fetch_xor`, `fetch_max`, and `fetch_min`.
+    *   **Hybrid Atomicity Model**: Utilizes lock-free atomic instructions for elements fully contained within a single `u64` storage word. For elements that span two words, it uses a striped locking mechanism to ensure atomicity without a global lock.
+    *   **Parallel Mutation**: Supports parallel in-place modification via a `par_iter_mut` method.
+    *   **Construction**: Supported by its own builder and the `atomic_fixed_vec!` macro.
+
+*   **Generic Integer Type Support**: Both `FixedVec` and `IntVec` now support all primitive integer types (e.g., `u8`, `i16`, `u32`, `i64`). This is managed by the `Storable` trait, which abstracts the conversion to and from the underlying storage words.
+
+*   **`variable::IntVecSeqReader`**: Introduced a new stateful reader for `variable::IntVec`, optimized for access patterns with high locality.
+    *   **Stateful Cursor**: The reader maintains an internal cursor of its current decoding position.
+    *   **Optimized Forward Decoding**: If a requested index is at or after the cursor's position and within the same sample block, the reader decodes forward from its last position, avoiding a seek operation. For non-sequential access, it falls back to a seek-based approach.
+
+*   **Convenience Macros**:
+    *   **`fixed_vec!`**: A new macro for `vec!`-like initialization of `fixed::FixedVec`.
+    *   **`atomic_fixed_vec!`**: A new macro for `vec!`-like initialization of `fixed::atomic::AtomicFixedVec`.
+    *   The `int_vec!` and `sint_vec!` macros have been updated to construct `variable::IntVec` instances.
+
+### Improved
+
+*   **`variable::IntVec` Reader Robustness**: The internal codec dispatcher for `variable::IntVec` has been re-implemented with a hybrid strategy. It now uses a fast, function-pointer-based path for common codecs and parameters, but includes a `match`-based fallback path for less common parameterizations. This change guarantees that any validly constructed `IntVec` can be read without panicking due to an unsupported codec configuration.
+
+*   **API Unification and Ergonomics**:
+    *   The `Storable` trait now provides a unified mechanism for handling both signed and unsigned integer types across `FixedVec` and `IntVec`, removing the need for a separate `SIntVec` struct and resulting in a more consistent API.
+    *   The `prelude` module has been expanded to export all common types, traits, and aliases from both the `fixed` and `variable` modules, simplifying imports.
+
+*   **Benchmarking Suite**: The benchmarking infrastructure has been significantly expanded and restructured.
+    *   Benchmarks are now organized into `fixed` and `variable` directories, with new suites covering atomic operations, mutable operations, and various access patterns (random, sorted, clustered).
+    *   Performance is now compared against external libraries (`sux`, `succinct`) to provide a clearer context for the library's performance characteristics.
+
+*   **`serde` Implementation**: The `serde` implementations have been updated to support the new `FixedVec`, `AtomicFixedVec`, and restructured `IntVec` types, ensuring correct serialization and deserialization for the new architecture.
+
+## [0.4.0] - 2025-07-27
 
 This is a release representing a complete architectural overhaul of the
 library. It introduces a more ergonomic and powerful builder-based API, adds
@@ -127,3 +196,6 @@ usability and performance gains but include foundational breaking changes.
 *   **Fixed `serde` Serialization**: The `serde` implementation now correctly
     serializes and deserializes the internal state of `IntVec` and `SIntVec`,
     ensuring that all codec parameters and data are preserved accurately.
+
+
+

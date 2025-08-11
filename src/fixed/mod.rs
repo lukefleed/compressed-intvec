@@ -353,6 +353,28 @@ where
     ) -> builder::FixedVecFromIterBuilder<T, W, E, I> {
         builder::FixedVecFromIterBuilder::new(iter, bit_width)
     }
+
+    /// Creates an owned [`FixedVec`] from a slice of data.
+    ///
+    /// This method is a convenience wrapper around the builder API, using
+    /// the default bit width strategy ([`BitWidth::Minimal`]).
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    /// 
+    /// let data: &[u32] = &[10, 20, 30];
+    /// 
+    /// let vec: UFixedVec<u32> = FixedVec::from_slice(data).unwrap();
+    /// 
+    /// assert_eq!(vec.len(), 3);
+    /// assert_eq!(vec.bit_width(), 5); // 30 fits in 5 bits
+    /// assert_eq!(vec.get(0), Some(10));
+    /// ```
+    pub fn from_slice(slice: &[T]) -> Result<Self, Error> {
+        Self::builder().build(slice)
+    }
 }
 
 // Core immutable API.
