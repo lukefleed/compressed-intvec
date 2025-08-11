@@ -259,7 +259,7 @@ impl StdError for Error {}
 
 /// A compressed vector of integers with fixed-width encoding.
 ///
-/// `FixedVec` stores a sequence of integers where each element is encoded using
+/// [`FixedVec`] stores a sequence of integers where each element is encoded using
 /// the same number of bits. This allows for O(1) random access by calculating
 /// the memory location of any element. It is suitable for data where values are
 /// bounded within a known range.
@@ -291,7 +291,7 @@ pub struct FixedVec<T: Storable<W>, W: Word, E: Endianness, B: AsRef<[W]> = Vec<
     pub(crate) _phantom: PhantomData<(T, W, E)>,
 }
 
-// `FixedVec` builder implementation.
+// [`FixedVec`] builder implementation.
 impl<T, W, E> FixedVec<T, W, E, Vec<W>>
 where
     T: Storable<W>,
@@ -475,13 +475,13 @@ where
     /// # Safety
     ///
     /// The caller must ensure that the buffer is not mutated in a way that
-    /// violates the invariants of the `FixedVec` while the pointer is active.
+    /// violates the invariants of the [`FixedVec`] while the pointer is active.
     pub fn as_raw_parts(&self) -> (*const W, usize) {
         let slice = self.bits.as_ref();
         (slice.as_ptr(), slice.len())
     }
 
-    /// Creates a `FixedVec` from its raw components without performing checks.
+    /// Creates a [`FixedVec`] from its raw components without performing checks.
     ///
     /// # Safety
     ///
@@ -751,7 +751,7 @@ where
 
     /// Returns a raw pointer to the storage word containing the start of an element.
     ///
-    /// This method returns a pointer to the `Word` in the backing buffer where
+    /// This method returns a pointer to the [`Word`] in the backing buffer where
     /// the data for the element at `index` begins.
     ///
     /// Returns `None` if `index` is out of bounds.
@@ -760,7 +760,7 @@ where
     ///
     /// This method is safe as it only returns a raw pointer. Dereferencing the
     /// pointer is `unsafe`. The caller must ensure that the pointer is not used
-    /// after the `FixedVec` is dropped or modified.
+    /// after the [`FixedVec`] is dropped or modified.
     pub fn addr_of(&self, index: usize) -> Option<*const W> {
         if index >= self.len {
             return None;
@@ -937,7 +937,7 @@ where
     }
 }
 
-/// Allows iterating over a borrowed `FixedVec` (e.g., `for val in &my_vec`).
+/// Allows iterating over a borrowed [`FixedVec`] (e.g., `for val in &my_vec`).
 impl<'a, T, W, E, B> IntoIterator for &'a FixedVec<T, W, E, B>
 where
     T: Storable<W>,
@@ -953,7 +953,7 @@ where
     }
 }
 
-/// Allows iterating over an owned `FixedVec`, consuming it.
+/// Allows iterating over an owned [`FixedVec`], consuming it.
 impl<T, W, E> IntoIterator for FixedVec<T, W, E, Vec<W>>
 where
     T: Storable<W> + 'static,
@@ -977,7 +977,7 @@ where
     dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
         dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
 {
-    /// Creates a `FixedVec` by collecting elements from an iterator.
+    /// Creates a [`FixedVec`] by collecting elements from an iterator.
     ///
     /// The bit width is determined automatically using the [`BitWidth::Minimal`]
     /// strategy. This requires collecting the iterator into a temporary `Vec<T>`
@@ -1194,7 +1194,7 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the new capacity overflows `usize`.
+    /// Panics if the new capacity overflows [`usize`].
     ///
     /// # Examples
     ///
@@ -1662,7 +1662,7 @@ where
     /// # Safety
     ///
     /// Modifying the returned slice is logically unsafe. Any change to the bits
-    /// can violate the invariants of the `FixedVec`, leading to panics or
+    /// can violate the invariants of the [`FixedVec`], leading to panics or
     /// incorrect results on subsequent method calls.
     pub unsafe fn as_mut_limbs(&mut self) -> &mut [W] {
         self.bits.as_mut()
@@ -2211,7 +2211,7 @@ where
         }
     }
 
-    /// Copies a sequence of elements from a source `FixedVec` into this one.
+    /// Copies a sequence of elements from a source [`FixedVec`] into this one.
     ///
     /// # Panics
     ///
@@ -2300,7 +2300,7 @@ where
     B: AsRef<[W]>,
     B2: AsRef<[W]>,
 {
-    /// Checks for equality between two `FixedVec` instances.
+    /// Checks for equality between two [`FixedVec`] instances.
     ///
     /// It first checks `len` and `bit_width`, then the underlying storage.
     fn eq(&self, other: &FixedVec<T, W, E, B2>) -> bool {
@@ -2311,7 +2311,7 @@ where
     }
 }
 
-/// Implements `PartialEq` for comparing a `FixedVec` with a standard slice.
+/// Implements `PartialEq` for comparing a [`FixedVec`] with a standard slice.
 impl<T, W, E, B, T2> PartialEq<&[T2]> for FixedVec<T, W, E, B>
 where
     T: Storable<W> + PartialEq<T2>,
@@ -2356,7 +2356,7 @@ where
     W: Word,
     E: Endianness,
 {
-    /// Converts a `Vec`-backed `FixedVec` into a `Box<[]>`-backed `FixedVec`.
+    /// Converts a `Vec`-backed [`FixedVec`] into a `Box<[]>`-backed [`FixedVec`].
     fn from(vec: FixedVec<T, W, E, Vec<W>>) -> Self {
         unsafe { Self::new_unchecked(vec.bits.into_boxed_slice(), vec.len, vec.bit_width) }
     }
@@ -2368,7 +2368,7 @@ where
     W: Word,
     E: Endianness,
 {
-    /// Converts a `Box<[]>`-backed `FixedVec` into a `Vec`-backed `FixedVec`.
+    /// Converts a `Box<[]>`-backed [`FixedVec`] into a `Vec`-backed [`FixedVec`].
     fn from(vec: FixedVec<T, W, E, Box<[W]>>) -> Self {
         unsafe { Self::new_unchecked(vec.bits.into_vec(), vec.len, vec.bit_width) }
     }
