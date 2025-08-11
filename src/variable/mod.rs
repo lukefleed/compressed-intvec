@@ -218,10 +218,10 @@ use dsi_bitstream::{
     },
     traits::{BitWrite, BE, LE},
 };
-use mem_dbg::{MemDbg, MemSize};
+use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
 use std::{
     error::Error,
-    fmt::{self},
+    fmt::{self, Write},
     marker::PhantomData,
 };
 
@@ -237,8 +237,7 @@ pub enum IntVecError {
     /// An error occurred during an I/O operation, typically from the underlying
     /// bitstream reader or writer.
     Io(std::io::Error),
-    /// A generic error from the `dsi-bitstream` library, often related to
-    /// decoding malformed data.
+    /// A generic error from the [`dsi-bitstream`](https://crates.io/crates/dsi-bitstream) library, often related to decoding malformed data.
     Bitstream(Box<dyn Error + Send + Sync>),
     /// An error indicating that one or more parameters are invalid for the
     /// requested operation.
@@ -303,7 +302,7 @@ impl From<FixedVecError> for IntVecError {
 /// - `E`: The [`Endianness`] of the underlying bitstream (e.g., [`LE`] or [`BE`]).
 /// - `B`: The backend storage buffer, such as `Vec<u64>` for an owned vector or
 ///   `&[u64]` for a borrowed, zero-copy view.
-#[derive(Debug, Clone, MemSize, MemDbg)]
+#[derive(Debug, Clone)]
 pub struct IntVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// The raw, bit-packed compressed data.
     pub(super) data: B,
@@ -317,6 +316,213 @@ pub struct IntVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     pub(super) encoding: Codes,
     /// Zero-sized markers for the generic type parameters.
     pub(super) _markers: PhantomData<(T, E)>,
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for IntVec<T, E, B> {
+    fn mem_size(&self, flags: SizeFlags) -> usize {
+        // Start with the stack size of the struct itself.
+        let mut total_size = core::mem::size_of::<Self>();
+        // Add the heap-allocated memory for the `data` field.
+        total_size += self.data.mem_size(flags) - core::mem::size_of::<B>();
+        // Add the heap-allocated memory for the `samples` field's internal buffer.
+        total_size +=
+            self.samples.mem_size(flags) - core::mem::size_of::<FixedVec<u64, u64, LE, B>>();
+        total_size
+    }
+}
+
+// A local wrapper for `dsi_bitstream::codes::Codes` to override its `MemDbgImpl`.
+// This is necessary because the derived implementation for `Codes` is incorrect
+// and cannot be fixed due to the orphan rule.
+struct CodeWrapper<'a>(&'a Codes);
+
+impl mem_dbg::MemSize for CodeWrapper<'_> {
+    fn mem_size(&self, _flags: mem_dbg::SizeFlags) -> usize {
+        core::mem::size_of_val(self.0)
+    }
+}
+
+impl mem_dbg::MemDbgImpl for CodeWrapper<'_> {
+    // Override the top-level display function for this type.
+    fn _mem_dbg_depth_on(
+        &self,
+        writer: &mut impl core::fmt::Write,
+        total_size: usize,
+        max_depth: usize,
+        prefix: &mut String,
+        field_name: Option<&str>,
+        is_last: bool,
+        padded_size: usize,
+        flags: DbgFlags,
+    ) -> core::fmt::Result {
+        if prefix.len() > max_depth {
+            return Ok(());
+        }
+
+        let real_size = self.mem_size(flags.to_size_flags());
+        let mut buffer = String::new(); // Use a temp buffer to format the size part.
+
+        // Replicate the size and percentage formatting from the default `MemDbgImpl`.
+        if flags.contains(DbgFlags::HUMANIZE) {
+            let (value, uom) = mem_dbg::humanize_float(real_size as f64);
+            if uom == " B" {
+                let _ = write!(&mut buffer, "{:>5}  B ", real_size);
+            } else {
+                let precision = if value.abs() >= 100.0 {
+                    1
+                } else if value.abs() >= 10.0 {
+                    2
+                } else {
+                    3
+                };
+                let _ = write!(&mut buffer, "{0:>4.1$} {2} ", value, precision, uom);
+            }
+        } else {
+            let align = mem_dbg::n_of_digits(total_size);
+            let _ = write!(&mut buffer, "{:>align$} B ", real_size, align = align);
+        }
+
+        if flags.contains(DbgFlags::PERCENTAGE) {
+            let percentage = if total_size == 0 {
+                100.0
+            } else {
+                100.0 * real_size as f64 / total_size as f64
+            };
+            let _ = write!(&mut buffer, "{:>6.2}% ", percentage);
+        }
+
+        // Write the formatted size string with colors if enabled.
+        if flags.contains(DbgFlags::COLOR) {
+            writer.write_fmt(format_args!("{}", mem_dbg::color(real_size)))?;
+        }
+        writer.write_str(&buffer)?;
+        if flags.contains(DbgFlags::COLOR) {
+            writer.write_fmt(format_args!("{}", mem_dbg::reset_color()))?;
+        }
+
+        // Write the tree structure part.
+        if !prefix.is_empty() {
+            writer.write_str(&prefix[2..])?;
+            writer.write_char(if is_last { '╰' } else { '├' })?;
+            writer.write_char('╴')?;
+        }
+
+        if let Some(field_name) = field_name {
+            writer.write_fmt(format_args!("{}", field_name))?;
+        }
+
+        // This is the custom part: print the `Debug` format of the enum.
+        if flags.contains(DbgFlags::TYPE_NAME) {
+            if flags.contains(DbgFlags::COLOR) {
+                writer.write_fmt(format_args!("{}", mem_dbg::type_color()))?;
+            }
+            writer.write_fmt(format_args!(": {:?}", self.0))?;
+            if flags.contains(DbgFlags::COLOR) {
+                writer.write_fmt(format_args!("{}", mem_dbg::reset_color()))?;
+            }
+        }
+
+        // Correctly calculate and print padding.
+        let padding = padded_size - core::mem::size_of_val(self.0);
+        if padding != 0 {
+            writer.write_fmt(format_args!(" [{}B]", padding))?;
+        }
+
+        writer.write_char('\n')?;
+        Ok(())
+    }
+
+    // It's a leaf node in the display tree, so no recursion is needed.
+    fn _mem_dbg_rec_on(
+        &self,
+        _writer: &mut impl core::fmt::Write,
+        _total_size: usize,
+        _max_depth: usize,
+        _prefix: &mut String,
+        _is_last: bool,
+        _flags: DbgFlags,
+    ) -> core::fmt::Result {
+        Ok(())
+    }
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for IntVec<T, E, B> {
+    fn _mem_dbg_rec_on(
+        &self,
+        writer: &mut impl core::fmt::Write,
+        total_size: usize,
+        max_depth: usize,
+        prefix: &mut String,
+        _is_last: bool,
+        flags: DbgFlags,
+    ) -> core::fmt::Result {
+        // Manually display each field, ensuring correct tree structure.
+        self.data._mem_dbg_depth_on(
+            writer,
+            total_size,
+            max_depth,
+            prefix,
+            Some("data"),
+            false,
+            core::mem::size_of_val(&self.data),
+            flags,
+        )?;
+        self.samples._mem_dbg_depth_on(
+            writer,
+            total_size,
+            max_depth,
+            prefix,
+            Some("samples"),
+            false,
+            core::mem::size_of_val(&self.samples),
+            flags,
+        )?;
+        self.k._mem_dbg_depth_on(
+            writer,
+            total_size,
+            max_depth,
+            prefix,
+            Some("k"),
+            false,
+            core::mem::size_of_val(&self.k),
+            flags,
+        )?;
+        self.len._mem_dbg_depth_on(
+            writer,
+            total_size,
+            max_depth,
+            prefix,
+            Some("len"),
+            false,
+            core::mem::size_of_val(&self.len),
+            flags,
+        )?;
+
+        // Use the custom wrapper to correctly display the `encoding` field.
+        let code_wrapper = CodeWrapper(&self.encoding);
+        code_wrapper._mem_dbg_depth_on(
+            writer,
+            total_size,
+            max_depth,
+            prefix,
+            Some("encoding"),
+            false, // Not the last field.
+            core::mem::size_of_val(&self.encoding),
+            flags,
+        )?;
+
+        self._markers._mem_dbg_depth_on(
+            writer,
+            total_size,
+            max_depth,
+            prefix,
+            Some("_markers"),
+            true, // This is the last field.
+            core::mem::size_of_val(&self._markers),
+            flags,
+        )?;
+        Ok(())
+    }
 }
 
 /// Type alias for the bit writer used internally by `IntVec` builders.
