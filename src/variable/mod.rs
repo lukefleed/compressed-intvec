@@ -146,10 +146,10 @@
 //!
 //! let data: Vec<u64> = (0..100).map(|i| i * i).collect();
 //!
-//! let vec: UIntVec<u64> = IntVec::builder(&data)
+//! let vec: UIntVec<u64> = IntVec::builder()
 //!     .k(8) // Set sampling rate
 //!     .codec(VariableCodecSpec::Zeta { k: Some(3) }) // Set compression codec
-//!     .build()
+//!     .build(&data)
 //!     .unwrap();
 //!
 //! assert_eq!(vec.get_sampling_rate(), 8);
@@ -185,8 +185,8 @@
 //! let data: Vec<u32> = (0..100).collect();
 //! 
 //! // Create an IntVec with automatic codec selection
-//! let vec: UIntVec<u32> = IntVec::builder(&data)
-//!     .build()
+//! let vec: UIntVec<u32> = IntVec::builder()
+//!     .build(&data)
 //!     .unwrap();
 //!```
 //!  
@@ -543,16 +543,16 @@ impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
     /// use compressed_intvec::variable::{IntVec, UIntVec, VariableCodecSpec};
     ///
     /// let data: &[u32] = &[5, 8, 13, 21, 34];
-    /// let vec: UIntVec<u32> = IntVec::builder(data)
+    /// let vec: UIntVec<u32> = IntVec::builder()
     ///     .k(2) // Sample every 2nd element
     ///     .codec(VariableCodecSpec::Delta)
-    ///     .build()
+    ///     .build(data)
     ///     .unwrap();
     ///
     /// assert_eq!(vec.get(3), Some(21));
     /// ```
-    pub fn builder(input: &'_ [T]) -> IntVecBuilder<'_, T, E> {
-        IntVecBuilder::new(input)
+    pub fn builder() -> IntVecBuilder<T, E> {
+        IntVecBuilder::new()
     }
 
     /// Creates a builder for constructing an owned [`IntVec`] from an iterator.
@@ -596,10 +596,10 @@ impl<T: Storable, E: Endianness> IntVec<T, E, Vec<u64>> {
         for<'a> crate::variable::IntVecBitWriter<E>:
             BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
-        Self::builder(slice)
+        Self::builder()
             .k(16)
             .codec(VariableCodecSpec::Auto)
-            .build()
+            .build(slice)
     }
 }
 

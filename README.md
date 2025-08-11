@@ -97,9 +97,9 @@ use compressed_intvec::prelude::*;
 let skewed_data: &[u64] = &[5, 8, 13, 1000, 7, 6, 10_000, 10, 2, 3];
 
 // The builder can automatically select the best compression codec.
-let intvec: LEIntVec = IntVec::builder(skewed_data)
+let intvec: LEIntVec = IntVec::builder()
     .codec(VariableCodecSpec::Auto)
-    .build()
+    .build(skewed_data)
     .unwrap();
 
 assert_eq!(intvec.len(), skewed_data.len());
@@ -165,10 +165,10 @@ use compressed_intvec::prelude::*;
 use rand::Rng; // For random number generation
 
 let data: Vec<u64> = (0..10_000).collect();
-let intvec: LEIntVec = IntVec::builder(&data)
+let intvec: LEIntVec = IntVec::builder()
     .codec(VariableCodecSpec::Delta)
     .k(64)
-    .build()
+    .build(&data)
     .unwrap();
 
 // Indices can be in any order.
@@ -191,7 +191,7 @@ For retrieving elements from a streaming iterator of indices.
 use compressed_intvec::prelude::*;
 
 let data: Vec<u64> = (0..10_000).collect();
-let intvec: LEIntVec = IntVec::builder(&data).build().unwrap();
+let intvec: LEIntVec = IntVec::from_slice(&data).unwrap();
 
 // Process indices from a streaming source, such as a range iterator.
 let values: Vec<u64> = intvec.get_many_from_iter(500..505).unwrap();
@@ -214,7 +214,7 @@ A **stateless** reader for efficient, repeated random lookups.
 use compressed_intvec::prelude::*;
 
 let data: Vec<u64> = (0..10_000).collect();
-let intvec: LEIntVec = IntVec::builder(&data).build().unwrap();
+let intvec: LEIntVec = IntVec::from_slice(&data).unwrap();
 
 // Create a stateless reader for random access.
 let mut reader = intvec.reader();
@@ -233,7 +233,7 @@ A **stateful** reader optimized for access patterns with sequential locality.
 use compressed_intvec::prelude::*;
 
 let data: Vec<u64> = (0..10_000).collect();
-let intvec: LEIntVec = IntVec::builder(&data).build().unwrap();
+let intvec: LEIntVec = IntVec::from_slice(&data).unwrap();
 
 // Create a stateful reader for sequential access.
 let mut seq_reader = intvec.seq_reader();
@@ -320,18 +320,18 @@ fn main() {
     data.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
 
     // Create an IntVec with a generic Gamma encoding.
-    let gamma_intvec = LEIntVec::builder(&data)
+    let gamma_intvec = LEIntVec::builder()
         .codec(VariableCodecSpec::Gamma)
-        .build()
+        .build(&data)
         .unwrap();
 
     println!("\nSize of the IntVec with gamma encoding:");
     gamma_intvec.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
 
     // Let the library analyze the data and choose the best codec.
-    let auto_intvec = LEIntVec::builder(&data)
+    let auto_intvec = LEIntVec::builder()
         .codec(VariableCodecSpec::Auto)
-        .build()
+        .build(&data)
         .unwrap();
 
     println!("\nSize of the IntVec with Auto encoding:");

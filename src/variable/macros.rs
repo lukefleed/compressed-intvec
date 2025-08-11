@@ -59,23 +59,23 @@
 #[macro_export]
 macro_rules! int_vec {
     () => {
-        $crate::variable::IntVec::builder(&[0u64; 0]).build().unwrap()
+        $crate::variable::IntVec::builder().build(&[0u64; 0]).unwrap()
     };
     ($($elem:expr),* $(,)?) => {
-        $crate::variable::IntVec::builder(&[$($elem as u64),*])
+        $crate::variable::IntVec::builder()
             .codec($crate::variable::VariableCodecSpec::Auto)
             .k(16)
-            .build()
+            .build(&[$($elem as u64),*])
             .unwrap()
     };
     ($elem:expr; $len:expr) => {
         {
             let mut v = ::std::vec::Vec::with_capacity($len);
             v.resize($len, $elem as u64);
-            $crate::variable::IntVec::builder(&v)
+            $crate::variable::IntVec::builder()
                 .codec($crate::variable::VariableCodecSpec::Auto)
                 .k(16)
-                .build()
+                .build(&v)
                 .unwrap()
         }
     };
@@ -130,23 +130,23 @@ macro_rules! int_vec {
 #[macro_export]
 macro_rules! sint_vec {
     () => {
-        $crate::variable::IntVec::builder(&[0i64; 0]).build().unwrap()
+        $crate::variable::IntVec::builder().build(&[0i64; 0]).unwrap()
     };
     ($($elem:expr),* $(,)?) => {
-        $crate::variable::IntVec::builder(&[$($elem as i64),*])
+        $crate::variable::IntVec::builder()
             .codec($crate::variable::VariableCodecSpec::Auto)
             .k(16)
-            .build()
+            .build(&[$($elem as i64),*])
             .unwrap()
     };
     ($elem:expr; $len:expr) => {
         {
             let mut v = ::std::vec::Vec::with_capacity($len);
             v.resize($len, $elem as i64);
-            $crate::variable::IntVec::builder(&v)
+            $crate::variable::IntVec::builder()
                 .codec($crate::variable::VariableCodecSpec::Auto)
                 .k(16)
-                .build()
+                .build(&v)
                 .unwrap()
         }
     };

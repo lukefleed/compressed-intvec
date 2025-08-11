@@ -24,16 +24,16 @@
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>(); 
 //! 
 //! // Explicitly specify a non-parametric codec
-//! let delta_vec: UIntVec<u32> = IntVec::builder(&data)
+//! let delta_vec: UIntVec<u32> = IntVec::builder()
 //!     .codec(VariableCodecSpec::Delta)
 //!     .k(16)
-//!     .build()
+//!     .build(&data)
 //!     .unwrap();
 //!  
 //! // Explicitly specify a parametric codec with a fixed parameter
-//! let zeta_vec: UIntVec<u32> = IntVec::builder(data)
+//! let zeta_vec: UIntVec<u32> = IntVec::builder()
 //!     .codec(VariableCodecSpec::Zeta { k: Some(3) })
-//!     .build()
+//!     .build(&data)
 //!     .unwrap();
 //! ```
 //!
@@ -49,9 +49,9 @@
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //!
 //! // Automatically select the best Rice parameter
-//! let rice_vec: UIntVec<u32> = IntVec::builder(&data)
+//! let rice_vec: UIntVec<u32> = IntVec::builder()
 //!     .codec(VariableCodecSpec::Rice { log2_b: None })
-//!     .build()
+//!     .build(&data)
 //!     .unwrap();
 //! ```
 //!
@@ -64,9 +64,9 @@
 //! 
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //! // Automatically select the best codec and parameters for the data
-//! let auto_vec: UIntVec<u32> = IntVec::builder(&data)
+//! let auto_vec: UIntVec<u32> = IntVec::builder()
 //!    .codec(VariableCodecSpec::Auto)
-//!    .build()
+//!    .build(&data)
 //!    .unwrap();
 //! ```
 //! 

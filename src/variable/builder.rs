@@ -32,21 +32,19 @@ use std::marker::PhantomData;
 /// This builder always produces an owned `IntVec<T, E, Vec<u64>>`. It is obtained
 /// by calling [`IntVec::builder`].
 #[derive(Debug)]
-pub struct IntVecBuilder<'a, T: Storable, E: Endianness> {
-    input: &'a [T],
+pub struct IntVecBuilder<T: Storable, E: Endianness> {
     k: usize,
     codec_spec: VariableCodecSpec,
     _markers: PhantomData<(T, E)>,
 }
 
-impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
+impl<T: Storable, E: Endianness> IntVecBuilder<T, E> {
     /// Creates a new builder for an `IntVec` with default settings.
     ///
     /// By default, the sampling rate is `k=32` and the codec is chosen
     /// automatically via [`VariableCodecSpec::Auto`].
-    pub(super) fn new(input: &'a [T]) -> Self {
+    pub(super) fn new() -> Self {
         Self {
-            input,
             k: 32,
             codec_spec: VariableCodecSpec::Auto,
             _markers: PhantomData,
@@ -78,7 +76,7 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
         self
     }
 
-    /// Builds the [`IntVec`], consuming the builder.
+    /// Builds the [`IntVec`] from a slice of data, consuming the builder.
     ///
     /// This method performs the compression and builds the sampling table.
     ///
@@ -89,21 +87,21 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ``` 
     /// use compressed_intvec::variable::{IntVec, SIntVec, VariableCodecSpec};
     ///
     /// let data: &[i16] = &[-100, 0, 50, -2, 1000];
     ///
-    /// let vec: SIntVec<i16> = IntVec::builder(data)
+    /// let vec: SIntVec<i16> = IntVec::builder()
     ///     .k(2) // Smaller `k` for faster access
     ///     .codec(VariableCodecSpec::Delta) // Explicitly choose Delta coding
-    ///     .build()
+    ///     .build(data)
     ///     .unwrap();
     ///
     /// assert_eq!(vec.len(), 5);
     /// assert_eq!(vec.get(0), Some(-100));
     /// ```
-    pub fn build(self) -> Result<IntVec<T, E, Vec<u64>>, IntVecError>
+    pub fn build(self, input: &[T]) -> Result<IntVec<T, E, Vec<u64>>, IntVecError>
     where
         IntVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
@@ -114,10 +112,10 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
         }
 
         // Convert the input data to a vector of u64 words for analysis and compression.
-        let words: Vec<u64> = self.input.iter().map(|&x| x.to_word()).collect();
+        let words: Vec<u64> = input.iter().map(|&x| x.to_word()).collect();
         let resolved_code = codec::resolve_codec(&words, self.codec_spec)?;
 
-        if self.input.is_empty() {
+        if input.is_empty() {
             let empty_samples = FixedVec::<u64, u64, LE>::builder()
                 .build(&[0u64; 0])
                 .unwrap();
@@ -129,12 +127,12 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
         let word_writer = MemWordWriterVec::new(Vec::new());
         let mut writer = IntVecBitWriter::<E>::new(word_writer);
 
-        let sample_capacity = self.input.len().div_ceil(self.k);
+        let sample_capacity = input.len().div_ceil(self.k);
         let mut temp_samples = Vec::with_capacity(sample_capacity);
         let mut current_bit_offset = 0;
 
         // Iterate through the data, writing compressed values and recording samples.
-        for (i, &value) in self.input.iter().enumerate() {
+        for (i, &value) in input.iter().enumerate() {
             if i % self.k == 0 {
                 temp_samples.push(current_bit_offset as u64);
             }
@@ -175,11 +173,9 @@ impl<'a, T: Storable, E: Endianness> IntVecBuilder<'a, T, E> {
         let mut data = writer.into_inner().unwrap().into_inner();
         data.shrink_to_fit();
 
-        Ok(
-            unsafe {
-                IntVec::new_unchecked(data, samples, self.k, self.input.len(), resolved_code)
-            },
-        )
+        Ok(unsafe {
+            IntVec::new_unchecked(data, samples, self.k, input.len(), resolved_code)
+        })
     }
 }
 

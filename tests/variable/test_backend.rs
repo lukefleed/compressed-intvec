@@ -14,10 +14,10 @@ fn test_intvec_owned_to_borrowed_conversion() {
     let data = generate_random_vec(1000, 10000);
 
     // 1. Create an owned vector, which will be our source of truth.
-    let owned_vec = LEIntVec::builder(&data)
+    let owned_vec = LEIntVec::builder()
         .k(16)
         .codec(VariableCodecSpec::Delta)
-        .build()
+        .build(&data)
         .unwrap();
 
     // 2. Extract references to the raw components from the owned vector.
@@ -61,7 +61,7 @@ fn test_intvec_owned_to_borrowed_conversion() {
 #[test]
 fn test_from_parts_validation() {
     let data = generate_random_vec(100, 1000);
-    let owned_vec = BEIntVec::builder(&data).k(8).build().unwrap();
+    let owned_vec = BEIntVec::builder().k(8).build(&data).unwrap();
 
     let data_limbs = owned_vec.as_limbs();
     let samples_vec = owned_vec.samples_ref();
@@ -103,10 +103,10 @@ fn test_from_parts_validation() {
 #[test]
 fn test_sintvec_owned_to_borrowed_conversion() {
     let data = generate_random_signed_vec(1000, 10000);
-    let owned_svec: IntVec<i64, LE> = IntVec::builder(&data)
+    let owned_svec: IntVec<i64, LE> = IntVec::builder()
         .k(16)
         .codec(VariableCodecSpec::Auto)
-        .build()
+        .build(&data)
         .unwrap();
 
     let data_limbs = owned_svec.as_limbs();

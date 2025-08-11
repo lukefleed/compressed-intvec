@@ -60,10 +60,10 @@ where
         };
 
         // Build the IntVec
-        let intvec = IntVec::<T, E>::builder(data)
+        let intvec = IntVec::<T, E>::builder()
             .k(32) // A reasonable default for testing
             .codec(codec_spec)
-            .build()
+            .build(data)
             .unwrap_or_else(|e| panic!("Build failed: {}", context(&format!("{:?}", e))));
 
         // Basic property checks
@@ -217,7 +217,7 @@ fn test_builder_rejects_auto_on_iter() {
 #[test]
 fn test_binary_search() {
     let data: Vec<u64> = (0..100).map(|x| x * 2).collect();
-    let intvec = LEIntVec::builder(&data).build().unwrap();
+    let intvec = LEIntVec::builder().build(&data).unwrap();
     assert_eq!(intvec.binary_search(&10), Ok(5));
     assert_eq!(intvec.binary_search(&11), Err(6));
     assert_eq!(intvec.binary_search(&0), Ok(0));
@@ -239,9 +239,9 @@ macro_rules! test_roundtrip_with_codec {
             );
 
             // Build the vector. This should always succeed.
-            let vec = IntVec::<u32, $E>::builder(&data)
+            let vec = IntVec::<u32, $E>::builder()
                 .codec($codec_spec)
-                .build()
+                .build(&data)
                 .expect("Build failed");
 
             // 1. Test full iteration using .iter() -> IntVecIter

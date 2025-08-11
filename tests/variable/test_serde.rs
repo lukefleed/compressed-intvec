@@ -15,10 +15,10 @@ mod test_serde {
             fn $test_name() {
                 let input_data = &$input;
                 // FIX: Use the new generic signature IntVec<T, E> by specifying u64.
-                let original_intvec = IntVec::<u64, $endianness>::builder(input_data)
+                let original_intvec = IntVec::<u64, $endianness>::builder()
                     .k($k)
                     .codec($codec_spec)
-                    .build()
+                    .build(input_data)
                     .unwrap();
 
                 // 1. Test with bincode (binary format)
@@ -64,10 +64,10 @@ mod test_serde {
             fn $test_name() {
                 let input_data = &$input;
                 // FIX: Use the generic IntVec<i64, E> instead of the old SIntVec<E>.
-                let original_sintvec = IntVec::<i64, $endianness>::builder(input_data)
+                let original_sintvec = IntVec::<i64, $endianness>::builder()
                     .k($k)
                     .codec($codec_spec)
-                    .build()
+                    .build(input_data)
                     .unwrap();
 
                 // 1. Test with bincode

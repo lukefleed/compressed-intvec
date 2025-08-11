@@ -16,7 +16,7 @@ use dsi_bitstream::prelude::{ToInt, ToNat};
 /// # Zig-Zag Encoding for Signed Integers
 ///
 /// For signed integer types, this trait's implementation automatically applies
-/// **Zig-Zag encoding**. This is a critical transformation that maps signed
+/// **Zig-Zag encoding**. This is a transformation that maps signed
 /// integers to unsigned integers in a way that is efficient for variable-length
 /// compression.
 ///
@@ -34,8 +34,7 @@ use dsi_bitstream::prelude::{ToInt, ToNat};
 ///
 /// This ensures that values close to zero, whether positive or negative, are
 /// represented by small unsigned integers, which can then be compressed into
-/// very few bits by the variable-length codecs. This conversion is handled
-/// transparently by `to_word` and `from_word`.
+/// very few bits by the variable-length codecs. 
 pub trait Storable: Sized + Copy {
     /// Converts the element into its `u64` storage representation.
     ///
