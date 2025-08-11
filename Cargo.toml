@@ -15,7 +15,7 @@ keywords = [
     "integer-encoding",
 ]
 categories = ["data-structures", "compression", "algorithms"]
-exclude = [".github/*", "images/*"]
+exclude = [".github/*", "images/*", "python/*"]
 
 [dependencies]
 atomic = "0.5.3"
@@ -38,6 +38,8 @@ serde_json = "1.0.141"
 sux = "0.8.0"
 succinct = "0.5.2"
 rand = "0.9.0"
+
+# --- Benchmark Targets ---
 
 [[bench]]
 name = "bench_random_access"
@@ -89,8 +91,36 @@ name = "bench_var_parallel"
 harness = false
 path = "benches/variable/bench_parallel.rs"
 
+[[bench]]
+name = "bench_size"
+harness = false
+path = "benches/bench_size.rs"
+
 
 [features]
 default = ["parallel"]
 parallel = ["rayon"]
 serde = ["dep:serde"]
+
+
+# --- Build Profiles ---
+
+[profile.release]
+# Standard release optimizations.
+opt-level = 3
+# Include debug information in release builds.
+# The impact on runtime performance is negligible, but the binary size increases.
+debug = true
+overflow-checks = false
+
+[profile.bench]
+# Aggressive optimizations for benchmarks, at the cost of
+# much longer compile times
+opt-level = 3
+# Enable "fat" Link-Time Optimization to allow optimizations across the entire crate.
+lto = "fat"
+# Disable debug info for benchmark binaries to get the cleanest performance measurement.
+debug = false
+# Force the compiler to process the crate as a single unit, enabling more
+# aggressive inlining and optimization.
+codegen-units = 1
