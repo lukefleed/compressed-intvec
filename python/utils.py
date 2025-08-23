@@ -80,7 +80,7 @@ def save_plot(fig, filename_base):
     # Salva in HTML
     html_path = os.path.join(OUTPUT_DIR, f"{filename_base}.html")
     try:
-        fig.write_html(html_path)
+        fig.write_html(html_path, full_html=False, include_plotlyjs='cdn')
         print(f"Plot saved to {html_path}")
     except Exception as e:
         print(f"Error saving HTML plot: {e}")
