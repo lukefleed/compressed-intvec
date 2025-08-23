@@ -30,6 +30,7 @@ serde = { version = "1.0.219", features = ["derive"], optional = true }
 
 
 [dev-dependencies]
+simple-sds-sbwt = "0.3.2"
 bincode = "1.3.3"
 criterion = { version = "0.5.1", features = ["html_reports"] }
 rand_distr = "0.5.0"

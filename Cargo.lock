@@ -326,6 +326,7 @@ dependencies = [
  "rayon",
  "serde",
  "serde_json",
+ "simple-sds-sbwt",
  "succinct",
  "sux",
 ]
@@ -1368,6 +1369,15 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "simple-sds-sbwt"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf90dbe5fd0e2195b52079f8c48a15273ef4e1f62541784054242ee7d5da7057"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "smallvec"

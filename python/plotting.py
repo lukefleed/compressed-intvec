@@ -1,14 +1,91 @@
 import pandas as pd
 import plotly.graph_objects as go
-from parsing import parse_random_access_results
-from utils import format_codec_name, format_distribution_subtitle, save_plot
+import plotly.express as px
+from parsing import parse_random_access_results, parse_fixed_access_results
+from utils import (
+    format_codec_name, format_distribution_subtitle, format_fixed_access_name, 
+    save_plot, NUM_ACCESSES, VECTOR_SIZE, format_number
+)
+
+def plot_fixed_access():
+    """Generates a plot for the fixed-width random access benchmark (time vs. bit_width)."""
+    print("Processing fixed-width random access benchmarks...")
+    df = parse_fixed_access_results()
+    if df.empty:
+        print("No fixed-width random access benchmark data found to plot.")
+        return
+
+    df["time_ms"] = df["time_ns"] / 1e6
+    df["display_name"] = df["name"].apply(format_fixed_access_name)
+    
+    fig = go.Figure()
+
+    # --- Gestione Baseline ---
+    baseline_df = df[df["name"].str.startswith("Baseline_Vec")].copy()
+    other_df = df[~df["name"].str.startswith("Baseline_Vec")]
+
+    if not baseline_df.empty:
+        baseline_df = baseline_df.sort_values("bit_width")
+        
+        fig.add_trace(go.Scatter(
+            x=baseline_df["bit_width"],
+            y=baseline_df["time_ms"],
+            mode="lines+markers",
+            name="Vec<T>",
+            line=dict(color='black', dash='dash'),
+            hovertemplate=(
+                "<b>%{text}</b><br>" +
+                "Bit Width: %{x}<br>" +
+                "Time: %{y:.2f} ms<extra></extra>"
+            ),
+            text=baseline_df["display_name"] 
+        ))
+
+    # --- Plotta le altre implementazioni con colori distinti ---
+    color_palette = px.colors.qualitative.Plotly
+    unique_names = sorted(other_df["display_name"].unique())
+
+    for i, name in enumerate(unique_names):
+        df_plot = other_df[other_df["display_name"] == name].sort_values("bit_width")
+        color = color_palette[i % len(color_palette)]
+        
+        fig.add_trace(go.Scatter(
+            x=df_plot["bit_width"], 
+            y=df_plot["time_ms"], 
+            mode="lines+markers",
+            name=name,
+            line=dict(color=color),
+            marker=dict(color=color),
+            hovertemplate=(
+                "<b>" + name + "</b><br>" +
+                "Bit Width: %{x}<br>" +
+                "Time: %{y:.2f} ms<extra></extra>"
+            )
+        ))
+
+    main_title = "Fixed-Width Random Access Performance"
+    subtitle = f"{format_number(NUM_ACCESSES)} random reads on a vector of {format_number(VECTOR_SIZE)} elements"
+
+    fig.update_layout(
+        title_text=f"{main_title}<br><i>{subtitle}</i>",
+        xaxis=dict(title="Bit Width", dtick=4),
+        yaxis=dict(title=f"Time for {format_number(NUM_ACCESSES)} accesses (ms, lower is better)", type='log'),
+        legend_title_text="Implementation",
+        hovermode="x unified",
+        width=1200,
+        height=700,
+        font=dict(size=14)
+    )
+
+    save_plot(fig, "fixed_random_access_performance")
+
 
 def plot_random_access():
-    """Generates a separate plot for each distribution for the random access benchmark."""
-    print("Processing random access benchmarks...")
+    """Generates a separate plot for each distribution for the variable-width random access benchmark."""
+    print("Processing variable-width random access benchmarks...")
     df = parse_random_access_results()
     if df.empty:
-        print("No random access benchmark data found to plot.")
+        print("No variable-width random access benchmark data found to plot.")
         return
 
     df["time_ms"] = df["time_seconds"] * 1000
@@ -19,7 +96,6 @@ def plot_random_access():
         print("No distributions found in benchmark data.")
         return
 
-    # Calculate slowdown factor relative to the baseline for each distribution.
     for dist in distributions:
         baseline_df = df[(df["distribution"] == dist) & (df["name"] == "Baseline")]
         if not baseline_df.empty:
@@ -29,7 +105,6 @@ def plot_random_access():
             print(f"Warning: Baseline data not found for distribution '{dist}'. Cannot calculate slowdown.")
             df.loc[df["distribution"] == dist, "slowdown"] = float('nan')
             
-    # Define styles for fixed-width vectors to ensure they are distinct.
     fixed_styles = {
         "Vec<u64>": {"color": "black", "dash": "dash"},
         "FixedVec": {"color": "#EF553B", "dash": "dot"},
@@ -37,7 +112,6 @@ def plot_random_access():
         "succinct::IntVector": {"color": "#AB63FA", "dash": "dot"}
     }
 
-    # Generate one plot per distribution.
     for dist in distributions:
         fig = go.Figure()
         df_dist = df[df["distribution"] == dist].copy()
@@ -45,7 +119,6 @@ def plot_random_access():
         fixed_df = df_dist[df_dist["k"] == 0].sort_values(by="slowdown")
         sampled_df = df_dist[df_dist["k"] > 0]
 
-        # Plot variable-width codecs.
         for codec_name in sorted(sampled_df["codec_display_name"].unique()):
             df_plot = sampled_df[sampled_df["codec_display_name"] == codec_name].sort_values("k")
             fig.add_trace(go.Scatter(
@@ -58,7 +131,6 @@ def plot_random_access():
                                "Absolute Time: %{text}<extra></extra>")
             ))
 
-        # Plot fixed-width vectors: add a dummy trace for the legend, then the hline.
         for _, row in fixed_df.iterrows():
             name = row["codec_display_name"]
             slowdown = row["slowdown"]

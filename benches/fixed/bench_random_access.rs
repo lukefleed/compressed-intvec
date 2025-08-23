@@ -4,14 +4,11 @@ use std::time::Duration;
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
-use succinct::int_vec::{IntVec, IntVector};
-use sux::prelude::{BitFieldSlice, BitFieldSliceMut, BitFieldVec};
+use simple_sds_sbwt::{int_vector::IntVector as SdsIntVector, ops::Access}; // Alias per evitare conflitti
+use succinct::int_vec::{IntVec, IntVector as SuccinctIntVector};
+use sux::prelude::{BitFieldSlice, BitFieldVec};
 
 /// Generates a vector with uniformly random values up to a given maximum.
-///
-/// # Arguments
-/// * `size` - The number of elements to generate.
-/// * `max_val_exclusive` - The exclusive upper bound for the random values.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
     let mut rng = SmallRng::seed_from_u64(42);
     (0..size)
@@ -20,18 +17,13 @@ fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
 }
 
 /// The main benchmark function for random access performance.
-///
-/// This suite measures the speed of `get_unchecked` and `get_unaligned_unchecked`
-/// for both our `FixedVec` and `sux::BitFieldVec`, comparing them against a `Vec<u64>` baseline.
 fn benchmark_random_access(c: &mut Criterion) {
     const VECTOR_SIZE: usize = 10_000_000;
     const NUM_ACCESSES: usize = 1_000_000;
 
-    // Test a range of bit widths, including powers of two and others.
-    let bit_widths_to_test: Vec<u32> = (8..=64).step_by(4).collect();
+    // Test a range of bit widths.
+    let bit_widths_to_test: Vec<u32> = (4..=64).step_by(4).collect();
 
-    // Pre-generate the random indices that will be used for all benchmarks to ensure
-    // a fair comparison.
     let mut rng = SmallRng::seed_from_u64(1337);
     let access_indices: Vec<usize> = (0..NUM_ACCESSES)
         .map(|_| rng.random_range(0..VECTOR_SIZE))
@@ -40,8 +32,6 @@ fn benchmark_random_access(c: &mut Criterion) {
     for &bit_width in &bit_widths_to_test {
         let mut group = c.benchmark_group(format!("RandomAccess/{}bit", bit_width));
 
-        // Generate a single data vector for this bit_width to be used by all structures.
-        // The 64-bit case is handled explicitly to generate full-range u64 values.
         let data = if bit_width == 64 {
             let mut rng = SmallRng::seed_from_u64(42);
             (0..VECTOR_SIZE).map(|_| rng.random::<u64>()).collect()
@@ -49,92 +39,121 @@ fn benchmark_random_access(c: &mut Criterion) {
             generate_random_vec(VECTOR_SIZE, 1u64 << bit_width)
         };
 
-        // --- 1. Baseline: Standard Vec<u64> ---
-        group.bench_function("Baseline_Vec<u64>/Unchecked", |b| {
-            b.iter(|| {
-                for &index in black_box(&access_indices) {
-                    // SAFETY: Indices are generated within bounds for this benchmark.
-                    black_box(unsafe { data.get_unchecked(index) });
-                }
-            })
-        });
+        // --- 1. Baseline: Standard Vec with the smallest fitting type ---
+        match bit_width {
+            bw if bw <= 8 => {
+                let baseline_data: Vec<u8> = data.iter().map(|&v| v as u8).collect();
+                group.bench_function("Baseline_Vec<u8>/Unchecked", |b| {
+                    b.iter(|| {
+                        for &index in black_box(&access_indices) {
+                            black_box(unsafe { baseline_data.get_unchecked(index) });
+                        }
+                    })
+                });
+            }
+            bw if bw <= 16 => {
+                let baseline_data: Vec<u16> = data.iter().map(|&v| v as u16).collect();
+                group.bench_function("Baseline_Vec<u16>/Unchecked", |b| {
+                    b.iter(|| {
+                        for &index in black_box(&access_indices) {
+                            black_box(unsafe { baseline_data.get_unchecked(index) });
+                        }
+                    })
+                });
+            }
+            bw if bw <= 32 => {
+                let baseline_data: Vec<u32> = data.iter().map(|&v| v as u32).collect();
+                group.bench_function("Baseline_Vec<u32>/Unchecked", |b| {
+                    b.iter(|| {
+                        for &index in black_box(&access_indices) {
+                            black_box(unsafe { baseline_data.get_unchecked(index) });
+                        }
+                    })
+                });
+            }
+            _ => {
+                group.bench_function("Baseline_Vec<u64>/Unchecked", |b| {
+                    b.iter(|| {
+                        for &index in black_box(&access_indices) {
+                            black_box(unsafe { data.get_unchecked(index) });
+                        }
+                    })
+                });
+            }
+        };
 
         // --- 2. Setup Compressed Vectors ---
-        // Our library's vectors. The builder adds padding automatically.
         let le_fixed_vec = LEFixedVec::builder()
             .bit_width(BitWidth::Explicit(bit_width as usize))
             .build(&data)
             .unwrap();
 
-        // `from_slice` correctly infers the bit width from the data.
         let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
-        assert_eq!(sux_bfv.bit_width(), le_fixed_vec.bit_width());
 
-        // Create succinct::IntVector by pushing elements.
-        let mut succinct_iv = IntVector::<u64>::new(bit_width as usize);
+        let mut succinct_iv = SuccinctIntVector::<u64>::new(bit_width as usize);
+        succinct_iv.reserve_exact(data.len().try_into().unwrap());
         for &val in &data {
             succinct_iv.push(val);
         }
 
-        // --- 3. Benchmark Our LEFixedVec ---
+        // Setup for simple-sds-sbwt
+        let mut sds_iv = SdsIntVector::with_len(data.len(), bit_width as usize, 0).unwrap();
+        for (i, &val) in data.iter().enumerate() {
+            sds_iv.set(i, val);
+        }
+
+        // --- 3. Benchmark compressed-intvec ---
         group.bench_function("LEFixedVec/Unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
-                    // SAFETY: Indices are generated within bounds.
                     black_box(unsafe { le_fixed_vec.get_unchecked(index) });
                 }
             })
         });
 
-        group.bench_function("LEFixedVec/UnalignedUnchecked", |b| {
+        group.bench_function("LEFixedVec/Unaligned-Unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
-                    // SAFETY: Indices are generated within bounds and builder adds padding.
                     black_box(unsafe { le_fixed_vec.get_unaligned_unchecked(index) });
                 }
             })
         });
 
-        // --- 4. Benchmark succinct::IntVector ---
-        group.bench_function("succinct::IntVector/get", |b| {
-            b.iter(|| {
-                for &index in black_box(&access_indices) {
-                    // The `get` method in succinct performs bounds checking.
-                    black_box(succinct_iv.get(index as u64));
-                }
-            })
-        });
-
-        // --- 5. Benchmark sux::BitFieldVec ---
+        // --- 4. Benchmark sux::BitFieldVec ---
         group.bench_function("sux::BitFieldVec/Unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
-                    // SAFETY: Indices are generated within bounds.
                     black_box(unsafe { sux_bfv.get_unchecked(index) });
                 }
             })
         });
 
-        // sux::BitFieldVec's unaligned access has specific constraints and requires padding.
-        let w_bits = 64;
-        let can_use_unaligned =
-            bit_width <= w_bits - 8 + 2 || bit_width == w_bits - 8 + 4 || bit_width == w_bits;
+        group.bench_function("sux::BitFieldVec/Unaligned-Unchecked", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    black_box(unsafe { sux_bfv.get_unaligned_unchecked(index) });
+                }
+            })
+        });
+        
+        // --- 5. Benchmark succinct::IntVector ---
+        group.bench_function("succinct::IntVector/get", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    black_box(succinct_iv.get(index as u64));
+                }
+            })
+        });
 
-        if can_use_unaligned {
-            let mut sux_bfv_unaligned =
-                sux::prelude::BitFieldVec::<u64>::new_unaligned(bit_width as usize, VECTOR_SIZE);
-            for (i, &v) in data.iter().enumerate() {
-                sux_bfv_unaligned.set(i, v);
-            }
-            group.bench_function("sux::BitFieldVec/UnalignedUnchecked", |b| {
-                b.iter(|| {
-                    for &index in black_box(&access_indices) {
-                        // SAFETY: Indices are in bounds, vector was created with `new_unaligned`.
-                        black_box(unsafe { sux_bfv_unaligned.get_unaligned_unchecked(index) });
-                    }
-                })
-            });
-        }
+        // --- 6. Benchmark simple-sds-sbwt::IntVector ---
+        group.bench_function("simple-sds-sbwt::IntVector/get", |b| {
+            b.iter(|| {
+                for &index in black_box(&access_indices) {
+                    // `get` performs bounds checking.
+                    black_box(sds_iv.get(index));
+                }
+            })
+        });
 
         group.finish();
     }
