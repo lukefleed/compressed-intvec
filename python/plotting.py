@@ -7,6 +7,15 @@ from utils import (
     save_plot, NUM_ACCESSES, VECTOR_SIZE, format_number
 )
 
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from parsing import parse_random_access_results, parse_fixed_access_results
+from utils import (
+    format_codec_name, format_distribution_subtitle, format_fixed_access_name,
+    save_plot, NUM_ACCESSES, VECTOR_SIZE, format_number
+)
+
 def plot_fixed_access():
     """Generates a plot for the fixed-width random access benchmark (time vs. bit_width)."""
     print("Processing fixed-width random access benchmarks...")
@@ -17,7 +26,7 @@ def plot_fixed_access():
 
     df["time_ms"] = df["time_ns"] / 1e6
     df["display_name"] = df["name"].apply(format_fixed_access_name)
-    
+
     fig = go.Figure()
 
     # --- Gestione Baseline ---
@@ -26,7 +35,7 @@ def plot_fixed_access():
 
     if not baseline_df.empty:
         baseline_df = baseline_df.sort_values("bit_width")
-        
+
         fig.add_trace(go.Scatter(
             x=baseline_df["bit_width"],
             y=baseline_df["time_ms"],
@@ -38,20 +47,19 @@ def plot_fixed_access():
                 "Bit Width: %{x}<br>" +
                 "Time: %{y:.2f} ms<extra></extra>"
             ),
-            text=baseline_df["display_name"] 
+            text=baseline_df["display_name"]
         ))
 
-    # --- Plotta le altre implementazioni con colori distinti ---
     color_palette = px.colors.qualitative.Plotly
     unique_names = sorted(other_df["display_name"].unique())
 
     for i, name in enumerate(unique_names):
         df_plot = other_df[other_df["display_name"] == name].sort_values("bit_width")
         color = color_palette[i % len(color_palette)]
-        
+
         fig.add_trace(go.Scatter(
-            x=df_plot["bit_width"], 
-            y=df_plot["time_ms"], 
+            x=df_plot["bit_width"],
+            y=df_plot["time_ms"],
             mode="lines+markers",
             name=name,
             line=dict(color=color),
@@ -69,12 +77,21 @@ def plot_fixed_access():
     fig.update_layout(
         title_text=f"{main_title}<br><i>{subtitle}</i>",
         xaxis=dict(title="Bit Width", dtick=4),
-        yaxis=dict(title=f"Time for {format_number(NUM_ACCESSES)} accesses (ms, lower is better)", type='log'),
+        yaxis=dict(title=f"Time for {format_number(NUM_ACCESSES)} accesses (ms, lower is better, log scale)", type='log'),
         legend_title_text="Implementation",
         hovermode="x unified",
         width=1200,
-        height=700,
-        font=dict(size=14)
+        height=900,  
+        font=dict(size=14),
+        template="ggplot2",
+        legend=dict(
+            x=0.01,
+            y=0.99,
+            xanchor='left',  
+            yanchor='top',
+            bgcolor='rgba(0,0,0,0)'    
+        ),
+        margin=dict(l=80, r=80, t=80, b=60)
     )
 
     save_plot(fig, "fixed_random_access_performance")
