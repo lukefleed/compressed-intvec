@@ -24,6 +24,7 @@ common_traits = "0.12.0"
 dsi-bitstream = {version = "0.5.0", features = ["mem_dbg"]}
 mem_dbg = "0.3.0"
 num-traits = "0.2.19"
+num_cpus = "1.17.0"
 parking_lot = "0.12.4"
 rayon = { version = "1.10.0", optional = true }
 serde = { version = "1.0.219", features = ["derive"], optional = true }
@@ -96,6 +97,16 @@ path = "benches/variable/bench_parallel.rs"
 name = "bench_size"
 harness = false
 path = "benches/bench_size.rs"
+
+[[bench]]
+name = "benchmark_lock_free_access"
+harness = false
+path = "benches/fixed/benchmark_lock_free_access.rs"
+
+[[bench]]
+name = "benchmark_locked_access"
+harness = false
+path = "benches/fixed/benchmark_locked_access.rs"
 
 
 [features]
