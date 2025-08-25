@@ -72,7 +72,7 @@ def save_plot(fig, filename_base):
         print(f"Error saving SVG plot: {e}")
         print("Please ensure you have Kaleido installed (`pip install kaleido`)")
 
-    html_path = os.path.join(PROJECT_ROOT, "src", "pages", "bench-intvec", f"{filename_base}.html")
+    html_path = os.path.join(OUTPUT_DIR, f"{filename_base}.html")
     os.makedirs(os.path.dirname(html_path), exist_ok=True)
     try:
         fig.write_html(html_path, full_html=False, include_plotlyjs='cdn')
