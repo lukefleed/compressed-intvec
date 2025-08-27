@@ -3,7 +3,8 @@ import os
 from plotting import (
     plot_random_access, 
     plot_fixed_access, 
-    plot_atomic_scaling
+    plot_atomic_scaling,
+    plot_random_write
 )
 from utils import OUTPUT_DIR
 
@@ -11,14 +12,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate plots from compressed-intvec benchmark results.")
     parser.add_argument("--random-access", action="store_true", help="Generate the variable-width random access slowdown plot.")
     parser.add_argument("--fixed-access", action="store_true", help="Generate the fixed-width random access performance plot.")
+    parser.add_argument("--random-write", action="store_true", help="Generate the random write performance plot.")
     parser.add_argument("--atomic-scaling", action="store_true", help="Generate atomic write scaling plots.")
     parser.add_argument("--all", action="store_true", help="Generate all available plots.")
     args = parser.parse_args()
 
     run_all = args.all or not any(vars(args).values())
     run_random_access = args.random_access or run_all
-    
     run_fixed_access = args.fixed_access or run_all
+    run_random_write = args.random_write or run_all
     run_atomic_scaling = args.atomic_scaling or run_all
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -28,6 +30,9 @@ if __name__ == "__main__":
     
     if run_fixed_access:
         plot_fixed_access()
+
+    if run_random_write:
+        plot_random_write()
 
     if run_atomic_scaling:
         plot_atomic_scaling(

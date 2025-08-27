@@ -108,6 +108,10 @@ name = "benchmark_locked_access"
 harness = false
 path = "benches/fixed/benchmark_locked_access.rs"
 
+[[bench]]
+name = "bench_random_write"
+harness = false
+path = "benches/fixed/bench_random_write.rs"
 
 [features]
 default = ["parallel"]

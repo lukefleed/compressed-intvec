@@ -4,11 +4,12 @@ import plotly.express as px
 from parsing import (
     parse_random_access_results, 
     parse_fixed_access_results, 
-    parse_atomic_scaling_results
+    parse_atomic_scaling_results,
+    parse_random_write_results
 )
 from utils import (
     format_codec_name, format_distribution_subtitle, format_fixed_access_name, 
-    save_plot, NUM_ACCESSES, VECTOR_SIZE, format_number, OPS_PER_THREAD
+    format_random_write_name, save_plot, NUM_ACCESSES, NUM_WRITES, VECTOR_SIZE, format_number, OPS_PER_THREAD
 )
 
 def plot_fixed_access():
@@ -71,6 +72,71 @@ def plot_fixed_access():
         margin=dict(l=80, r=80, t=80, b=60)
     )
     save_plot(fig, "fixed_random_access_performance")
+
+def plot_random_write():
+    print("Processing random write benchmarks...")
+    df = parse_random_write_results()
+    if df.empty:
+        print("No random write benchmark data found to plot.")
+        return
+
+    df["time_ms"] = df["time_ns"] / 1e6
+    df["display_name"] = df["name"].apply(format_random_write_name)
+
+    fig = go.Figure()
+
+    # Separate baseline and other implementations
+    baseline_df = df[df["name"].str.startswith("Baseline_Vec")].copy()
+    other_df = df[~df["name"].str.startswith("Baseline_Vec")]
+
+    # Plot baseline with distinct styling
+    if not baseline_df.empty:
+        baseline_df = baseline_df.sort_values("bit_width")
+        fig.add_trace(go.Scatter(
+            x=baseline_df["bit_width"], y=baseline_df["time_ms"],
+            mode="lines+markers", name="Vec<T>",
+            line=dict(color='black', dash='dash'),
+            hovertemplate=("<b>%{text}</b><br>" + "Bit Width: %{x}<br>" + "Time: %{y:.2f} ms<extra></extra>"),
+            text=baseline_df["display_name"]
+        ))
+
+    # Plot other implementations
+    color_palette = px.colors.qualitative.Plotly
+    unique_names = sorted(other_df["display_name"].unique())
+
+    for i, name in enumerate(unique_names):
+        df_plot = other_df[other_df["display_name"] == name].sort_values("bit_width")
+        color = color_palette[i % len(color_palette)]
+        fig.add_trace(go.Scatter(
+            x=df_plot["bit_width"], y=df_plot["time_ms"],
+            mode="lines+markers", name=name,
+            line=dict(color=color), marker=dict(color=color),
+            hovertemplate=("<b>" + name + "</b><br>" + "Bit Width: %{x}<br>" + "Time: %{y:.2f} ms<extra></extra>")
+        ))
+
+    # Plot the random write performance
+    main_title = "Random Write Performance"
+    subtitle = f"{format_number(NUM_WRITES)} random writes on a vector of {format_number(VECTOR_SIZE)} elements"
+    fig.update_layout(
+        title_text=f"{main_title}<br><i>{subtitle}</i>",
+        xaxis=dict(title="Bit Width", dtick=4),
+        yaxis=dict(title=f"Time for {format_number(NUM_WRITES)} writes (ms, lower is better, log scale)", type='log'),
+        legend=dict(
+            x=0.01, y=0.99, 
+            xanchor='left', yanchor='top',
+            bgcolor='rgba(0,0,0,0)',
+            bordercolor='rgba(0,0,0,0)',
+            borderwidth=1,
+            font=dict(size=12)
+        ),
+        legend_title_text="Implementation", 
+        hovermode="x unified",
+        width=1200, height=900, 
+        font=dict(size=14),
+        template="ggplot2",
+        margin=dict(l=80, r=80, t=80, b=60)
+    )
+    save_plot(fig, "random_write_performance")
 
 def plot_atomic_scaling(group_prefix, bit_width, baseline_name, filename_suffix, title_suffix):
     """

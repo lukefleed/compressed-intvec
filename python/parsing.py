@@ -149,3 +149,44 @@ def parse_random_access_results():
                 })
 
     return pd.DataFrame(results)
+
+
+def parse_random_write_results():
+    results = []
+    base_path = CRITERION_DIR
+    if not os.path.isdir(base_path):
+        print(f"Error: Criterion output directory not found at '{base_path}'")
+        return pd.DataFrame()
+
+    # Look for RandomWrite_XXbit directories
+    for dir_name in os.listdir(base_path):
+        match_bw = re.match(r"RandomWrite_(\d+)bit", dir_name)
+        if not match_bw:
+            continue
+        bit_width = int(match_bw.group(1))
+
+        bw_path = os.path.join(base_path, dir_name)
+        if not os.path.isdir(bw_path):
+            continue
+            
+        for bench_name in os.listdir(bw_path):
+            if bench_name == 'report':  # Skip report directory
+                continue
+                
+            estimates_path = os.path.join(bw_path, bench_name, 'base', 'estimates.json')
+            if not os.path.exists(estimates_path):
+                continue
+            
+            with open(estimates_path, 'r') as f:
+                data = json.load(f)
+                time_ns = data['mean']['point_estimate']
+                results.append({
+                    "name": bench_name.replace('__', '::'),
+                    "bit_width": bit_width,
+                    "time_ns": time_ns,
+                })
+    
+    if not results:
+        print(f"Warning: No RandomWrite benchmark data found in '{base_path}'.")
+
+    return pd.DataFrame(results)

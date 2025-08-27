@@ -8,6 +8,7 @@ OUTPUT_DIR = os.path.join(PROJECT_ROOT, "images")
 
 VECTOR_SIZE = 10_000_000
 NUM_ACCESSES = 1_000_000
+NUM_WRITES = 1_000_000  # From bench_random_write.rs
 OPS_PER_THREAD = 10_000
 
 def format_number(n):
@@ -33,6 +34,29 @@ def format_fixed_access_name(name):
         if "Unaligned-Unchecked" in name:
             return "sux::BitFieldVec (Unaligned)"
         return "sux::BitFieldVec (Aligned)"
+    
+    if name.startswith("succinct::IntVector"):
+        return "succinct::IntVector"
+    
+    if name.startswith("simple-sds-sbwt::IntVector"):
+        return "simple-sds-sbwt::IntVector"
+
+    return name
+
+def format_random_write_name(name):
+    """Format benchmark names for random write plots."""
+    if name.startswith("Baseline_Vec"):
+        # Extract type from patterns like "Baseline_Vec_u16_set_unchecked"
+        match = re.search(r"Baseline_Vec_(\w+)_", name)
+        if match:
+            return f"Vec<{match.group(1)}>"
+        return "Vec (Baseline)"
+    
+    if name.startswith("LEFixedVec"):
+        return "LEFixedVec"
+
+    if name.startswith("sux::BitFieldVec"):
+        return "sux::BitFieldVec"
     
     if name.startswith("succinct::IntVector"):
         return "succinct::IntVector"
