@@ -189,9 +189,9 @@ fn benchmark_random_write(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(40)
-        .warm_up_time(Duration::from_millis(500))
-        .measurement_time(Duration::from_secs(8));
+        .sample_size(60)
+        .warm_up_time(Duration::from_secs(3))
+        .measurement_time(Duration::from_secs(15));
 
     targets = benchmark_random_write
 }

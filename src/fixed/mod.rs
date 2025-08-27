@@ -1720,6 +1720,7 @@ where
     /// The caller must ensure that `index` is within bounds and that `value_w`
     /// fits within the configured `bit_width`. Failure to do so will result in
     /// data corruption or a panic.
+    #[inline(always)]
     pub unsafe fn set_unchecked(&mut self, index: usize, value_w: W) {
         let bits_per_word = <W as traits::Word>::BITS;
         let bit_pos = index * self.bit_width;
@@ -1731,38 +1732,38 @@ where
         if E::IS_LITTLE {
             // Fast path: the value fits entirely within a single word.
             if bit_offset + self.bit_width <= bits_per_word {
-                let word = &mut limbs[word_index];
+                let mut word = *limbs.get_unchecked(word_index);
                 // Clear the target bits and then OR the new value.
-                *word &= !(self.mask << bit_offset);
-                *word |= value_w << bit_offset;
+                word &= !(self.mask << bit_offset);
+                word |= value_w << bit_offset;
+                *limbs.get_unchecked_mut(word_index) = word;
             } else {
-                // Slow path: the value spans two words.
-                let (left, right) = limbs.split_at_mut(word_index + 1);
-                let low_word = &mut left[word_index];
-                let high_word = &mut right[0];
+                let remaining_bits_in_first_word = bits_per_word - bit_offset;
+                let (left, right) = limbs.split_at_mut_unchecked(word_index + 1);
+                let mut low_word_val = *left.get_unchecked(word_index);
+                let low_mask = (<W as num_traits::NumCast>::from(1u8).unwrap() << bit_offset)
+                    .wrapping_sub(<W as num_traits::NumCast>::from(1u8).unwrap());
+                low_word_val &= low_mask;
+                low_word_val |= value_w << bit_offset;
+                *left.get_unchecked_mut(word_index) = low_word_val;
 
-                // Write the low part of the value to the first word.
-                *low_word &= !(self.mask << bit_offset);
-                *low_word |= value_w << bit_offset;
-
-                // Write the high part of the value to the next word.
-                let bits_in_high = (bit_offset + self.bit_width) - bits_per_word;
-                let high_mask = self.mask >> (self.bit_width - bits_in_high);
-                *high_word &= !high_mask;
-                *high_word |= value_w >> (self.bit_width - bits_in_high);
+                let mut high_word_val = *right.get_unchecked(0);
+                high_word_val &= !(self.mask >> remaining_bits_in_first_word);
+                high_word_val |= value_w >> remaining_bits_in_first_word;
+                *right.get_unchecked_mut(0) = high_word_val;
             }
         } else {
             // Big-Endian set logic.
             if bit_offset + self.bit_width <= bits_per_word {
                 let shift = bits_per_word - self.bit_width - bit_offset;
                 let mask = self.mask << shift;
-                let word = &mut limbs[word_index];
+                let word = limbs.get_unchecked_mut(word_index);
                 *word &= !mask.to_be();
                 *word |= (value_w << shift).to_be();
             } else {
-                let (left, right) = limbs.split_at_mut(word_index + 1);
-                let high_word = &mut left[word_index];
-                let low_word = &mut right[0];
+                let (left, right) = limbs.split_at_mut_unchecked(word_index + 1);
+                let high_word = left.get_unchecked_mut(word_index);
+                let low_word = right.get_unchecked_mut(0);
 
                 let bits_in_first = bits_per_word - bit_offset;
                 let bits_in_second = self.bit_width - bits_in_first;
