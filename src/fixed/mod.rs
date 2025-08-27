@@ -1723,6 +1723,15 @@ where
     #[inline(always)]
     pub unsafe fn set_unchecked(&mut self, index: usize, value_w: W) {
         let bits_per_word = <W as traits::Word>::BITS;
+        if self.bit_width == bits_per_word {
+            *self.bits.as_mut().get_unchecked_mut(index) = if E::IS_LITTLE {
+                value_w
+            } else {
+                value_w.to_be()
+            };
+            return;
+        }
+        
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / bits_per_word;
         let bit_offset = bit_pos % bits_per_word;
