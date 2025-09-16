@@ -3,17 +3,11 @@ name = "compressed-intvec"
 version = "0.5.0"
 edition = "2021"
 authors = ["Luca Lombardo"]
-description = "A compressed integer vector with fast random access that stores values with instantaneous codes in a bitstream"
+description = "Space-efficient integer vectors for Rust. Offers a fixed-width implementation for O(1) mutable and atomic access, and a variable-width implementation that uses instantaneous codes and sampling for high compression ratios on non-uniform data."
 readme = "README.md"
 license = "Apache-2.0"
 repository = "https://github.com/lukefleed/compressed-intvec"
-keywords = [
-    "compression",
-    "vector",
-    "bitstream",
-    "data-compression",
-    "integer-encoding",
-]
+keywords = ["compression", "vector", "integer", "data-structures", "succinct"]
 categories = ["data-structures", "compression", "algorithms"]
 exclude = [".github/*", "images/*", "python/*"]
 
@@ -21,10 +15,9 @@ exclude = [".github/*", "images/*", "python/*"]
 atomic = "0.5.3"
 bytemuck = { version = "1.23.1", optional = true }
 common_traits = "0.12.0"
-dsi-bitstream = {version = "0.5.0", features = ["mem_dbg"]}
+dsi-bitstream = { version = "0.5.0", features = ["mem_dbg"] }
 mem_dbg = "0.3.0"
 num-traits = "0.2.19"
-num_cpus = "1.17.0"
 parking_lot = "0.12.4"
 rayon = { version = "1.10.0", optional = true }
 serde = { version = "1.0.219", features = ["derive"], optional = true }
@@ -117,6 +110,7 @@ path = "benches/fixed/bench_random_write.rs"
 default = ["parallel"]
 parallel = ["rayon"]
 serde = ["dep:serde"]
+arch-dependent-storable = []
 
 
 # --- Build Profiles ---

@@ -1,6 +1,5 @@
 //! Helper functions for integration tests.
 #![allow(dead_code)] // Allow unused functions as this is a helper library for tests
-
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 /// Generates a vector with uniformly random `u64` values.

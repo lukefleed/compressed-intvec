@@ -13,11 +13,11 @@ const OPS_PER_THREAD: usize = 100_000;
 const BIT_WIDTH: usize = 15; // Non-power of two to force the locked path
 
 fn benchmark_locked_scaling(c: &mut Criterion) {
-    let mut thread_counts: Vec<usize> = (1..=num_cpus::get())
-        .filter(|n| n.is_power_of_two())
-        .collect();
-    if !thread_counts.contains(&num_cpus::get()) {
-        thread_counts.push(num_cpus::get());
+    // Determine the number of logical cores available.
+    let num_cores = std::thread::available_parallelism().unwrap().get();
+    let mut thread_counts: Vec<usize> = (1..=num_cores).filter(|n| n.is_power_of_two()).collect();
+    if !thread_counts.contains(&num_cores) {
+        thread_counts.push(num_cores);
     }
     thread_counts.sort_unstable();
     thread_counts.dedup();
@@ -34,14 +34,22 @@ fn benchmark_locked_scaling(c: &mut Criterion) {
             .collect();
 
         // --- Setup Data Structures Once ---
-        let baseline_u16 = Arc::new((0..VECTOR_SIZE).map(|_| AtomicU16::new(0)).collect::<Vec<_>>());
+        let baseline_u16 = Arc::new(
+            (0..VECTOR_SIZE)
+                .map(|_| AtomicU16::new(0))
+                .collect::<Vec<_>>(),
+        );
         let afv_15bit = Arc::new(
             UAtomicFixedVec::<u64>::builder()
                 .bit_width(BitWidth::Explicit(BIT_WIDTH))
                 .build(&vec![0; VECTOR_SIZE])
                 .unwrap(),
         );
-        let sux_storage_15bit = Arc::new((0..(VECTOR_SIZE * BIT_WIDTH).div_ceil(64) + 2).map(|_| AtomicU64::new(0)).collect());
+        let sux_storage_15bit = Arc::new(
+            (0..(VECTOR_SIZE * BIT_WIDTH).div_ceil(64) + 2)
+                .map(|_| AtomicU64::new(0))
+                .collect(),
+        );
 
         // --- Benchmark Runs ---
         group.bench_function("Baseline_Vec<AtomicU16>/store", |b| {
@@ -78,7 +86,11 @@ fn run_store_on_atomic_u16(vec: &Arc<Vec<AtomicU16>>, num_threads: usize, indice
     });
 }
 
-fn run_store_on_atomic_fixed_vec(vec: &Arc<UAtomicFixedVec<u64>>, num_threads: usize, indices: &[usize]) {
+fn run_store_on_atomic_fixed_vec(
+    vec: &Arc<UAtomicFixedVec<u64>>,
+    num_threads: usize,
+    indices: &[usize],
+) {
     let barrier = Arc::new(Barrier::new(num_threads));
     let chunks: Vec<_> = indices.chunks(OPS_PER_THREAD).collect();
 
@@ -105,7 +117,13 @@ fn run_store_on_sux_vec(storage: &Arc<Vec<AtomicU64>>, num_threads: usize, indic
             let storage_clone = Arc::clone(storage);
             let barrier_clone = Arc::clone(&barrier);
             s.spawn(move || {
-                let sux_vec = unsafe { AtomicBitFieldVec::<u64, _>::from_raw_parts(storage_clone.as_slice(), BIT_WIDTH, VECTOR_SIZE) };
+                let sux_vec = unsafe {
+                    AtomicBitFieldVec::<u64, _>::from_raw_parts(
+                        storage_clone.as_slice(),
+                        BIT_WIDTH,
+                        VECTOR_SIZE,
+                    )
+                };
                 barrier_clone.wait();
                 for &index in *chunk {
                     unsafe {
