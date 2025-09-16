@@ -411,9 +411,7 @@ The resulting SVGs file will be saved in the `images` directory.
 [`sux::BitFieldVec`]: https://docs.rs/sux/latest/sux/bits/bit_field_vec/index.htmll
 [`succinct::IntVector`]: https://docs.rs/succinct/latest/succinct/int_vec/trait.IntVec.html
 
-## Optional Features
-
-### `arch-dependent-storable`: Storing `usize` and `isize`
+## Optional Features: storing `usize` and `isize`
 
 By default, [`variable::IntVec`] only supports integer types with a fixed size (e.g., `u32`, `i64`). This guarantees that compressed data is portable across different machine architectures (e.g., from a 64-bit server to a 32-bit embedded device).
 
@@ -422,8 +420,9 @@ The `arch-dependent-storable` feature flag enables [`Storable`] implementations 
 **Warning**: This feature breaks data portability. An `IntVec<usize>` created on a 64-bit system containing values larger than `u32::MAX` will cause a panic if deserialized or read on a 32-bit system. Only enable this feature if you can guarantee that your application and its data will only ever run on a single target architecture (e.g., `x86_64`).
 
 Enable it in your `Cargo.toml`:
+
 ```toml
-compressed-intvec = { version = "0.5.0", features = ["arch-dependent-storable"] }
+compressed-intvec = { version = "0.5.1", features = ["arch-dependent-storable"] }
 ```
 
 [`Storable`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/traits/trait.Storable.html

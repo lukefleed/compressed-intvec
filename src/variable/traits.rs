@@ -54,6 +54,8 @@ use dsi_bitstream::prelude::{ToInt, ToNat};
 /// | -2              | 3                |
 /// | 2               | 4                |
 /// | ...             | ...              |
+///
+/// [`IntVec`]: crate::variable::IntVec
 pub trait Storable: Sized + Copy {
     /// Converts the element into its [`u64`] storage representation.
     ///
