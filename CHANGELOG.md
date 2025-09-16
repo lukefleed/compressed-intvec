@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2025-09-16
+
+### New
+
+*   Added a new `arch-dependent-storable` feature flag to enable `Storable` implementations for `usize` and `isize` in `variable::IntVec`. This allows for creating vectors of architecture-dependent types, but sacrifices data portability guarantees across platforms with different pointer widths.
+*   Added a new benchmark suite (`bench_random_write`) and corresponding plotting scripts to measure and compare random write performance for `fixed::FixedVec` against other libraries.
+
+### Improved
+
+*   Optimized `FixedVec::set_unchecked` for significantly improved write performance. The implementation now includes a fast path for elements with a bit width equal to the storage word size and uses `split_at_mut_unchecked` to reduce bounds checking overhead for writes that span word boundaries.
+*   Updated crate description and keywords in `Cargo.toml` for better discoverability and clarity on crates.io.
+*   Replaced the `num_cpus` dependency with `std::thread::available_parallelism`.
+
+### Fixed
+
+*   Corrected minor type errors in the `variable` module test suite.
+
 ## [0.5.0] - 11-08-2025
 
 This release introduces a fundamental architectural restructuring of the library, splitting the implementation into two distinct data structures: `FixedVec` for fixed-width encoding and `IntVec` for variable-width encoding. This separation enables significant new features, including full mutability, atomic operations, and improved performance, but constitutes a major breaking change to the public API.
@@ -196,6 +213,3 @@ usability and performance gains but include foundational breaking changes.
 *   **Fixed `serde` Serialization**: The `serde` implementation now correctly
     serializes and deserializes the internal state of `IntVec` and `SIntVec`,
     ensuring that all codec parameters and data are preserved accurately.
-
-
-
