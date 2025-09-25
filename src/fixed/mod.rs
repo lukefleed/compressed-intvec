@@ -42,7 +42,7 @@
 //!     - [`BitWidth::Minimal`]: Selects the minimal bit-width required.
 //!     - [`BitWidth::PowerOfTwo`]: Rounds up to the nearest power of two.
 //!     - [`BitWidth::Explicit`]: Allows specifying a fixed bit-width.
-//! - **Builders**: [`FixedVecBuilder`](builder::FixedVecBuilder) and [`FixedVecFromIterBuilder`](builder::FixedVecFromIterBuilder) 
+//! - **Builders**: [`FixedVecBuilder`](builder::FixedVecBuilder) and [`FixedVecFromIterBuilder`](builder::FixedVecFromIterBuilder)
 //! - **Slices**: [`FixedVecSlice`](slice::FixedVecSlice) for creating immutable or mutable views.
 //!
 //! # Examples
@@ -358,16 +358,16 @@ where
     ///
     /// This method is a convenience wrapper around the builder API, using
     /// the default bit width strategy ([`BitWidth::Minimal`]).
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
-    /// 
+    ///
     /// let data: &[u32] = &[10, 20, 30];
-    /// 
+    ///
     /// let vec: UFixedVec<u32> = FixedVec::from_slice(data).unwrap();
-    /// 
+    ///
     /// assert_eq!(vec.len(), 3);
     /// assert_eq!(vec.bit_width(), 5); // 30 fits in 5 bits
     /// assert_eq!(vec.get(0), Some(10));
@@ -614,7 +614,9 @@ where
     ///
     /// # Implementation Notes
     ///
-    /// For Big-Endian, this method falls back to the standard [`get_unchecked`](Self::get_unchecked) implementation.
+    /// For Big-Endian systems, or for `bit_width` values that are too large for a
+    /// single unaligned read to be sufficient (i.e., `bit_width > W::BITS - 7`),
+    /// this method falls back to the standard [`get_unchecked`](Self::get_unchecked) implementation.
     #[inline(always)]
     pub unsafe fn get_unaligned_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len);
@@ -622,6 +624,16 @@ where
         if E::IS_LITTLE {
             let bits_per_word = <W as Word>::BITS;
             if self.bit_width == bits_per_word {
+                return self.get_unchecked(index);
+            }
+
+            // A single unaligned read of a `Word` is only guaranteed to be correct
+            // if the value spans at most `W::BITS` bits from the start of the read.
+            // Since the value can start at any bit offset (0-7) within the first
+            // byte, the condition is `bit_rem + bit_width <= W::BITS`. The worst-case
+            // `bit_rem` is 7, so we must have `7 + bit_width <= W::BITS`.
+            // If `bit_width > W::BITS - 7`, we fall back to the safe, two-read implementation.
+            if self.bit_width > bits_per_word.saturating_sub(7) {
                 return self.get_unchecked(index);
             }
 
@@ -1731,7 +1743,7 @@ where
             };
             return;
         }
-        
+
         let bit_pos = index * self.bit_width;
         let word_index = bit_pos / bits_per_word;
         let bit_offset = bit_pos % bits_per_word;
