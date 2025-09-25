@@ -1,6 +1,6 @@
 [package]
 name = "compressed-intvec"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 authors = ["Luca Lombardo"]
 description = "Space-efficient integer vectors for Rust. Offers a fixed-width implementation for O(1) mutable and atomic access, and a variable-width implementation that uses instantaneous codes and sampling for high compression ratios on non-uniform data."

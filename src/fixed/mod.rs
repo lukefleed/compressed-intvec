@@ -591,7 +591,7 @@ where
     /// This method attempts to use a optimized path with a single
     /// unaligned memory read. For certain `bit_width` configurations where this
     /// is not safe (e.g., a 63-bit value on a [`u64`] backend), it automatically
-    /// falls back to the safe, two-read implementation of [`get_unchecked`].
+    /// falls back to the safe, two-read implementation of [`get_unchecked`](Self::get_unchecked).
     ///
     /// # Note
     ///
@@ -1467,7 +1467,7 @@ where
         let bits_per_word = <W as Word>::BITS;
 
         // Fast path for word-aligned shifts, using `copy_within`.
-        if shift_amount % bits_per_word == 0 {
+        if shift_amount.is_multiple_of(bits_per_word) {
             let start_write_word = start_bit / bits_per_word;
             let start_read_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
@@ -1535,7 +1535,7 @@ where
         }
 
         // Fast path for word-aligned shifts.
-        if shift_amount % bits_per_word == 0 {
+        if shift_amount.is_multiple_of(bits_per_word) {
             let start_read_word = start_bit / bits_per_word;
             let start_write_word = (start_bit + shift_amount) / bits_per_word;
             let num_words_to_move = num_bits_to_move.div_ceil(bits_per_word);
