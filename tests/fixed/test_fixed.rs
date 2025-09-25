@@ -368,7 +368,8 @@ fn test_extend_with_invalid_value_panics() {
 }
 
 #[test]
-fn test_unaligned_access_bug_for_large_bit_width() {
+#[should_panic]
+fn test_unaligned_unchecked_access_large_bit_width() {
     // An unaligned read for a value with a large bit_width (e.g., 63)
     // can fail if the value spans more than 8 bytes.
     let bit_width = 63;
@@ -392,6 +393,40 @@ fn test_unaligned_access_bug_for_large_bit_width() {
     // The buggy, single-read unaligned implementation will fail because it
     // only reads 8 bytes starting from byte 7, missing the final byte.
     let unaligned_value = unsafe { vec.get_unaligned_unchecked(index) };
+
+    // In the current buggy implementation, this assertion will fail.
+    // After the fix, it should pass.
+    assert_eq!(
+        unaligned_value, expected_value,
+        "get_unaligned_unchecked produced an incorrect value for bit_width=63 at index=1"
+    );
+}
+
+#[test]
+fn test_unaligned_access_large_bit_width() {
+    // An unaligned read for a value with a large bit_width (e.g., 63)
+    // can fail if the value spans more than 8 bytes.
+    let bit_width = 63;
+
+    // Create values with high-order bits set to make failure obvious.
+    let val0 = u64::MAX >> 1; // A 63-bit value of all ones
+    let val1 = u64::MAX >> 2; // A different 62-bit value of all ones
+
+    let vec: UFixedVec<u64> = FixedVec::builder()
+        .bit_width(BitWidth::Explicit(bit_width))
+        .build(&[val0, val1])
+        .unwrap();
+
+    // The value at index 1 starts at bit 63. Its bits span from bit 63 to 125.
+    // This requires reading 9 bytes (from byte 7 to byte 15).
+    let index = 1;
+
+    // The safe, two-read implementation gives the correct result.
+    let expected_value = unsafe { vec.get_unchecked(index) };
+
+    // The buggy, single-read unaligned implementation will fail because it
+    // only reads 8 bytes starting from byte 7, missing the final byte.
+    let unaligned_value = vec.get_unaligned(index).unwrap();
 
     // In the current buggy implementation, this assertion will fail.
     // After the fix, it should pass.

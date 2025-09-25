@@ -585,6 +585,61 @@ where
         <T as Storable<W>>::from_word(final_word)
     }
 
+    /// Returns the element at the specified index using unaligned memory access,
+    /// or [`None`] if the index is out of bounds.
+    ///
+    /// This method attempts to use a optimized path with a single
+    /// unaligned memory read. For certain `bit_width` configurations where this
+    /// is not safe (e.g., a 63-bit value on a [`u64`] backend), it automatically
+    /// falls back to the safe, two-read implementation of [`get_unchecked`].
+    ///
+    /// # Note
+    ///
+    /// This method performs various checks to determine if the current configuration
+    /// is safe for a single unaligned read. This will of course add some overhead. If
+    /// your are sure that
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
+    ///
+    /// let data: &[u32] = &[10, 20, 30];
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
+    ///
+    /// assert_eq!(vec.get_unaligned(1), Some(20));
+    /// assert_eq!(vec.get_unaligned(3), None);
+    /// ```
+    #[inline]
+    pub fn get_unaligned(&self, index: usize) -> Option<T> {
+        if index >= self.len {
+            return None;
+        }
+
+        // SAFETY: We have just performed the bounds check, so both
+        // `get_unchecked` and `get_unaligned_unchecked` are safe to call.
+        unsafe {
+            let bits_per_word = <W as Word>::BITS;
+            let bit_width = self.bit_width;
+
+            // Check if the current configuration is safe for a single unaligned read.
+            // This is a precise check based on the analysis of which bit_widths can
+            // cause a read to span more than W::BITS.
+            let is_safe = (bit_width <= bits_per_word.saturating_sub(6)) // e.g., <= 58 for u64
+                || (bit_width == bits_per_word.saturating_sub(4))        // e.g., == 60 for u64
+                || (bit_width == bits_per_word);
+
+            let value = if is_safe {
+                // Fast path for safe configurations.
+                self.get_unaligned_unchecked(index)
+            } else {
+                // Fallback for unsafe bit_widths (e.g., 59, 61, 62, 63 for u64).
+                self.get_unchecked(index)
+            };
+            Some(value)
+        }
+    }
+
     /// Returns the element at `index` using unaligned memory access.
     ///
     /// This method can be significantly faster for random access. It performs a
@@ -606,38 +661,47 @@ where
     ///
     /// # Safety
     ///
-    /// Calling this method with an out-of-bounds `index` is undefined behavior.
-    /// The [`FixedVec`] must have been constructed with sufficient padding (at
-    /// least one [`Word`]) to guarantee that the unaligned read does not go
-    /// past the allocated buffer. This padding is guaranteed by the default
-    /// builders.
+    /// Calling this method is undefined behavior if:
+    /// - `index` is out of bounds (`index >= self.len()`).
+    /// - The `bit_width` is one for which a single unaligned read is unsafe.
+    ///   This is the case for `bit_width` values such as `59`, `61`, `62`, `63`
+    ///   on a [`u64`] backend, and analogous values for other word sizes.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, this method will panic if the safety conditions on `index`
+    /// or `bit_width` are not met.
     ///
     /// # Implementation Notes
     ///
-    /// For Big-Endian systems, or for `bit_width` values that are too large for a
-    /// single unaligned read to be sufficient (i.e., `bit_width > W::BITS - 7`),
-    /// this method falls back to the standard [`get_unchecked`](Self::get_unchecked) implementation.
+    /// For Big-Endian systems, this method falls back to the standard
+    /// [`get_unchecked`](Self::get_unchecked) implementation, as unaligned
+    /// access logic is more complex and architecture-dependent.
     #[inline(always)]
     pub unsafe fn get_unaligned_unchecked(&self, index: usize) -> T {
         debug_assert!(index < self.len);
 
         if E::IS_LITTLE {
             let bits_per_word = <W as Word>::BITS;
-            if self.bit_width == bits_per_word {
+            let bit_width = self.bit_width;
+
+            if bit_width == bits_per_word {
                 return self.get_unchecked(index);
             }
 
-            // A single unaligned read of a `Word` is only guaranteed to be correct
-            // if the value spans at most `W::BITS` bits from the start of the read.
-            // Since the value can start at any bit offset (0-7) within the first
-            // byte, the condition is `bit_rem + bit_width <= W::BITS`. The worst-case
-            // `bit_rem` is 7, so we must have `7 + bit_width <= W::BITS`.
-            // If `bit_width > W::BITS - 7`, we fall back to the safe, two-read implementation.
-            if self.bit_width > bits_per_word.saturating_sub(7) {
-                return self.get_unchecked(index);
-            }
+            // In debug builds, assert that this function is only called for `bit_width`
+            // values where a single unaligned read is guaranteed to be sufficient.
+            debug_assert!({
+                    let is_safe_contiguous = bit_width <= bits_per_word.saturating_sub(6); // e.g., <= 58 for u64
+                    let is_safe_case_60 = bit_width == bits_per_word.saturating_sub(4); // e.g., == 60 for u64
+                    is_safe_contiguous || is_safe_case_60
+                },
+                "get_unaligned_unchecked is not safe for this bit_width ({bit_width}). \
+                The value may span more than {bits_per_word} bits, making a single read insufficient. \
+                Use get_unaligned() for a safe version with an automatic fallback."
+            );
 
-            let bit_pos = index * self.bit_width;
+            let bit_pos = index * bit_width;
             let byte_pos = bit_pos / 8;
             let bit_rem = bit_pos % 8;
 

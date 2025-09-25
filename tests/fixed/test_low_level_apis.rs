@@ -238,8 +238,10 @@ where
         }
 
         for i in 0..vec.len() {
+            // The safe `get_unaligned` is the one we want to test for correctness.
+            // It contains the fallback logic, so it should always be correct.
             let val_normal = unsafe { vec.get_unchecked(i) };
-            let val_unaligned = unsafe { vec.get_unaligned_unchecked(i) };
+            let val_unaligned = vec.get_unaligned(i).unwrap(); // Without bounds check this would fail for some bit widths
             assert_eq!(
                 val_normal,
                 val_unaligned,
@@ -254,6 +256,70 @@ where
     }
 }
 
+/// A specific test to trigger the unaligned read bug with large bit widths.
+/// This test verifies the correctness of the fallback logic in `get_unaligned`.
+fn run_unaligned_access_edge_case_test<W, E>()
+where
+    W: Word + compressed_intvec::prelude::FixedStorable<W>,
+    E: Endianness,
+    u64: AsPrimitive<W>,
+    dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<W, Vec<W>>>:
+        dsi_bitstream::prelude::BitWrite<E, Error = std::convert::Infallible>,
+{
+    let word_bits = <W as Word>::BITS;
+
+    // Iterate over all bit widths, with special focus on those near the word size.
+    for bit_width in 1..=word_bits {
+        // We only care about Little-Endian for unaligned access tests.
+        if !E::IS_LITTLE {
+            continue;
+        }
+
+        // The value to test: a sequence of `bit_width` ones. This ensures
+        // that if the unaligned read misses the most significant bits, the
+        // result will be incorrect.
+        let test_value: W = if bit_width == word_bits {
+            W::max_value()
+        } else {
+            (W::ONE << bit_width).wrapping_sub(W::ONE)
+        };
+
+        // We test every possible starting bit remainder (0-7) to ensure all
+        // alignment scenarios are covered.
+        for rem in 0..8 {
+            let mut test_index = None;
+            // Find an index `i` such that `(i * bit_width) % 8 == rem`.
+            for i in 0..16 {
+                if (i * bit_width) % 8 == rem {
+                    test_index = Some(i);
+                    break;
+                }
+            }
+
+            if let Some(index) = test_index {
+                let mut vec: FixedVec<W, W, E> = FixedVec::new(bit_width).unwrap();
+                // Pad with zeros, insert the test value at the chosen index.
+                for i in 0..20 {
+                    vec.push(if i == index { test_value } else { W::ZERO });
+                }
+
+                let val_normal = unsafe { vec.get_unchecked(index) };
+                let val_unaligned = vec.get_unaligned(index).unwrap(); // Without bounds check this would fail for some bit widths
+
+                assert_eq!(
+                    val_normal,
+                    val_unaligned,
+                    "Unaligned access failed for W={}, bit_width={}, index={} (produces rem={})",
+                    std::any::type_name::<W>(),
+                    bit_width,
+                    index,
+                    rem
+                );
+            }
+        }
+    }
+}
+
 macro_rules! test_low_level_apis {
     ($test_name:ident, $T:ty, $W:ty, $E:ty) => {
         #[test]
@@ -262,6 +328,7 @@ macro_rules! test_low_level_apis {
             run_addr_of_test::<$T, $W, $E>();
             run_prefetch_test::<$T, $W, $E>();
             run_unaligned_access_test::<$T, $W, $E>();
+            run_unaligned_access_edge_case_test::<$W, $E>();
         }
     };
 }
