@@ -18,6 +18,10 @@ use crate::fixed::{BitWidth, FixedVec};
 use crate::variable::codec;
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
+    codes::{
+        DeltaWrite, ExpGolombWrite, GammaWrite, GolombWrite, OmegaWrite, PiWrite, RiceWrite,
+        VByteBeWrite, VByteLeWrite, ZetaWrite,
+    },
     impls::MemWordWriterVec,
     prelude::{BitWrite, Codes, CodesWrite, Endianness, LE},
 };
@@ -188,9 +192,9 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
         T: 'static,
         SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
-        // Resolve the codec without data analysis (empty slice is fine for
-        // fully-specified codecs).
-        let resolved_codec = codec::resolve_codec(&[], self.codec_spec)
+        // Resolve the codec without data analysis. Pass an empty u64 slice
+        // since fully-specified codecs do not require data.
+        let resolved_codec = codec::resolve_codec::<u64>(&[], self.codec_spec)
             .map_err(|e| SeqVecError::CodecDispatch(e.to_string()))?;
 
         self.encode_sequences(sequences, resolved_codec)
@@ -367,8 +371,9 @@ where
             ));
         }
 
-        // Resolve the codec without data analysis.
-        let resolved_codec = codec::resolve_codec(&[], self.codec_spec)
+        // Resolve the codec without data analysis. Pass an empty u64 slice
+        // since fully-specified codecs do not require data.
+        let resolved_codec = codec::resolve_codec::<u64>(&[], self.codec_spec)
             .map_err(|e| SeqVecError::CodecDispatch(e.to_string()))?;
 
         // Initialize the bit writer.

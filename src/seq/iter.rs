@@ -14,10 +14,10 @@
 use crate::fixed::FixedVec;
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
-    dispatch::{Codes, CodesRead, FuncCodeReader, StaticCodeRead},
+    codes::params::DefaultReadParams,
+    dispatch::{Codes, CodesRead},
     impls::{BufBitReader, MemWordReader},
     prelude::{BitRead, BitSeek, Endianness, LE},
-    traits::DefaultReadParams,
 };
 use std::marker::PhantomData;
 
@@ -27,54 +27,6 @@ use std::marker::PhantomData;
 /// matching the configuration used in the `variable` module.
 pub(crate) type SeqVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
-
-/// A hybrid codec dispatcher for reading variable-length codes.
-///
-/// This enum implements a two-tier dispatch strategy to balance performance
-/// and compatibility across all supported codecs.
-///
-/// ## Dispatch Strategy
-///
-/// 1. **Fast Path** ([`CodecReader::Fast`]): For codecs with common parameters
-///    (e.g., Gamma, Delta, Zeta with k ≤ 10), the `dsi-bitstream` library provides
-///    pre-compiled function pointers via [`FuncCodeReader`]. This avoids runtime
-///    dispatch overhead on every read operation.
-///
-/// 2. **Slow Path** ([`CodecReader::Slow`]): For codecs with parameters outside
-///    the pre-compiled set (e.g., `Golomb { b: 15 }`), the dispatcher stores the
-///    [`Codes`] enum and performs a `match` on each read. This is slower but
-///    guarantees that any validly constructed [`SeqVec`] can be read.
-///
-/// The constructor automatically selects the appropriate path based on the codec.
-pub(crate) enum CodecReader<E: Endianness, R: CodesRead<E>> {
-    /// Fast path using a pre-resolved function pointer.
-    Fast(FuncCodeReader<E, R>),
-    /// Slow path using runtime dispatch on the [`Codes`] enum.
-    Slow(Codes),
-}
-
-impl<E: Endianness, R: CodesRead<E>> CodecReader<E, R> {
-    /// Creates a new codec reader, selecting the optimal dispatch strategy.
-    ///
-    /// Attempts to use the fast function-pointer path. Falls back to the slower
-    /// match-based dispatch if the codec's parameters are not in the pre-compiled set.
-    #[inline]
-    pub(crate) fn new(code: Codes) -> Self {
-        match FuncCodeReader::new(code) {
-            Ok(func_reader) => Self::Fast(func_reader),
-            Err(_) => Self::Slow(code),
-        }
-    }
-
-    /// Reads and decodes a single value from the bitstream.
-    #[inline(always)]
-    pub(crate) fn read(&self, reader: &mut R) -> Result<u64, R::Error> {
-        match self {
-            Self::Fast(func_reader) => func_reader.read(reader),
-            Self::Slow(code) => code.read(reader),
-        }
-    }
-}
 
 /// A zero-allocation iterator over the elements of a single sequence.
 ///
@@ -123,8 +75,8 @@ where
 {
     /// The bitstream reader, positioned at the current element.
     reader: SeqVecBitReader<'a, E>,
-    /// The codec dispatcher for decoding elements.
-    code_reader: CodecReader<E, SeqVecBitReader<'a, E>>,
+    /// The codec used for decoding elements.
+    encoding: Codes,
     /// The bit position at which this sequence ends (exclusive).
     end_bit: u64,
     /// Marker for the element type.
@@ -156,7 +108,7 @@ where
 
         Self {
             reader,
-            code_reader: CodecReader::new(encoding),
+            encoding,
             end_bit,
             _marker: PhantomData,
         }
@@ -198,8 +150,10 @@ where
             return None;
         }
 
-        // Decode the next element. Infallible for in-memory buffers.
-        let word = self.code_reader.read(&mut self.reader).unwrap();
+        // Decode the next element using the Codes enum's read method.
+        // This uses runtime dispatch but benefits from branch prediction
+        // since the codec is constant throughout iteration.
+        let word = self.encoding.read(&mut self.reader).unwrap();
         Some(T::from_word(word))
     }
 
@@ -401,9 +355,6 @@ where
 mod tests {
     use super::*;
     use dsi_bitstream::prelude::LE;
-
-    // Helper to create a simple test scenario with known bit patterns.
-    // For unit tests, we rely on integration with SeqVec in mod.rs tests.
 
     #[test]
     fn test_seq_vec_iter_size_hint() {

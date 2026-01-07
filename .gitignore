@@ -3,3 +3,5 @@ dataset
 .github/prompts
 bench_results
 python/__pycache__
+.github/instructions/rust-dev.instructions.md
+.github/instructions/seq.instructions.md

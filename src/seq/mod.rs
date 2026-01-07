@@ -109,7 +109,7 @@ pub use iter::{SeqIter, SeqVecIter};
 // Re-export codec spec for convenience.
 pub use crate::variable::codec::VariableCodecSpec;
 
-use crate::fixed::FixedVec;
+use crate::fixed::{Error as FixedVecError, FixedVec};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
     dispatch::{Codes, CodesRead},
@@ -295,14 +295,18 @@ impl MemDbgImpl for CodeWrapper<'_> {
         write!(writer, " {} {}", prefix, if is_last { "╰" } else { "├" })?;
 
         if let Some(name) = field_name {
-            if flags.contains(DbgFlags::COLOR) {
-                write!(writer, "{}", mem_dbg::yellow())?;
-            }
             write!(writer, "{}", name)?;
+        }
+
+        // Print the Debug format of the enum with type_color() when TYPE_NAME is set.
+        if flags.contains(DbgFlags::TYPE_NAME) {
+            if flags.contains(DbgFlags::COLOR) {
+                write!(writer, "{}", mem_dbg::type_color())?;
+            }
+            write!(writer, ": {:?}", self.0)?;
             if flags.contains(DbgFlags::COLOR) {
                 write!(writer, "{}", mem_dbg::reset_color())?;
             }
-            write!(writer, ": {:?}", self.0)?;
         }
 
         let padding = padded_size - core::mem::size_of_val(self.0);
