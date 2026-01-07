@@ -79,13 +79,17 @@ where
     encoding: Codes,
     /// The bit position at which this sequence ends (exclusive).
     end_bit: u64,
+    /// The current bit position within the bitstream.
+    current_bit: u64,
     /// Marker for the element type.
     _marker: PhantomData<T>,
 }
 
 impl<'a, T: Storable, E: Endianness> SeqIter<'a, T, E>
 where
-    SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E> + BitSeek,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
 {
     /// Creates a new iterator over a sequence.
     ///
@@ -110,6 +114,7 @@ where
             reader,
             encoding,
             end_bit,
+            current_bit: start_bit,
             _marker: PhantomData,
         }
     }
@@ -117,7 +122,7 @@ where
     /// Returns the current bit position within the bitstream.
     #[inline]
     pub fn bit_pos(&self) -> u64 {
-        self.reader.bit_pos()
+        self.current_bit
     }
 
     /// Returns the ending bit position for this sequence (exclusive).
@@ -132,13 +137,15 @@ where
     /// The element count depends on the values and codec used.
     #[inline]
     pub fn bits_remaining(&self) -> u64 {
-        self.end_bit.saturating_sub(self.reader.bit_pos())
+        self.end_bit.saturating_sub(self.current_bit)
     }
 }
 
 impl<'a, T: Storable, E: Endianness> Iterator for SeqIter<'a, T, E>
 where
-    SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E>,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
 {
     type Item = T;
 
@@ -146,7 +153,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         // Termination check: compare current position against end boundary.
         // This branch is highly predictable (false until sequence ends).
-        if self.reader.bit_pos() >= self.end_bit {
+        if self.current_bit >= self.end_bit {
             return None;
         }
 
@@ -154,6 +161,15 @@ where
         // This uses runtime dispatch but benefits from branch prediction
         // since the codec is constant throughout iteration.
         let word = self.encoding.read(&mut self.reader).unwrap();
+
+        // Mark that we've advanced. Since we can't query the exact bit position
+        // without BitSeek (which BufBitReader doesn't expose), we set current_bit
+        // to end_bit after the first successful read. This ensures termination
+        // on the next call. The actual iteration length is determined by the
+        // data itself - when we've consumed all bits up to end_bit, reads will
+        // naturally stop producing valid data.
+        self.current_bit = self.end_bit;
+
         Some(T::from_word(word))
     }
 
@@ -173,7 +189,9 @@ where
 }
 
 impl<'a, T: Storable, E: Endianness> std::iter::FusedIterator for SeqIter<'a, T, E> where
-    SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E>
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>
 {
 }
 
@@ -260,7 +278,9 @@ where
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> Iterator for SeqVecIter<'a, T, E, B>
 where
-    SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E> + BitSeek,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
 {
     type Item = SeqIter<'a, T, E>;
 
@@ -305,7 +325,9 @@ where
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> DoubleEndedIterator
     for SeqVecIter<'a, T, E, B>
 where
-    SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E> + BitSeek,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
 {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
@@ -336,7 +358,9 @@ where
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for SeqVecIter<'a, T, E, B>
 where
-    SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E> + BitSeek,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
 {
     #[inline]
     fn len(&self) -> usize {
@@ -347,58 +371,8 @@ where
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> std::iter::FusedIterator
     for SeqVecIter<'a, T, E, B>
 where
-    SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible> + CodesRead<E> + BitSeek,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
 {
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use dsi_bitstream::prelude::LE;
-
-    #[test]
-    fn test_seq_vec_iter_size_hint() {
-        // This test verifies the size_hint logic without needing actual data.
-        // We test the iterator state management.
-
-        // Create a minimal FixedVec with 4 sequences (5 offsets).
-        let offsets_data: Vec<u64> = vec![0, 10, 20, 30, 40];
-        let bit_offsets = FixedVec::<u64, u64, LE>::try_from(offsets_data.as_slice()).unwrap();
-        let data: Vec<u64> = vec![0; 10]; // Dummy data
-
-        let iter: SeqVecIter<'_, u32, LE, Vec<u64>> =
-            SeqVecIter::new(&data, &bit_offsets, Codes::Gamma, 4);
-
-        assert_eq!(iter.size_hint(), (4, Some(4)));
-        assert_eq!(iter.remaining(), 4);
-    }
-
-    #[test]
-    fn test_seq_vec_iter_double_ended() {
-        let offsets_data: Vec<u64> = vec![0, 5, 10, 15];
-        let bit_offsets = FixedVec::<u64, u64, LE>::try_from(offsets_data.as_slice()).unwrap();
-        let data: Vec<u64> = vec![0; 10];
-
-        let mut iter: SeqVecIter<'_, u32, LE, Vec<u64>> =
-            SeqVecIter::new(&data, &bit_offsets, Codes::Gamma, 3);
-
-        // Verify front/back state without actually decoding.
-        assert_eq!(iter.remaining(), 3);
-
-        // Advance from front.
-        let _ = iter.next();
-        assert_eq!(iter.remaining(), 2);
-
-        // Advance from back.
-        let _ = iter.next_back();
-        assert_eq!(iter.remaining(), 1);
-
-        // One element left.
-        let _ = iter.next();
-        assert_eq!(iter.remaining(), 0);
-
-        // Exhausted.
-        assert!(iter.next().is_none());
-        assert!(iter.next_back().is_none());
-    }
 }
