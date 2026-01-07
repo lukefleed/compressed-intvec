@@ -18,7 +18,7 @@ const NUM_ACCESSES: usize = 100_000;
 /// * `max_val_exclusive` - The exclusive upper bound for the random values.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
     let mut rng = SmallRng::seed_from_u64(42);
-    let limit = if max_val_exclusive == 0 || max_val_exclusive > u64::MAX {
+    let limit = if max_val_exclusive == 0 {
         u64::MAX
     } else {
         max_val_exclusive

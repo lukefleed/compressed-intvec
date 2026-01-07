@@ -185,12 +185,13 @@ fn test_unchecked_iterators() {
     // Test iter_mut_unchecked
     let mut mut_vec = vec;
     let len = mut_vec.len(); // Get the length *before* borrowing.
-    let mut iter_mut = unsafe { mut_vec.iter_mut_unchecked() };
-    for i in 0..len {
-        let mut proxy = unsafe { iter_mut.next_unchecked() };
-        *proxy = i as u32 * 2;
+    {
+        let mut iter_mut = unsafe { mut_vec.iter_mut_unchecked() };
+        for i in 0..len {
+            let mut proxy = unsafe { iter_mut.next_unchecked() };
+            *proxy = i as u32 * 2;
+        }
     }
-    drop(iter_mut); // Drop the iterator to release the borrow
 
     for i in 0..len {
         assert_eq!(mut_vec.get(i), Some(i as u32 * 2));

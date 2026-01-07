@@ -5,9 +5,7 @@ use compressed_intvec::{
 };
 use dsi_bitstream::prelude::{BE, LE};
 
-#[path = "../common/mod.rs"]
-mod common;
-use common::helpers::{generate_random_signed_vec, generate_random_vec};
+use crate::common::helpers::{generate_random_signed_vec, generate_random_vec};
 
 #[test]
 fn test_intvec_owned_to_borrowed_conversion() {

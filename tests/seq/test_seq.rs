@@ -12,10 +12,8 @@ use dsi_bitstream::traits::Endianness;
 use num_traits::AsPrimitive;
 use std::fmt::Debug;
 
-// Import helper functions from the common module.
-#[path = "../common/mod.rs"]
-mod common;
-use common::helpers::{generate_random_signed_vec, generate_random_vec};
+// Import helper functions from the common module declared in `tests/tests.rs`.
+use crate::common::helpers::{generate_random_signed_vec, generate_random_vec};
 
 /// Central test function called by the macro for each type combination.
 fn run_test_for_type<T, E>(sequences: &[Vec<T>], type_name: &str)

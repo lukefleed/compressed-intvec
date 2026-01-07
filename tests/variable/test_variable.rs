@@ -18,10 +18,8 @@ use dsi_bitstream::prelude::{
 use num_traits::{AsPrimitive, PrimInt};
 use std::fmt::Debug;
 
-// Import helper functions from the common module.
-#[path = "../common/mod.rs"]
-mod common;
-use common::helpers::{generate_random_signed_vec, generate_random_vec};
+// Import helper functions from the common module declared in `tests/tests.rs`.
+use crate::common::helpers::{generate_random_signed_vec, generate_random_vec};
 
 #[cfg(feature = "parallel")]
 use rayon::iter::ParallelIterator;

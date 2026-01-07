@@ -17,7 +17,7 @@ fn test_int_vec_macro_empty() {
 
 #[test]
 fn test_int_vec_macro_from_list() {
-    let data = vec![100u64, 200, 300, 400, 500];
+    let data: [u64; 5] = [100u64, 200, 300, 400, 500];
     // Add an explicit type annotation to help the compiler resolve trait bounds.
     let v: LEIntVec = int_vec![100, 200, 300, 400, 500];
 
@@ -61,7 +61,7 @@ fn test_sint_vec_macro_empty() {
 
 #[test]
 fn test_sint_vec_macro_from_list() {
-    let data = vec![-100i64, 0, 200, -300, 500];
+    let data: [i64; 5] = [-100i64, 0, 200, -300, 500];
     // Add an explicit type annotation.
     let v: LESIntVec = sint_vec![-100, 0, 200, -300, 500];
 

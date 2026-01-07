@@ -125,21 +125,19 @@ fn test_map_in_place_edge_cases() {
 #[test]
 fn test_split_at_mut() {
     let mut vec: UFixedVec<u32> = (10..=50).step_by(10).collect();
-    let (mut left, mut right) = vec.split_at_mut(3);
+    {
+        let (mut left, mut right) = vec.split_at_mut(3);
 
-    assert_eq!(left.len(), 3);
-    assert_eq!(right.len(), 2);
-    assert_eq!(left.get(0), Some(10));
-    assert_eq!(right.get(0), Some(40));
+        assert_eq!(left.len(), 3);
+        assert_eq!(right.len(), 2);
+        assert_eq!(left.get(0), Some(10));
+        assert_eq!(right.get(0), Some(40));
 
-    *left.at_mut(0).unwrap() = 11;
-    *right.at_mut(1).unwrap() = 55;
+        *left.at_mut(0).unwrap() = 11;
+        *right.at_mut(1).unwrap() = 55;
+    }
 
-    // The original vec is not directly accessible due to borrowing rules,
-    // which is correct. We can re-borrow `vec` after `left` and `right` go out of scope.
-    drop(left);
-    drop(right);
-
+    // After the block above the borrows have ended and `vec` can be re-borrowed.
     let expected_data: Vec<u32> = vec![11, 20, 30, 40, 55];
     let expected_vec: UFixedVec<u32> = expected_data.into_iter().collect();
     assert_eq!(vec, expected_vec);

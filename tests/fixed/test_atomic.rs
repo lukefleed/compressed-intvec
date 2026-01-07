@@ -469,10 +469,10 @@ fn test_par_iter_mut_contention() {
     });
 
     // Verify the results sequentially.
-    for i in 0..vec.len() {
+    for (i, &expected) in data.iter().enumerate().take(vec.len()) {
         assert_eq!(
             vec.load(i, Ordering::Relaxed),
-            data[i] * 2,
+            expected * 2,
             "Mismatch at index {}",
             i
         );
