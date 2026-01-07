@@ -221,6 +221,9 @@ pub struct SeqVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
 /// A [`SeqVec`] with little-endian bit ordering.
 pub type LESeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 
+/// Type alias for a tuple of two [`SeqVecSlice`] references.
+pub type SeqVecSlicePair<'a, T, E, B> = (SeqVecSlice<'a, T, E, B>, SeqVecSlice<'a, T, E, B>);
+
 /// A [`SeqVec`] with big-endian bit ordering.
 pub type BESeqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
 
@@ -849,13 +852,7 @@ where
     /// assert_eq!(left.get_vec(0), Some(vec![1]));
     /// assert_eq!(right.get_vec(0), Some(vec![3]));
     /// ```
-    pub fn split_at(
-        &self,
-        mid: usize,
-    ) -> Option<(
-        slice::SeqVecSlice<'_, T, E, B>,
-        slice::SeqVecSlice<'_, T, E, B>,
-    )> {
+    pub fn split_at(&self, mid: usize) -> Option<SeqVecSlicePair<'_, T, E, B>> {
         if mid > self.num_sequences() {
             return None;
         }
