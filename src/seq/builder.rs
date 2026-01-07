@@ -50,7 +50,7 @@ use std::marker::PhantomData;
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```
 /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
 ///
 /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
@@ -128,7 +128,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// // From slice of slices
@@ -283,7 +283,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```
 /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
 ///
 /// // Generate sequences on the fly
@@ -347,7 +347,7 @@ where
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
     ///
     /// let sequences: Vec<Vec<u32>> = vec![vec![1, 2], vec![3, 4, 5]];
@@ -497,7 +497,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
@@ -520,7 +520,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     ///
     /// ## Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
     ///
     /// // Generate sequences programmatically

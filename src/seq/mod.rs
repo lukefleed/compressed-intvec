@@ -61,7 +61,7 @@
 //!
 //! ## Basic Usage
 //!
-//! ```ignore
+//! ```
 //! use compressed_intvec::seq::{SeqVec, LESeqVec};
 //!
 //! let sequences: &[&[u32]] = &[
@@ -82,7 +82,7 @@
 //!
 //! ## Custom Codec
 //!
-//! ```ignore
+//! ```
 //! use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
 //!
 //! let sequences: Vec<Vec<u64>> = vec![
@@ -402,7 +402,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
@@ -616,7 +616,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[4, 5]];
@@ -661,7 +661,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[10, 20, 30]];
@@ -685,7 +685,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
@@ -714,7 +714,7 @@ where
     ///
     /// # Examples
     ///
-    /// ```ignore
+    /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2], &[3], &[4, 5, 6]];

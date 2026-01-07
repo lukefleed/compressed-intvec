@@ -56,7 +56,7 @@ pub(crate) type SeqVecBitReader<'a, E> =
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```
 /// use compressed_intvec::seq::{SeqVec, LESeqVec};
 ///
 /// let sequences: &[&[u32]] = &[&[10, 20, 30], &[100, 200]];
@@ -162,13 +162,9 @@ where
         // since the codec is constant throughout iteration.
         let word = self.encoding.read(&mut self.reader).unwrap();
 
-        // Mark that we've advanced. Since we can't query the exact bit position
-        // without BitSeek (which BufBitReader doesn't expose), we set current_bit
-        // to end_bit after the first successful read. This ensures termination
-        // on the next call. The actual iteration length is determined by the
-        // data itself - when we've consumed all bits up to end_bit, reads will
-        // naturally stop producing valid data.
-        self.current_bit = self.end_bit;
+        // Update current bit position after reading. Since SeqVecBitReader
+        // implements BitSeek, we can query the exact position.
+        self.current_bit = self.reader.bit_pos().unwrap();
 
         Some(T::from_word(word))
     }
@@ -209,7 +205,7 @@ impl<'a, T: Storable, E: Endianness> std::iter::FusedIterator for SeqIter<'a, T,
 ///
 /// ## Examples
 ///
-/// ```ignore
+/// ```
 /// use compressed_intvec::seq::{SeqVec, LESeqVec};
 ///
 /// let sequences: &[&[u32]] = &[&[1, 2], &[3], &[4, 5, 6]];
