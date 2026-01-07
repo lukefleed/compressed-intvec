@@ -102,9 +102,11 @@
 
 mod builder;
 mod iter;
+mod reader;
 
 pub use builder::{SeqVecBuilder, SeqVecFromIterBuilder};
 pub use iter::{SeqIter, SeqVecIter};
+pub use reader::SeqVecReader;
 
 // Re-export codec spec for convenience.
 pub use crate::variable::codec::VariableCodecSpec;
@@ -732,6 +734,52 @@ where
             self.encoding,
             self.num_sequences(),
         )
+    }
+
+    /// Creates a reusable reader for convenient random access to sequences.
+    ///
+    /// The returned [`SeqVecReader`] provides a convenient interface for
+    /// performing multiple sequence retrievals. While the current implementation
+    /// is a thin wrapper, it serves as a natural extension point for future
+    /// optimizations such as position tracking or caching.
+    ///
+    /// ## Performance Considerations
+    ///
+    /// - **Zero-copy iteration**: Returned iterators borrow directly from the
+    ///   compressed data without intermediate allocations.
+    /// - **Stateless operation**: Each call to [`SeqVecReader::get`] is
+    ///   independent and creates a fresh [`SeqIter`].
+    /// - **Convenience methods**: The reader provides [`get_vec`](SeqVecReader::get_vec)
+    ///   and [`get_into`](SeqVecReader::get_into) for common patterns.
+    ///
+    /// ## When to Use
+    ///
+    /// Use a reader when:
+    /// - You prefer a consistent interface for multiple accesses.
+    /// - You want to use convenience methods like `get_vec` or `get_into`.
+    /// - Future stateful optimizations would benefit your access pattern.
+    ///
+    /// For single queries or simple iteration, direct calls to [`get`](Self::get)
+    /// or [`iter`](Self::iter) are equally efficient.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    ///
+    /// let mut reader = vec.reader();
+    ///
+    /// // Perform multiple random accesses efficiently
+    /// assert_eq!(reader.get_vec(2), Some(vec![6]));
+    /// assert_eq!(reader.get_vec(0), Some(vec![1, 2]));
+    /// assert_eq!(reader.get(1).unwrap().sum::<u32>(), 12);
+    /// ```
+    #[inline]
+    pub fn reader(&self) -> SeqVecReader<'_, T, E, B> {
+        SeqVecReader::new(self)
     }
 }
 
