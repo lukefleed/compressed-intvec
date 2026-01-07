@@ -1,7 +1,7 @@
 use compressed_intvec::{
     // FIX: Rimosso l'import non utilizzato di FixedVecError
     prelude::*,
-    variable::{codec::VariableCodecSpec, IntVec, BEIntVec, LEIntVec},
+    variable::{codec::VariableCodecSpec, BEIntVec, IntVec, LEIntVec},
 };
 use dsi_bitstream::prelude::{BE, LE};
 
@@ -92,10 +92,7 @@ fn test_from_parts_validation() {
         len,
         encoding,
     );
-    assert!(matches!(
-        result,
-        Err(IntVecError::InvalidParameters(_))
-    ));
+    assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
 }
 
 #[test]

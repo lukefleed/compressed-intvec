@@ -129,12 +129,16 @@ macro_rules! test_all_types {
         #[test]
         fn $test_name() {
             // Unsigned types
-            let u_data_8: Vec<u8> =
-                generate_random_vec(100, 200).into_iter().map(|x| x as u8).collect();
+            let u_data_8: Vec<u8> = generate_random_vec(100, 200)
+                .into_iter()
+                .map(|x| x as u8)
+                .collect();
             run_test_for_type::<u8, $E>(&u_data_8, "u8");
 
-            let u_data_16: Vec<u16> =
-                generate_random_vec(100, 50_000).into_iter().map(|x| x as u16).collect();
+            let u_data_16: Vec<u16> = generate_random_vec(100, 50_000)
+                .into_iter()
+                .map(|x| x as u16)
+                .collect();
             run_test_for_type::<u16, $E>(&u_data_16, "u16");
 
             let u_data_32: Vec<u32> = generate_random_vec(100, 1_000_000_000)
@@ -147,8 +151,10 @@ macro_rules! test_all_types {
             run_test_for_type::<u64, $E>(&u_data_64, "u64");
 
             // Signed types
-            let s_data_8: Vec<i8> =
-                generate_random_signed_vec(100, 100).into_iter().map(|x| x as i8).collect();
+            let s_data_8: Vec<i8> = generate_random_signed_vec(100, 100)
+                .into_iter()
+                .map(|x| x as i8)
+                .collect();
             run_test_for_type::<i8, $E>(&s_data_8, "i8");
 
             let s_data_16: Vec<i16> = generate_random_signed_vec(100, 30_000)
@@ -279,16 +285,8 @@ macro_rules! test_roundtrip_with_codec {
 // --- Test Suite for Codec Dispatch Fallback ---
 
 // Test a standard, fast-path codec to prevent regressions.
-test_roundtrip_with_codec!(
-    fallback_le_gamma_fast_path,
-    LE,
-    VariableCodecSpec::Gamma
-);
-test_roundtrip_with_codec!(
-    fallback_be_gamma_fast_path,
-    BE,
-    VariableCodecSpec::Gamma
-);
+test_roundtrip_with_codec!(fallback_le_gamma_fast_path, LE, VariableCodecSpec::Gamma);
+test_roundtrip_with_codec!(fallback_be_gamma_fast_path, BE, VariableCodecSpec::Gamma);
 
 // Test edge cases that require the slow-path fallback.
 // These parameters are chosen because they are outside the range supported
@@ -323,16 +321,8 @@ test_roundtrip_with_codec!(
     BE,
     VariableCodecSpec::Rice { log2_b: Some(11) }
 );
-test_roundtrip_with_codec!(
-    fallback_le_pi_11,
-    LE,
-    VariableCodecSpec::Pi { k: Some(11) }
-);
-test_roundtrip_with_codec!(
-    fallback_be_pi_11,
-    BE,
-    VariableCodecSpec::Pi { k: Some(11) }
-);
+test_roundtrip_with_codec!(fallback_le_pi_11, LE, VariableCodecSpec::Pi { k: Some(11) });
+test_roundtrip_with_codec!(fallback_be_pi_11, BE, VariableCodecSpec::Pi { k: Some(11) });
 test_roundtrip_with_codec!(
     fallback_le_expgolomb_11,
     LE,
