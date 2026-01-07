@@ -15,3 +15,4 @@ mod test_iter;
 mod test_reader;
 mod test_seq;
 mod test_seq_reader;
+mod test_slice;

@@ -104,11 +104,13 @@ mod builder;
 mod iter;
 mod reader;
 mod seq_reader;
+mod slice;
 
 pub use builder::{SeqVecBuilder, SeqVecFromIterBuilder};
 pub use iter::{SeqIter, SeqVecIter};
 pub use reader::SeqVecReader;
 pub use seq_reader::SeqVecSeqReader;
+pub use slice::SeqVecSlice;
 
 // Re-export codec spec for convenience.
 pub use crate::variable::codec::VariableCodecSpec;
@@ -782,6 +784,85 @@ where
     #[inline]
     pub fn reader(&self) -> SeqVecReader<'_, T, E, B> {
         SeqVecReader::new(self)
+    }
+
+    /// Creates a zero-copy slice of a contiguous range of sequences.
+    ///
+    /// The slice provides a view into `len` sequences starting at `start`,
+    /// without copying the underlying compressed data.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The index of the first sequence in the slice.
+    /// * `len` - The number of sequences to include in the slice.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(SeqVecSlice)` if the range is valid, or `None` if
+    /// `start + len` exceeds the number of sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6], &[7, 8]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    ///
+    /// // Create a slice of sequences 1 and 2
+    /// let slice = vec.slice(1, 2).unwrap();
+    /// assert_eq!(slice.len(), 2);
+    ///
+    /// // Index 0 of the slice refers to sequence 1 of the original vector
+    /// let seq: Vec<u32> = slice.get(0).unwrap().collect();
+    /// assert_eq!(seq, vec![3, 4, 5]);
+    /// ```
+    pub fn slice(&self, start: usize, len: usize) -> Option<slice::SeqVecSlice<'_, T, E, B>> {
+        if start.saturating_add(len) > self.num_sequences() {
+            return None;
+        }
+        Some(slice::SeqVecSlice::new(self, start..start + len))
+    }
+
+    /// Splits the vector into two slices at the specified index.
+    ///
+    /// Returns a tuple of two slices: the first contains sequences `[0, mid)`
+    /// and the second contains sequences `[mid, len)`.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some((left_slice, right_slice))` if `mid <= num_sequences()`,
+    /// or `None` if `mid` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1], &[2], &[3], &[4]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    ///
+    /// let (left, right) = vec.split_at(2).unwrap();
+    /// assert_eq!(left.len(), 2);
+    /// assert_eq!(right.len(), 2);
+    ///
+    /// assert_eq!(left.get_vec(0), Some(vec![1]));
+    /// assert_eq!(right.get_vec(0), Some(vec![3]));
+    /// ```
+    pub fn split_at(
+        &self,
+        mid: usize,
+    ) -> Option<(
+        slice::SeqVecSlice<'_, T, E, B>,
+        slice::SeqVecSlice<'_, T, E, B>,
+    )> {
+        if mid > self.num_sequences() {
+            return None;
+        }
+        Some((
+            slice::SeqVecSlice::new(self, 0..mid),
+            slice::SeqVecSlice::new(self, mid..self.num_sequences()),
+        ))
     }
 
     /// Creates a stateful reader optimized for sequential access patterns.
