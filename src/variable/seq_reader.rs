@@ -24,11 +24,8 @@
 //! [`IntVec`]: crate::variable::IntVec
 //! [`IntVecReader`]: crate::variable::reader::IntVecReader
 
-use super::{
-    reader::CodecReader, // Import the robust hybrid dispatcher
-    traits::Storable,
-    IntVec, IntVecBitReader, IntVecError,
-};
+use super::{traits::Storable, IntVec, IntVecError};
+use crate::common::codec_reader::{CodecReader, IntVecBitReader};
 use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
@@ -84,7 +81,7 @@ where
     /// The stateful, reusable bitstream reader.
     reader: IntVecBitReader<'a, E>,
     /// The hybrid dispatcher that handles codec reading robustly.
-    code_reader: CodecReader<'a, T, E, B>,
+    code_reader: CodecReader<'a, E>,
     /// The index of the element *after* the one most recently read. This acts
     /// as a cursor for the current decoding position.
     current_index: usize,

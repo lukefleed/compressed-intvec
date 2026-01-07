@@ -7,10 +7,10 @@
 //! [`IntVec`]: crate::variable::IntVec
 
 use super::{
-    reader::CodecReader, // Import the robust hybrid dispatcher
     traits::Storable,
-    IntVec, IntVecBitReader,
+    IntVec,
 };
+use crate::common::codec_reader::{CodecReader, IntVecBitReader};
 use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
@@ -47,7 +47,7 @@ where
     len: usize,
     reader: IntVecBitReader<'a, E>,
     /// The hybrid dispatcher that handles codec reading robustly.
-    code_reader: CodecReader<'a, T, E, B>,
+    code_reader: CodecReader<'a, E>,
     current_index: usize,
     _markers: PhantomData<(&'a B, T)>,
 }
@@ -147,7 +147,7 @@ where
     /// A stateful reader that borrows from `_data_owner`.
     reader: IntVecBitReader<'static, E>,
     /// The hybrid dispatcher for decoding.
-    code_reader: CodecReader<'static, T, E, Vec<u64>>,
+    code_reader: CodecReader<'static, E>,
     /// This field owns the data buffer, ensuring it lives as long as the iterator.
     _data_owner: Vec<u64>,
     /// Phantom data to hold the generic type `T`.

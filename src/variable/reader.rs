@@ -20,92 +20,12 @@
 //!
 //! [`IntVec`]: crate::variable::IntVec
 
-use super::{traits::Storable, IntVec, IntVecBitReader, IntVecError};
+use super::{traits::Storable, IntVec, IntVecError};
+use crate::common::codec_reader::{CodecReader, IntVecBitReader};
 use dsi_bitstream::{
-    dispatch::{Codes, CodesRead, FuncCodeReader, StaticCodeRead},
+    dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
-use std::marker::PhantomData;
-
-/// An internal hybrid dispatcher for reading compression codes.
-///
-/// This enum acts as a two-stage dispatcher to read values from a
-/// compressed bitstream. It is designed to handle all valid codecs supported by
-/// [`dsi-bitstream`](https://crates.io/crates/dsi-bitstream), ensuring correctness while maximizing performance.
-///
-/// ### Dispatch Strategy
-///
-/// 1.  **Fast Path ([`CodecReader::Fast`])**: For common codecs
-///     (e.g., Gamma, Delta, or Zeta with small parameters), [`dsi-bitstream`](https://crates.io/crates/dsi-bitstream)
-///     provides pre-compiled function pointers via [`FuncCodeReader`]. This path
-///     avoids the overhead of a `match` statement on every read operation, as the
-///     correct function is resolved once at creation time.
-///
-/// 2.  **Slow Path ([`CodecReader::Slow`])**: For codecs with parameters outside of
-///     the pre-compiled set (e.g., `Golomb { b: 15 }`), the fast path is not
-///     available. In this case, the dispatcher falls back to storing the [`Codes`]
-///     enum variant directly. Each read operation then uses a `match` statement to
-///     call the appropriate decoding function. While slightly slower due to the
-///     runtime dispatch, this ensures that any validly created `IntVec` can be read.
-///
-/// This hybrid approach guarantees that the reader will never panic due to an
-/// "unsupported code" error, which was a critical issue in previous implementations.
-/// The `new` constructor automatically selects the appropriate path.
-pub(super) enum CodecReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
-where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// Fast-path reader using a pre-resolved function pointer.
-    Fast(FuncCodeReader<E, IntVecBitReader<'a, E>>),
-    /// Fallback reader using dynamic dispatch on the `Codes` enum.
-    Slow(Codes),
-    /// Zero-sized marker to carry the generic parameters, ensuring type safety
-    /// and allowing the compiler to properly manage lifetimes.
-    _Phantom(PhantomData<(&'a B, T)>),
-}
-
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> CodecReader<'_, T, E, B>
-where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// Creates a new [`CodecReader`], automatically selecting the fastest available
-    /// dispatch path for the given codec.
-    ///
-    /// This constructor attempts to create a high-performance [`FuncCodeReader`].
-    /// If the codec is not supported by the fast path (e.g., it has uncommon
-    /// parameters), it falls back to the dynamic dispatch mechanism.
-    /// This method will not panic.
-    pub(super) fn new(code: Codes) -> Self {
-        match FuncCodeReader::new(code) {
-            Ok(fast_reader) => Self::Fast(fast_reader),
-            Err(_) => Self::Slow(code),
-        }
-    }
-}
-
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> StaticCodeRead<E, IntVecBitReader<'a, E>>
-    for CodecReader<'a, T, E, B>
-where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    #[inline]
-    fn read(&self, reader: &mut IntVecBitReader<'a, E>) -> Result<u64, core::convert::Infallible> {
-        match self {
-            // If we have a function pointer, call it directly. This is the fast path.
-            Self::Fast(func_reader) => func_reader.read(reader),
-            // Otherwise, use the slower dynamic dispatch. This is the fallback path.
-            Self::Slow(code) => code.read(reader),
-            // This variant is never constructed, but is needed for the type system.
-            Self::_Phantom(_) => unreachable!(),
-        }
-    }
-}
 
 /// A stateful reader for an `IntVec` that provides fast random access.
 ///
@@ -141,7 +61,7 @@ where
     /// The stateful, reusable bitstream reader.
     pub(super) reader: IntVecBitReader<'a, E>,
     /// The hybrid dispatcher that handles codec reading.
-    pub(super) code_reader: CodecReader<'a, T, E, B>,
+    pub(super) code_reader: CodecReader<'a, E>,
 }
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecReader<'a, T, E, B>
