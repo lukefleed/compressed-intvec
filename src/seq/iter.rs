@@ -11,11 +11,12 @@
 //!
 //! [`SeqVec`]: crate::seq::SeqVec
 
+use crate::common::codec_reader::CodecReader;
 use crate::fixed::FixedVec;
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
-    dispatch::{Codes, CodesRead},
+    dispatch::{Codes, CodesRead, StaticCodeRead},
     impls::{BufBitReader, MemWordReader},
     prelude::{BitRead, BitSeek, Endianness},
 };
@@ -71,15 +72,19 @@ pub(crate) type SeqVecBitReader<'a, E> =
 /// ```
 pub struct SeqIter<'a, T: Storable, E: Endianness>
 where
-    SeqVecBitReader<'a, E>: CodesRead<E>,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
 {
     /// The bitstream reader, positioned at the current element.
     reader: SeqVecBitReader<'a, E>,
-    /// The codec used for decoding elements.
-    encoding: Codes,
+    /// The hybrid codec reader for decoding elements.
+    /// Provides fast-path optimization via function pointers for common codecs,
+    /// with fallback to dynamic dispatch for uncommon parameter combinations.
+    code_reader: CodecReader<'a, E>,
     /// The bit position at which this sequence ends (exclusive).
     end_bit: u64,
-    /// The current bit position within the bitstream.
+    /// The current bit position within the bitstream (tracks progress).
     current_bit: u64,
     /// Marker for the element type.
     _marker: PhantomData<T>,
@@ -110,34 +115,25 @@ where
         // in-memory readers, but we handle the Result for type correctness.
         let _ = reader.set_bit_pos(start_bit);
 
+        // Create the hybrid codec reader for efficient decoding.
+        let code_reader = CodecReader::new(encoding);
+
         Self {
             reader,
-            encoding,
+            code_reader,
             end_bit,
             current_bit: start_bit,
             _marker: PhantomData,
         }
     }
 
-    /// Returns the current bit position within the bitstream.
-    #[inline]
-    pub fn bit_pos(&self) -> u64 {
-        self.current_bit
-    }
-
     /// Returns the ending bit position for this sequence (exclusive).
+    ///
+    /// This is useful for understanding the memory footprint of the sequence
+    /// when compressed.
     #[inline]
     pub fn end_bit(&self) -> u64 {
         self.end_bit
-    }
-
-    /// Returns the number of bits remaining in this sequence.
-    ///
-    /// This is the number of compressed bits, not the number of elements.
-    /// The element count depends on the values and codec used.
-    #[inline]
-    pub fn bits_remaining(&self) -> u64 {
-        self.end_bit.saturating_sub(self.current_bit)
     }
 }
 
@@ -157,21 +153,22 @@ where
             return None;
         }
 
-        // Decode the next element using the Codes enum's read method.
-        // This uses runtime dispatch but benefits from branch prediction
-        // since the codec is constant throughout iteration.
-        let word = self.encoding.read(&mut self.reader).unwrap();
+        // Decode the next element using the optimized codec reader.
+        // CodecReader provides fast-path dispatch via function pointers for
+        // common codecs, with fallback to dynamic dispatch for uncommon parameters.
+        let word = self.code_reader.read(&mut self.reader).unwrap();
 
-        // Update current bit position after reading. Since SeqVecBitReader
-        // implements BitSeek, we can query the exact position.
-        self.current_bit = self.reader.bit_pos().unwrap();
+        // Update current bit position after reading. Since the read operation
+        // advances the reader's internal position, we estimate the new position
+        // by querying the reader (this is infallible for in-memory readers).
+        self.current_bit = self.reader.bit_pos().unwrap_or(self.current_bit);
 
         Some(T::from_word(word))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let bits_remaining = self.bits_remaining();
+        let bits_remaining = self.end_bit.saturating_sub(self.current_bit);
 
         if bits_remaining == 0 {
             return (0, Some(0));

@@ -1,68 +1,62 @@
 //! A reader for efficient, repeated random access into a [`SeqVec`].
 //!
-//! This module provides [`SeqVecReader`], a reusable, stateless reader designed
+//! This module provides [`SeqVecReader`], a reusable, stateful reader designed
 //! to provide a convenient interface for performing multiple random sequence
-//! lookups.
+//! lookups with optimized reader reuse.
 //!
-//! # Convenience
+//! # Stateful Design
 //!
-//! A standard call to [`get`](super::SeqVec::get) is straightforward, but
-//! [`SeqVecReader`] provides additional convenience methods like
-//! [`get_vec`](SeqVecReader::get_vec) and [`get_into`](SeqVecReader::get_into)
-//! for common access patterns.
+//! [`SeqVecReader`] maintains an internal bitstream reader and codec dispatcher,
+//! enabling efficient reuse across multiple sequence accesses. This design mirrors
+//! [`IntVecReader`](crate::variable::IntVecReader) in the `variable` module.
 //!
-//! # Stateless Design
+//! - **`get()`**: Returns a fresh [`SeqIter`] for lazy decoding (unavoidable due
+//!   to Rust's borrowing rules — the iterator must own its reader).
+//! - **`get_into()`**: Decodes directly into a buffer using the internal reader,
+//!   avoiding iterator overhead.
 //!
-//! Unlike [`IntVecSeqReader`](crate::variable::IntVecSeqReader), this reader is
-//! **stateless**. Each call to [`get`](SeqVecReader::get) operates independently,
-//! creating a fresh [`SeqIter`] with its own bitstream reader.
+//! # Comparison with `SeqVecSeqReader`
 //!
-//! This design choice reflects the fact that [`SeqVec`] access returns entire
-//! sequences as iterators, not individual elements. The returned [`SeqIter`]
-//! owns its own bitstream reader, so position tracking in the parent reader
-//! would not provide benefits.
-//!
-//! # Future Extensions
-//!
-//! The reader serves as a natural extension point for future stateful
-//! optimizations, such as:
-//!
-//! - Caching recently accessed sequences.
-//! - Position tracking for locality-aware access patterns.
-//! - Parallel sequence retrieval coordination.
+//! | Reader | Stateful | `get()` | `get_into()` | Use Case |
+//! |--------|----------|---------|-------------|----------|
+//! | `SeqVecReader` | Yes (always seeks) | Fresh `SeqIter` | Reuses reader | **Random access** |
+//! | `SeqVecSeqReader` | Yes (may skip seeks) | Fresh `SeqIter` | Reuses reader + position | **Sequential access** |
 //!
 //! [`SeqVec`]: crate::seq::SeqVec
 //! [`SeqIter`]: crate::seq::SeqIter
 
 use super::{iter::SeqVecBitReader, SeqIter, SeqVec};
+use crate::common::codec_reader::{CodecReader, IntVecBitReader};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
-    dispatch::CodesRead,
+    dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 
-/// A stateless reader for a `SeqVec` that provides convenient random sequence
-/// access.
+/// A stateful reader for a `SeqVec` that provides convenient random sequence
+/// access with optimized reader reuse.
 ///
 /// This reader is created by the [`SeqVec::reader`](super::SeqVec::reader)
 /// method. It provides a convenient interface for performing multiple random
-/// sequence lookups.
+/// sequence lookups, with internal reader reuse for efficiency.
 ///
 /// ## Design Rationale
 ///
-/// Unlike [`IntVecReader`](crate::variable::IntVecReader), which maintains a
-/// stateful bitstream reader and codec dispatcher, `SeqVecReader` is **stateless**.
-/// Each call to [`get`](SeqVecReader::get) creates a fresh [`SeqIter`] with its
-/// own reader. This design is necessary because:
+/// Unlike the stateless [`SeqVec`] accessors, `SeqVecReader` maintains an
+/// internal [`IntVecBitReader`] and [`CodecReader`] that are reused across
+/// multiple accesses. This design mirrors [`IntVecReader`](crate::variable::IntVecReader)
+/// in the `variable` module.
 ///
-/// - `SeqVec` access returns entire sequences as iterators, not single elements.
-/// - The returned iterator must own its reader to outlive the `get()` call.
-/// - Rust's borrowing rules prevent sharing a mutable reader between the parent
-///   and the returned iterator.
+/// The distinction between `get()` and `get_into()` reflects the constraints
+/// of Rust's borrowing rules:
 ///
-/// The reader provides convenience methods like [`get_vec`](SeqVecReader::get_vec)
-/// and [`get_into`](SeqVecReader::get_into) for common access patterns, and serves
-/// as a natural extension point for future stateful optimizations.
+/// - **`get()`**: Returns a [`SeqIter`] that owns its own bitstream reader.
+///   This allows lazy decoding and multiple iterators to coexist, but does not
+///   benefit from reader reuse.
+///
+/// - **`get_into()`**: Decodes directly into a provided buffer using the
+///   internal reader. This bypasses [`SeqIter`] creation and reuses the reader,
+///   providing better performance for buffer-filling patterns.
 ///
 /// # Examples
 ///
@@ -79,10 +73,12 @@ use dsi_bitstream::{
 /// // Create a reusable reader
 /// let mut reader = vec.reader();
 ///
-/// // Perform multiple random reads efficiently
-/// let seq2: Vec<u32> = reader.get(2).unwrap().collect();
-/// assert_eq!(seq2, vec![1000, 2000, 3000, 4000]);
+/// // Perform multiple random reads with optimized get_into()
+/// let mut buffer = Vec::new();
+/// reader.get_into(2, &mut buffer).unwrap();
+/// assert_eq!(buffer, vec![1000, 2000, 3000, 4000]);
 ///
+/// // Or use get() for lazy iteration
 /// let seq0: Vec<u32> = reader.get(0).unwrap().collect();
 /// assert_eq!(seq0, vec![10, 20, 30]);
 /// ```
@@ -94,6 +90,10 @@ where
 {
     /// A reference to the parent `SeqVec`.
     seqvec: &'a SeqVec<T, E, B>,
+    /// The reusable bitstream reader for decoding sequences.
+    reader: IntVecBitReader<'a, E>,
+    /// The hybrid codec reader for efficient element decoding.
+    code_reader: CodecReader<'a, E>,
 }
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecReader<'a, T, E, B>
@@ -105,7 +105,15 @@ where
     /// Creates a new `SeqVecReader`.
     #[inline]
     pub(super) fn new(seqvec: &'a SeqVec<T, E, B>) -> Self {
-        Self { seqvec }
+        let reader = IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+            seqvec.data.as_ref(),
+        ));
+        let code_reader = CodecReader::new(seqvec.encoding);
+        Self {
+            seqvec,
+            reader,
+            code_reader,
+        }
     }
 
     /// Retrieves an iterator over the sequence at `index`, or `None` if out of
@@ -212,6 +220,9 @@ where
     ///
     /// Returns `None` if `index` is out of bounds.
     ///
+    /// This implementation reuses the internal bitstream reader and codec
+    /// dispatcher, avoiding the overhead of creating a temporary [`SeqIter`].
+    ///
     /// # Examples
     ///
     /// ```
@@ -234,11 +245,30 @@ where
     /// assert_eq!(buffer, vec![10, 20, 30, 40]);
     /// ```
     #[inline]
-    pub fn get_into(&self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
+    pub fn get_into(&mut self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
+        if index >= self.seqvec.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        let start_bit = unsafe { self.seqvec.sequence_start_bit_unchecked(index) };
+        let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
+
         buf.clear();
-        self.get(index).map(|iter| {
-            buf.extend(iter);
-            buf.len()
-        })
+
+        // Always seek to the start position (random access pattern).
+        let _ = self.reader.set_bit_pos(start_bit);
+
+        // Decode all elements in the sequence using the reusable reader and codec dispatcher.
+        // Track current position separately since we can't rely on reader.bit_pos().
+        let mut current_pos = start_bit;
+        while current_pos < end_bit {
+            let word = self.code_reader.read(&mut self.reader).unwrap();
+            buf.push(T::from_word(word));
+            // Update position estimate after read
+            current_pos = self.reader.bit_pos().unwrap_or(current_pos);
+        }
+
+        Some(buf.len())
     }
 }
