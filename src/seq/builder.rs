@@ -413,7 +413,7 @@ impl CodecSpecExt for VariableCodecSpec {
 ///
 /// This function encodes all sequences using a single resolved codec and
 /// pre-allocated offsets vector. It resolves the codec dispatch once at the
-/// beginning rather than per-element, improving throughput.
+/// beginning (via `CodecWriter`) rather than per-element, improving throughput.
 ///
 /// Returns the encoded data (word vector) and bit offset boundaries.
 fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
@@ -542,5 +542,34 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
         S: AsRef<[T]>,
     {
         SeqVecFromIterBuilder::new(iter)
+    }
+
+    /// Creates a `SeqVec` from raw parts without validation.
+    ///
+    /// # Safety
+    ///
+    /// This method is unsafe because it does not validate that the `data` and
+    /// `bit_offsets` are consistent with each other. The caller must ensure:
+    /// - The `bit_offsets` array has at least 2 elements (start and end sentinel).
+    /// - All offsets are valid bit positions within the `data` buffer.
+    /// - The last offset equals the total number of bits in the compressed data.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The compressed data buffer.
+    /// * `bit_offsets` - The bit offset index for each sequence.
+    /// * `encoding` - The codec used to encode the data.
+    #[inline]
+    pub unsafe fn from_raw_parts(
+        data: Vec<u64>,
+        bit_offsets: crate::fixed::FixedVec<u64, u64, E, Vec<u64>>,
+        encoding: dsi_bitstream::prelude::Codes,
+    ) -> Self {
+        SeqVec {
+            data,
+            bit_offsets,
+            encoding,
+            _markers: PhantomData,
+        }
     }
 }

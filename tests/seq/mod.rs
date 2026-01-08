@@ -12,7 +12,12 @@ mod test_backend;
 mod test_codec;
 mod test_construction;
 mod test_iter;
+mod test_macros;
+#[cfg(feature = "parallel")]
+mod test_parallel;
 mod test_reader;
 mod test_seq;
 mod test_seq_reader;
+#[cfg(feature = "serde")]
+mod test_serde;
 mod test_slice;

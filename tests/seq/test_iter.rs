@@ -20,10 +20,9 @@ where
         + Send
         + Sync
         + 'static,
-    for<'a> compressed_intvec::seq::iter::SeqVecBitReader<'a, E>:
-        dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
-            + dsi_bitstream::prelude::CodesRead<E>
-            + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
+    for<'a> compressed_intvec::seq::iter::SeqVecBitReader<'a, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
+        + dsi_bitstream::prelude::CodesRead<E>
+        + dsi_bitstream::prelude::BitSeek<Error = core::convert::Infallible>,
     E: Endianness + Debug,
     dsi_bitstream::impls::BufBitWriter<E, dsi_bitstream::impls::MemWordWriterVec<u64, Vec<u64>>>:
         dsi_bitstream::prelude::BitWrite<E, Error = core::convert::Infallible>
@@ -46,7 +45,8 @@ where
         // 1.1. Forward iteration with SeqVecIter
         let all_sequences: Vec<Vec<T>> = vec.iter().map(|seq| seq.collect()).collect();
         assert_eq!(
-            &all_sequences, sequences,
+            &all_sequences,
+            sequences,
             "SeqVecIter forward iteration mismatch {}",
             context("iter()")
         );
@@ -58,7 +58,8 @@ where
             let mut expected_reversed = sequences.clone();
             expected_reversed.reverse();
             assert_eq!(
-                &reversed_sequences, &expected_reversed,
+                &reversed_sequences,
+                &expected_reversed,
                 "SeqVecIter reverse iteration mismatch {}",
                 context("iter().rev()")
             );
@@ -109,7 +110,8 @@ where
             // 2.1. Collect all elements
             let collected: Vec<T> = seq_iter.collect();
             assert_eq!(
-                &collected, expected_seq,
+                &collected,
+                expected_seq,
                 "SeqIter[{}] collection mismatch {}",
                 seq_idx,
                 context("get().collect()")
@@ -122,7 +124,8 @@ where
                     count += 1;
                 }
                 assert_eq!(
-                    count, expected_seq.len(),
+                    count,
+                    expected_seq.len(),
                     "SeqIter[{}] count mismatch {}",
                     seq_idx,
                     context("get().count()")
@@ -168,6 +171,59 @@ where
         // After exhaustion, should always return None
         assert_eq!(iter.next(), None, "SeqVecIter exhaustion mismatch");
         assert_eq!(iter.next(), None, "SeqVecIter should fuse after exhaustion");
+    }
+
+    // --- Test Case 5: PartialEq ---
+    let vec_clone = vec.clone();
+    assert_eq!(
+        vec,
+        vec_clone,
+        "PartialEq: clone must equal original {}",
+        context("clone()")
+    );
+
+    // Different content should not be equal
+    if !sequences.is_empty() && sequences[0].len() > 0 {
+        let mut different_sequences = sequences.clone();
+        different_sequences[0][0] = different_sequences[0][0].wrapping_add(1);
+        if let Ok(vec_different) = SeqVec::from_slices(&different_sequences) {
+            assert_ne!(
+                vec, vec_different,
+                "PartialEq: different content must not be equal"
+            );
+        }
+    }
+
+    // --- Test Case 6: IntoIterator ---
+    let vec_into = vec.clone();
+    let collected_into: Vec<Vec<T>> = vec_into.into_iter().map(|seq| seq.collect()).collect();
+    assert_eq!(
+        &collected_into,
+        sequences,
+        "IntoIterator: consumed vector iteration mismatch {}",
+        context("into_iter()")
+    );
+
+    // 6.1 IntoIterator with mixed front/back access
+    if sequences.len() > 1 {
+        let vec_mixed = SeqVec::from_slices(&sequences)
+            .unwrap_or_else(|e| panic!("Build failed: {} - {}", context("from_slices"), e));
+        let mut into_iter = vec_mixed.into_iter();
+        let first = into_iter.next().map(|seq| seq.collect::<Vec<_>>());
+        let last = into_iter.next_back().map(|seq| seq.collect::<Vec<_>>());
+
+        assert_eq!(
+            first,
+            Some(sequences[0].clone()),
+            "IntoIterator: first element mismatch {}",
+            context("into_iter().next()")
+        );
+        assert_eq!(
+            last,
+            Some(sequences[sequences.len() - 1].clone()),
+            "IntoIterator: last element mismatch {}",
+            context("into_iter().next_back()")
+        );
     }
 }
 
@@ -253,12 +309,7 @@ fn test_seqvec_iter_double_ended() {
 
 #[test]
 fn test_exact_size_iterator() {
-    let sequences: Vec<Vec<u32>> = vec![
-        vec![1],
-        vec![2, 3],
-        vec![4, 5, 6],
-        vec![7, 8, 9, 10],
-    ];
+    let sequences: Vec<Vec<u32>> = vec![vec![1], vec![2, 3], vec![4, 5, 6], vec![7, 8, 9, 10]];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
     let mut iter = vec.iter();
@@ -328,8 +379,7 @@ fn test_all_empty_sequences_iteration() {
 
 #[test]
 fn test_mixed_empty_non_empty_iteration() {
-    let sequences: Vec<Vec<u32>> =
-        vec![vec![1, 2], vec![], vec![3], vec![], vec![4, 5, 6]];
+    let sequences: Vec<Vec<u32>> = vec![vec![1, 2], vec![], vec![3], vec![], vec![4, 5, 6]];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
     let collected: Vec<Vec<u32>> = vec.iter().map(|seq| seq.collect()).collect();

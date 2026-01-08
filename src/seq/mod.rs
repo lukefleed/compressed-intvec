@@ -102,12 +102,17 @@
 
 mod builder;
 mod iter;
+mod macros;
+#[cfg(feature = "parallel")]
+mod parallel;
 mod reader;
 mod seq_reader;
+#[cfg(feature = "serde")]
+mod serde;
 mod slice;
 
 pub use builder::{SeqVecBuilder, SeqVecFromIterBuilder};
-pub use iter::{SeqIter, SeqVecIter};
+pub use iter::{SeqIter, SeqVecIntoIter, SeqVecIter};
 pub use reader::SeqVecReader;
 pub use seq_reader::SeqVecSeqReader;
 pub use slice::SeqVecSlice;
@@ -920,6 +925,132 @@ where
     }
 }
 
+// --- PartialEq Implementation ---
+
+impl<T: Storable + PartialEq, E: Endianness, B: AsRef<[u64]>> PartialEq for SeqVec<T, E, B>
+where
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    fn eq(&self, other: &Self) -> bool {
+        // Quick check: same number of sequences?
+        if self.num_sequences() != other.num_sequences() {
+            return false;
+        }
+
+        // Compare all sequences element-by-element
+        for i in 0..self.num_sequences() {
+            // SAFETY: i < num_sequences() by loop invariant
+            let self_iter = unsafe { self.get_unchecked(i) };
+            let other_iter = unsafe { other.get_unchecked(i) };
+
+            if self_iter.ne(other_iter) {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+// --- get_many_sequences Implementation ---
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B>
+where
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// Retrieves multiple sequences by their indices.
+    ///
+    /// This method decodes the requested sequences in sorted order for efficient
+    /// sequential access to the bitstream, then returns them in the order
+    /// corresponding to the input indices.
+    ///
+    /// # Arguments
+    ///
+    /// * `indices` - A slice of sequence indices to retrieve.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Vec<Vec<T>>)` containing the sequences in the order of `indices`.
+    /// - `Err(SeqVecError::IndexOutOfBounds(idx))` if any index is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[
+    ///     &[1, 2, 3],
+    ///     &[10, 20],
+    ///     &[100, 200, 300],
+    ///     &[1000],
+    /// ];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    ///
+    /// let indices = [3, 0, 2];
+    /// let sequences = vec.get_many_sequences(&indices).unwrap();
+    /// assert_eq!(sequences, vec![
+    ///     vec![1000],
+    ///     vec![1, 2, 3],
+    ///     vec![100, 200, 300],
+    /// ]);
+    /// ```
+    pub fn get_many_sequences(&self, indices: &[usize]) -> Result<Vec<Vec<T>>, SeqVecError> {
+        if indices.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Bounds checking
+        for &index in indices {
+            if index >= self.num_sequences() {
+                return Err(SeqVecError::IndexOutOfBounds(index));
+            }
+        }
+
+        // SAFETY: We have just performed the bounds checks.
+        Ok(unsafe { self.get_many_sequences_unchecked(indices) })
+    }
+
+    /// Retrieves multiple sequences without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with any out-of-bounds index is undefined behavior.
+    pub unsafe fn get_many_sequences_unchecked(&self, indices: &[usize]) -> Vec<Vec<T>> {
+        if indices.is_empty() {
+            return Vec::new();
+        }
+
+        let mut results = vec![Vec::new(); indices.len()];
+
+        // Create indexed pairs: (sequence_index, position_in_results)
+        let mut indexed_indices: Vec<(usize, usize)> = indices
+            .iter()
+            .enumerate()
+            .map(|(i, &idx)| (idx, i))
+            .collect();
+
+        // Sort by sequence index to enable efficient sequential scanning
+        indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
+
+        // Create a sequential reader for efficient access
+        let mut seq_reader = SeqVecSeqReader::new(self);
+        let mut buffer = Vec::new();
+
+        for &(target_index, original_position) in &indexed_indices {
+            // Decode the sequence into the buffer
+            seq_reader.get_into(target_index, &mut buffer).unwrap();
+            // Store in the correct position
+            results[original_position] = buffer.clone();
+        }
+
+        results
+    }
+}
+
 // --- IntoIterator ---
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntoIterator for &'a SeqVec<T, E, B>
@@ -934,5 +1065,20 @@ where
     #[inline]
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<T: Storable + 'static, E: Endianness + 'static> IntoIterator for SeqVec<T, E, Vec<u64>>
+where
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    type Item = SeqIter<'static, T, E>;
+    type IntoIter = SeqVecIntoIter<T, E>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        SeqVecIntoIter::new(self)
     }
 }

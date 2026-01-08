@@ -369,3 +369,182 @@ where
         + BitSeek<Error = core::convert::Infallible>,
 {
 }
+
+/// An owning iterator over all sequences in a [`SeqVec`].
+///
+/// This iterator consumes a [`SeqVec<T, E, Vec<u64>>`] and yields [`SeqIter`]
+/// instances for each sequence. The iterator owns the underlying data buffer,
+/// ensuring it lives as long as the iterator.
+///
+/// ## Design
+///
+/// This is a self-referential struct similar to [`IntVecIntoIter`](crate::variable::iter::IntVecIntoIter).
+/// The data buffer is stored in `_data_owner`, and a transmuted `'static` reference
+/// is used to create the reader. This is safe because `_data_owner` is part of
+/// the same struct, guaranteeing the data outlives the reader.
+///
+/// ## Trait Implementations
+///
+/// - [`Iterator`]: Core iteration.
+/// - [`ExactSizeIterator`]: The number of sequences is known.
+/// - [`DoubleEndedIterator`]: Supports iteration from both ends.
+/// - [`FusedIterator`]: After `None`, always returns `None`.
+///
+/// ## Examples
+///
+/// ```
+/// use compressed_intvec::seq::{SeqVec, LESeqVec};
+///
+/// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
+/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+///
+/// // Consume the vec and iterate over sequences
+/// let mut count = 0;
+/// for seq in vec {
+///     count += 1;
+///     let _ = seq.collect::<Vec<_>>();
+/// }
+/// assert_eq!(count, 2);
+/// ```
+pub struct SeqVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// The number of sequences remaining in the iterator.
+    num_sequences: usize,
+    /// The current sequence index being iterated.
+    current_index: usize,
+    /// Reference to the bit offsets index. This is a transmuted reference
+    /// that is guaranteed to be valid for the lifetime of `_data_owner`.
+    bit_offsets: &'static [u64],
+    /// Reference to the compressed data buffer. This is a transmuted reference
+    /// that is guaranteed to be valid for the lifetime of `_data_owner`.
+    data: &'static [u64],
+    /// The codec used for decoding.
+    encoding: Codes,
+    /// This field owns the data buffer, ensuring it lives as long as the iterator.
+    _data_owner: Vec<u64>,
+    /// This field owns the bit offsets buffer.
+    _bit_offsets_owner: Vec<u64>,
+    /// Phantom data to hold the generic types.
+    _markers: PhantomData<(T, E)>,
+}
+
+impl<T, E> SeqVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// Creates a new owning iterator from a [`SeqVec`] with owned data.
+    pub(crate) fn new(vec: super::SeqVec<T, E, Vec<u64>>) -> Self {
+        // Capture metadata first (both are Copy types, so this is safe)
+        let num_sequences = vec.num_sequences();
+        let encoding = vec.encoding;
+
+        // Now extract the owned buffers
+        let _data_owner = vec.data;
+        let _bit_offsets_owner = vec.bit_offsets.as_limbs().to_vec();
+
+        // Create transmuted 'static references. This is safe because _data_owner
+        // and _bit_offsets_owner are part of this struct.
+        let data_ref: &'static [u64] = unsafe { std::mem::transmute(_data_owner.as_slice()) };
+        let bit_offsets_ref: &'static [u64] =
+            unsafe { std::mem::transmute(_bit_offsets_owner.as_slice()) };
+
+        Self {
+            num_sequences,
+            current_index: 0,
+            bit_offsets: bit_offsets_ref,
+            data: data_ref,
+            encoding,
+            _data_owner,
+            _bit_offsets_owner,
+            _markers: PhantomData,
+        }
+    }
+}
+
+impl<T, E> Iterator for SeqVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    type Item = SeqIter<'static, T, E>;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.num_sequences {
+            return None;
+        }
+
+        let start_bit = self.bit_offsets[self.current_index];
+        let end_bit = self.bit_offsets[self.current_index + 1];
+
+        self.current_index += 1;
+
+        Some(SeqIter::new(self.data, start_bit, end_bit, self.encoding))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.num_sequences.saturating_sub(self.current_index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl<T, E> ExactSizeIterator for SeqVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    #[inline]
+    fn len(&self) -> usize {
+        self.num_sequences.saturating_sub(self.current_index)
+    }
+}
+
+impl<T, E> DoubleEndedIterator for SeqVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    #[inline]
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.num_sequences {
+            return None;
+        }
+
+        self.num_sequences -= 1;
+
+        let start_bit = self.bit_offsets[self.num_sequences];
+        let end_bit = self.bit_offsets[self.num_sequences + 1];
+
+        Some(SeqIter::new(self.data, start_bit, end_bit, self.encoding))
+    }
+}
+
+impl<T, E> std::iter::FusedIterator for SeqVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+}
