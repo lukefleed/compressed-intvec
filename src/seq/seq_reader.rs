@@ -172,6 +172,15 @@ where
     /// For performance-critical sequential access, use [`get_into`](Self::get_into)
     /// instead, which reuses the internal reader and can avoid seeks.
     ///
+    /// ## Note on State Usage
+    ///
+    /// This method does **not** benefit from the reader's internal state. It creates
+    /// a fresh [`SeqIter`] with its own reader, equivalent to calling
+    /// [`SeqVec::get`](crate::seq::SeqVec::get) directly. The purpose of this method
+    /// is to provide API consistency with [`get_into`](Self::get_into). For stateful
+    /// access that reuses the internal reader and avoids seeks, use [`get_into`](Self::get_into)
+    /// or [`get_vec`](Self::get_vec).
+    ///
     /// ## Returns
     ///
     /// - `Some(SeqIter)` if the index is valid.
@@ -187,14 +196,15 @@ where
     ///
     /// let mut reader = vec.seq_reader();
     ///
-    /// // Returns a lazy iterator
+    /// // Returns a lazy iterator (does not use internal state)
     /// let iter = reader.get(0).unwrap();
     /// assert_eq!(iter.collect::<Vec<_>>(), vec![10, 20, 30]);
     /// ```
     #[inline]
     pub fn get(&mut self, index: usize) -> Option<SeqIter<'a, T, E>> {
         // Delegate to SeqVec's get method. This does not use our internal state,
-        // but provides API consistency.
+        // but provides API consistency. For stateful access that reuses the internal
+        // reader and avoids seeks, use get_into() instead.
         self.seqvec.get(index)
     }
 

@@ -246,7 +246,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for SeqVec<T
         total += self.data.mem_size(flags) - core::mem::size_of::<B>();
         // Add heap-allocated memory for the bit_offsets index.
         total +=
-            self.bit_offsets.mem_size(flags) - core::mem::size_of::<FixedVec<u64, u64, LE, B>>();
+            self.bit_offsets.mem_size(flags) - core::mem::size_of::<FixedVec<u64, u64, E, B>>();
         total
     }
 }
