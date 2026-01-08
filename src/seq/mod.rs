@@ -209,7 +209,8 @@ pub struct SeqVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// Bit offsets marking the start of each sequence. Contains N+1 elements
     /// where N is the number of sequences. The final element is a sentinel
     /// containing the total bit length.
-    bit_offsets: FixedVec<u64, u64, LE, B>,
+    /// Uses the same endianness `E` as the struct for design consistency.
+    bit_offsets: FixedVec<u64, u64, E, B>,
     /// The compression codec used for all elements.
     encoding: Codes,
     /// Zero-sized markers for the generic type parameters.
@@ -482,7 +483,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
             ));
         }
 
-        let bit_offsets = FixedVec::<u64, u64, LE, B>::from_parts(
+        let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
             bit_offsets_data,
             bit_offsets_len,
             bit_offsets_num_bits,
@@ -505,7 +506,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
     #[inline]
     pub unsafe fn from_parts_unchecked(
         data: B,
-        bit_offsets: FixedVec<u64, u64, LE, B>,
+        bit_offsets: FixedVec<u64, u64, E, B>,
         encoding: Codes,
     ) -> Self {
         Self {
@@ -525,8 +526,8 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
     /// This is O(1) as it is derived from the bit offsets index length.
     #[inline]
     pub fn num_sequences(&self) -> usize {
-        // bit_offsets has N+1 entries for N sequences.
-        self.bit_offsets.len().saturating_sub(1)
+        // bit_offsets has N+1 entries for N sequences (always at least the sentinel).
+        self.bit_offsets.len() - 1
     }
 
     /// Returns `true` if there are no sequences stored.
@@ -549,7 +550,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
 
     /// Returns a reference to the bit offsets index.
     #[inline]
-    pub fn bit_offsets_ref(&self) -> &FixedVec<u64, u64, LE, B> {
+    pub fn bit_offsets_ref(&self) -> &FixedVec<u64, u64, E, B> {
         &self.bit_offsets
     }
 
@@ -558,12 +559,8 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
     /// This is the sentinel value at the end of the bit offsets index.
     #[inline]
     pub fn total_bits(&self) -> u64 {
-        if self.bit_offsets.is_empty() {
-            0
-        } else {
-            // SAFETY: We verified the index is not empty.
-            unsafe { self.bit_offsets.get_unchecked(self.bit_offsets.len() - 1) }
-        }
+        // bit_offsets always has at least one sentinel entry by construction invariant.
+        unsafe { self.bit_offsets.get_unchecked(self.bit_offsets.len() - 1) }
     }
 
     /// Returns the bit offset where sequence `index` starts.

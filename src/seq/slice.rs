@@ -312,14 +312,14 @@ where
     /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
-    /// let sequences: &[&[u32]] = &[&[], &[1], &[1, 2], &[1, 2, 3]];
+    /// let sequences: &[&[u32]] = &[&[10], &[20], &[30, 40], &[50]];
     /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
     ///
     /// let slice = vec.slice(0, 4).unwrap();
     ///
-    /// // Search by first element (treating empty as None)
-    /// let result = slice.binary_search_by_key(&Some(1), |probe| probe.next());
-    /// assert_eq!(result, Ok(1)); // Found sequence [1]
+    /// // Search by first element
+    /// let result = slice.binary_search_by_key(&30, |mut probe| probe.next().unwrap());
+    /// assert_eq!(result, Ok(2)); // Found sequence [30, 40]
     /// ```
     #[inline]
     pub fn binary_search_by_key<K, F>(&self, b: &K, mut f: F) -> Result<usize, usize>

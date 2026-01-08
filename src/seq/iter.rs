@@ -17,7 +17,7 @@ use dsi_bitstream::{
     codes::params::DefaultReadParams,
     dispatch::{Codes, CodesRead},
     impls::{BufBitReader, MemWordReader},
-    prelude::{BitRead, BitSeek, Endianness, LE},
+    prelude::{BitRead, BitSeek, Endianness},
 };
 use std::marker::PhantomData;
 
@@ -225,7 +225,7 @@ where
     /// Reference to the compressed data buffer.
     data: &'a [u64],
     /// Reference to the bit offsets index.
-    bit_offsets: &'a FixedVec<u64, u64, LE, B>,
+    bit_offsets: &'a FixedVec<u64, u64, E, B>,
     /// The codec used for compression.
     encoding: Codes,
     /// Current front index (for forward iteration).
@@ -251,7 +251,7 @@ where
     #[inline]
     pub(crate) fn new(
         data: &'a [u64],
-        bit_offsets: &'a FixedVec<u64, u64, LE, B>,
+        bit_offsets: &'a FixedVec<u64, u64, E, B>,
         encoding: Codes,
         num_sequences: usize,
     ) -> Self {

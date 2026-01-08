@@ -23,7 +23,7 @@ use dsi_bitstream::{
         VByteBeWrite, VByteLeWrite, ZetaWrite,
     },
     impls::MemWordWriterVec,
-    prelude::{BitWrite, Codes, CodesWrite, Endianness, LE},
+    prelude::{BitWrite, Codes, CodesWrite, Endianness},
 };
 use std::marker::PhantomData;
 
@@ -213,7 +213,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 
         // Handle empty input.
         if num_sequences == 0 {
-            let empty_offsets = FixedVec::<u64, u64, LE>::builder()
+            let empty_offsets = FixedVec::<u64, u64, E>::builder()
                 .bit_width(BitWidth::Minimal)
                 .build(&[0u64])?;
             return Ok(SeqVec {
@@ -251,7 +251,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
         data.shrink_to_fit();
 
         // Build the bit offsets index with minimal bit width.
-        let bit_offsets = FixedVec::<u64, u64, LE>::builder()
+        let bit_offsets = FixedVec::<u64, u64, E>::builder()
             .bit_width(BitWidth::Minimal)
             .build(&offsets)?;
 
@@ -397,7 +397,7 @@ where
 
         // Handle empty iterator case.
         if offsets.is_empty() {
-            let empty_offsets = FixedVec::<u64, u64, LE>::builder()
+            let empty_offsets = FixedVec::<u64, u64, E>::builder()
                 .bit_width(BitWidth::Minimal)
                 .build(&[0u64])?;
             return Ok(SeqVec {
@@ -418,7 +418,7 @@ where
         data.shrink_to_fit();
 
         // Build the bit offsets index.
-        let bit_offsets = FixedVec::<u64, u64, LE>::builder()
+        let bit_offsets = FixedVec::<u64, u64, E>::builder()
             .bit_width(BitWidth::Minimal)
             .build(&offsets)?;
 
