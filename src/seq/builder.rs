@@ -224,31 +224,11 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
             });
         }
 
-        // Pre-allocate the offsets vector with exact capacity.
-        let mut offsets: Vec<u64> = Vec::with_capacity(num_sequences + 1);
-
-        // Initialize the bit writer.
-        let word_writer = MemWordWriterVec::new(Vec::new());
-        let mut writer = SeqVecBitWriter::<E>::new(word_writer);
-        let mut current_bit_offset: u64 = 0;
-
-        // Encode each sequence, recording bit offsets at boundaries.
-        for seq in sequences {
-            offsets.push(current_bit_offset);
-
-            for elem in seq.as_ref() {
-                let bits_written = write_code_value(&mut writer, elem.to_word(), resolved_codec)?;
-                current_bit_offset += bits_written as u64;
-            }
-        }
-
-        // Sentinel: total bit length.
-        offsets.push(current_bit_offset);
-
-        // Finalize the writer.
-        writer.flush()?;
-        let mut data = writer.into_inner()?.into_inner();
-        data.shrink_to_fit();
+        let (data, offsets) = encode_sequences_impl(
+            sequences.iter(),
+            resolved_codec,
+            Vec::with_capacity(num_sequences + 1),
+        )?;
 
         // Build the bit offsets index with minimal bit width.
         let bit_offsets = FixedVec::<u64, u64, E>::builder()
@@ -376,24 +356,12 @@ where
         let resolved_codec = codec::resolve_codec::<u64>(&[], self.codec_spec)
             .map_err(|e| SeqVecError::CodecDispatch(e.to_string()))?;
 
-        // Initialize the bit writer.
-        let word_writer = MemWordWriterVec::new(Vec::new());
-        let mut writer = SeqVecBitWriter::<E>::new(word_writer);
+        let iter = self.iter.into_iter();
+        // Use size_hint to pre-allocate offsets for efficiency.
+        let (lower, _) = iter.size_hint();
+        let offsets = Vec::with_capacity(lower.saturating_add(1));
 
-        // We don't know the number of sequences in advance, so we start with
-        // a reasonable default capacity.
-        let mut offsets: Vec<u64> = Vec::new();
-        let mut current_bit_offset: u64 = 0;
-
-        // Process each sequence from the iterator.
-        for seq in self.iter {
-            offsets.push(current_bit_offset);
-
-            for elem in seq.as_ref() {
-                let bits_written = write_code_value(&mut writer, elem.to_word(), resolved_codec)?;
-                current_bit_offset += bits_written as u64;
-            }
-        }
+        let (data, offsets) = encode_sequences_impl(iter, resolved_codec, offsets)?;
 
         // Handle empty iterator case.
         if offsets.is_empty() {
@@ -407,15 +375,6 @@ where
                 _markers: PhantomData,
             });
         }
-
-        // Sentinel: total bit length.
-        offsets.push(current_bit_offset);
-        offsets.shrink_to_fit();
-
-        // Finalize the writer.
-        writer.flush()?;
-        let mut data = writer.into_inner()?.into_inner();
-        data.shrink_to_fit();
 
         // Build the bit offsets index.
         let bit_offsets = FixedVec::<u64, u64, E>::builder()
@@ -450,12 +409,55 @@ impl CodecSpecExt for VariableCodecSpec {
     }
 }
 
+/// Shared implementation for encoding sequences from an iterator.
+///
+/// This function encodes all sequences using a single resolved codec and
+/// pre-allocated offsets vector. It resolves the codec dispatch once at the
+/// beginning rather than per-element, improving throughput.
+///
+/// Returns the encoded data (word vector) and bit offset boundaries.
+fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
+    sequences: I,
+    resolved_codec: Codes,
+    mut offsets: Vec<u64>,
+) -> Result<(Vec<u64>, Vec<u64>), SeqVecError>
+where
+    E: Endianness,
+    I: IntoIterator<Item = S>,
+    S: AsRef<[T]>,
+    SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
+{
+    // Initialize the bit writer.
+    let word_writer = MemWordWriterVec::new(Vec::new());
+    let mut writer = SeqVecBitWriter::<E>::new(word_writer);
+    let mut current_bit_offset: u64 = 0;
+
+    // Process each sequence, recording bit offsets at boundaries.
+    for seq in sequences {
+        offsets.push(current_bit_offset);
+
+        for elem in seq.as_ref() {
+            let bits_written = write_code_value(&mut writer, elem.to_word(), resolved_codec)?;
+            current_bit_offset += bits_written as u64;
+        }
+    }
+
+    // Sentinel: total bit length.
+    offsets.push(current_bit_offset);
+
+    // Finalize the writer.
+    writer.flush()?;
+    let mut data = writer.into_inner()?.into_inner();
+    data.shrink_to_fit();
+
+    Ok((data, offsets))
+}
+
 /// Writes a single value using the specified codec.
 ///
-/// Returns the number of bits written. This function uses a match statement
-/// for dispatch, which the compiler optimizes effectively. The match is
-/// evaluated once per element, but branch prediction makes this efficient
-/// since the codec is constant throughout the encoding process.
+/// This function is kept for potential future use. For bulk encoding,
+/// `resolve_write_fn` is more efficient as it avoids repeated dispatch.
+/// Returns the number of bits written.
 #[inline]
 fn write_code_value<E: Endianness>(
     writer: &mut SeqVecBitWriter<E>,
