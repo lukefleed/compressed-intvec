@@ -444,13 +444,19 @@ where
 {
     /// Creates a new owning iterator from a [`SeqVec`] with owned data.
     pub(crate) fn new(vec: super::SeqVec<T, E, Vec<u64>>) -> Self {
-        // Capture metadata first (both are Copy types, so this is safe)
-        let num_sequences = vec.num_sequences();
         let encoding = vec.encoding;
+        let num_sequences = vec.num_sequences();
 
-        // Now extract the owned buffers
+        // Extract the owned buffers.
+        //
+        // IMPORTANT: `FixedVec::as_limbs()` returns the *packed* backing storage,
+        // not the logical element values. For `bit_offsets` we need the decoded
+        // offsets (N+1 values, including the sentinel).
         let _data_owner = vec.data;
-        let _bit_offsets_owner = vec.bit_offsets.as_limbs().to_vec();
+        let mut _bit_offsets_owner = Vec::with_capacity(vec.bit_offsets.len());
+        for i in 0..vec.bit_offsets.len() {
+            _bit_offsets_owner.push(unsafe { vec.bit_offsets.get_unchecked(i) });
+        }
 
         // Create transmuted 'static references. This is safe because _data_owner
         // and _bit_offsets_owner are part of this struct.
