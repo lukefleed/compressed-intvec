@@ -561,10 +561,7 @@ fn test_slice_into_iterator_partial() {
     let slice = vec.slice(1, 2).unwrap();
 
     // Test IntoIterator on a partial slice (indices 1 and 2)
-    let collected: Vec<Vec<u32>> = (&slice)
-        .into_iter()
-        .map(|seq| seq.collect())
-        .collect();
+    let collected: Vec<Vec<u32>> = (&slice).into_iter().map(|seq| seq.collect()).collect();
 
     assert_eq!(collected.len(), 2);
     assert_eq!(collected[0], vec![20, 30]);
