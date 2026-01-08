@@ -532,3 +532,41 @@ fn test_slice_many_empty_sequences() {
         assert_eq!(slice.get_vec(i), Some(vec![]));
     }
 }
+
+#[test]
+fn test_slice_into_iterator() {
+    let sequences: Vec<&[u32]> = vec![&[1, 2], &[3, 4, 5], &[6]];
+    let vec = SeqVec::from_slices(&sequences).unwrap();
+
+    let slice = vec.slice(0, 3).unwrap();
+
+    // Test that &slice implements IntoIterator, enabling for-loop syntax
+    let mut collected = Vec::new();
+    for seq in &slice {
+        let seq_vec: Vec<u32> = seq.collect();
+        collected.push(seq_vec);
+    }
+
+    assert_eq!(collected.len(), 3);
+    assert_eq!(collected[0], vec![1, 2]);
+    assert_eq!(collected[1], vec![3, 4, 5]);
+    assert_eq!(collected[2], vec![6]);
+}
+
+#[test]
+fn test_slice_into_iterator_partial() {
+    let sequences: Vec<&[u32]> = vec![&[10], &[20, 30], &[40], &[50, 60, 70]];
+    let vec = SeqVec::from_slices(&sequences).unwrap();
+
+    let slice = vec.slice(1, 2).unwrap();
+
+    // Test IntoIterator on a partial slice (indices 1 and 2)
+    let collected: Vec<Vec<u32>> = (&slice)
+        .into_iter()
+        .map(|seq| seq.collect())
+        .collect();
+
+    assert_eq!(collected.len(), 2);
+    assert_eq!(collected[0], vec![20, 30]);
+    assert_eq!(collected[1], vec![40]);
+}

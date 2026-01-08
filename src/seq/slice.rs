@@ -217,6 +217,21 @@ where
     /// sequences with different lengths or any differing element are ordered
     /// according to the first difference encountered.
     ///
+    /// # Performance Note
+    ///
+    /// Each binary search probe **fully decodes a compressed sequence** until a
+    /// difference is found or the sequence ends. For `log(n)` probes, each
+    /// decoding is O(m) where `m` is the sequence length. This is O(m * log n)
+    /// overall.
+    ///
+    /// - If sequences are short or differ early, early termination makes this
+    ///   very efficient.
+    /// - If sequences are very long and similar, decoding cost dominates.
+    /// - To extract a key from each sequence efficiently, use
+    ///   [`binary_search_by_key`](Self::binary_search_by_key) to extract a
+    ///   sortable key from the compressed data (e.g., first element) rather
+    ///   than the full sequence.
+    ///
     /// # Examples
     ///
     /// ```
@@ -264,6 +279,19 @@ where
     /// The comparison function receives a [`SeqIter`] for the probe sequence
     /// and should return the ordering relative to the target.
     ///
+    /// # Performance Note
+    ///
+    /// The closure receives a [`SeqIter`] for the probe sequence, which may
+    /// require decoding the compressed data. Each probe can involve up to O(m)
+    /// decoding operations where `m` is the sequence length.
+    ///
+    /// - For fast key extraction (first element, hash, etc.), decode only what
+    ///   is needed within the closure and return early.
+    /// - To search by a pre-computed key, use [`binary_search_by_key`](Self::binary_search_by_key)
+    ///   instead, which is optimized for key-based comparisons.
+    /// - For comparisons requiring the full sequence, full decoding is
+    ///   unavoidable: O(m * log n).
+    ///
     /// # Examples
     ///
     /// ```
@@ -275,13 +303,21 @@ where
     ///
     /// let slice = vec.slice(0, 4).unwrap();
     ///
-    /// // Search by sequence length
+    /// // Search by sequence length (decodes all elements)
     /// let result = slice.binary_search_by(|probe| {
     ///     let probe_len = probe.count();
     ///     probe_len.cmp(&3)
     /// });
     ///
     /// assert_eq!(result, Ok(2));
+    ///
+    /// // Search by first element only (early termination)
+    /// let result = slice.binary_search_by(|mut probe| {
+    ///     match probe.next() {
+    ///         Some(first) => first.cmp(&1),
+    ///         None => Ordering::Less,
+    ///     }
+    /// });
     /// ```
     #[inline]
     pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
@@ -338,6 +374,38 @@ where
 pub struct SeqVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
     slice: &'a SeqVecSlice<'a, T, E, B>,
     current_index: usize,
+}
+
+// --- IntoIterator Implementation ---
+
+impl<'a, T, E, B> IntoIterator for &'a SeqVecSlice<'a, T, E, B>
+where
+    T: Storable,
+    E: Endianness,
+    B: AsRef<[u64]>,
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    type Item = SeqIter<'a, T, E>;
+    type IntoIter = SeqVecSliceIter<'a, T, E, B>;
+
+    /// Returns an iterator over the sequences in the slice.
+    ///
+    /// This implementation allows slices to be used in `for` loops:
+    ///
+    /// ```no_run
+    /// # use compressed_intvec::seq::{SeqVec, LESeqVec};
+    /// # let vec: LESeqVec<u32> = SeqVec::from_slices(&[&[1, 2][..], &[3, 4, 5][..]]).unwrap();
+    /// # let slice = vec.slice(0, 2).unwrap();
+    /// for seq in &slice {
+    ///     // Process each sequence
+    /// }
+    /// ```
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
 }
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSliceIter<'a, T, E, B> {
