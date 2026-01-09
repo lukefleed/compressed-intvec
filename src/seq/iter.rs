@@ -161,7 +161,7 @@ where
         // Update current bit position after reading. Since the read operation
         // advances the reader's internal position, we estimate the new position
         // by querying the reader (this is infallible for in-memory readers).
-        self.current_bit = self.reader.bit_pos().unwrap_or(self.current_bit);
+        self.current_bit = self.reader.bit_pos().unwrap();
 
         Some(T::from_word(word))
     }

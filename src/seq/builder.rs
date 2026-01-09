@@ -14,14 +14,12 @@
 //! [`SeqVec`]: crate::seq::SeqVec
 
 use super::{SeqVec, SeqVecBitWriter, SeqVecError, VariableCodecSpec};
+use crate::common::codec_writer::CodecWriter;
 use crate::fixed::{BitWidth, FixedVec};
 use crate::variable::codec;
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
-    codes::{
-        DeltaWrite, ExpGolombWrite, GammaWrite, GolombWrite, OmegaWrite, PiWrite, RiceWrite,
-        VByteBeWrite, VByteLeWrite, ZetaWrite,
-    },
+    dispatch::StaticCodeWrite,
     impls::MemWordWriterVec,
     prelude::{BitWrite, Codes, CodesWrite, Endianness},
 };
@@ -432,12 +430,16 @@ where
     let mut writer = SeqVecBitWriter::<E>::new(word_writer);
     let mut current_bit_offset: u64 = 0;
 
+    // Resolve the codec dispatch ONCE at the beginning.
+    // This eliminates per-element match overhead for common codecs.
+    let code_writer = CodecWriter::new(resolved_codec);
+
     // Process each sequence, recording bit offsets at boundaries.
     for seq in sequences {
         offsets.push(current_bit_offset);
 
         for elem in seq.as_ref() {
-            let bits_written = write_code_value(&mut writer, elem.to_word(), resolved_codec)?;
+            let bits_written = code_writer.write(&mut writer, elem.to_word())?;
             current_bit_offset += bits_written as u64;
         }
     }
@@ -453,41 +455,6 @@ where
     Ok((data, offsets))
 }
 
-/// Writes a single value using the specified codec.
-///
-/// This function is kept for potential future use. For bulk encoding,
-/// `resolve_write_fn` is more efficient as it avoids repeated dispatch.
-/// Returns the number of bits written.
-#[inline]
-fn write_code_value<E: Endianness>(
-    writer: &mut SeqVecBitWriter<E>,
-    value: u64,
-    code: Codes,
-) -> Result<usize, SeqVecError>
-where
-    SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
-{
-    let bits = match code {
-        Codes::Unary => writer.write_unary(value)?,
-        Codes::Gamma => writer.write_gamma(value)?,
-        Codes::Delta => writer.write_delta(value)?,
-        Codes::Omega => writer.write_omega(value)?,
-        Codes::VByteLe => writer.write_vbyte_le(value)?,
-        Codes::VByteBe => writer.write_vbyte_be(value)?,
-        Codes::Zeta { k } => writer.write_zeta(value, k)?,
-        Codes::Rice { log2_b } => writer.write_rice(value, log2_b)?,
-        Codes::Golomb { b } => writer.write_golomb(value, b as u64)?,
-        Codes::ExpGolomb { k } => writer.write_exp_golomb(value, k)?,
-        Codes::Pi { k } => writer.write_pi(value, k)?,
-        _ => {
-            return Err(SeqVecError::CodecDispatch(format!(
-                "Unsupported codec for writing: {:?}",
-                code
-            )));
-        }
-    };
-    Ok(bits)
-}
 
 // --- Integration with SeqVec ---
 
