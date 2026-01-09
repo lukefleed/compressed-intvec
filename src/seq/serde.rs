@@ -154,7 +154,9 @@ impl<'de, T: Storable + 'static, E: Endianness> Deserialize<'de> for SeqVec<T, E
         }
 
         // Validate buffer size
-        let required_bits = proxy.bit_offsets_len.saturating_mul(proxy.bit_offsets_bit_width);
+        let required_bits = proxy
+            .bit_offsets_len
+            .saturating_mul(proxy.bit_offsets_bit_width);
         let required_data_words = required_bits.div_ceil(word_size_bits);
 
         if proxy.bit_offsets_data.len() < required_data_words {
@@ -175,8 +177,6 @@ impl<'de, T: Storable + 'static, E: Endianness> Deserialize<'de> for SeqVec<T, E
         };
 
         // Reconstruct the SeqVec
-        Ok(unsafe {
-            SeqVec::from_raw_parts(proxy.data, bit_offsets, proxy.encoding.into())
-        })
+        Ok(unsafe { SeqVec::from_raw_parts(proxy.data, bit_offsets, proxy.encoding.into()) })
     }
 }

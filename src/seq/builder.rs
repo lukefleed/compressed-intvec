@@ -454,7 +454,6 @@ where
     Ok((data, offsets))
 }
 
-
 // --- Integration with SeqVec ---
 
 impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {

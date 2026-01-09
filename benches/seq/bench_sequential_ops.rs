@@ -37,10 +37,7 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
     // 1. Full scan: iterate all sequences and sum all elements
     group.bench_function("iter_all_sum", |b| {
         b.iter(|| {
-            let sum: u64 = black_box(&seq_vec)
-                .iter()
-                .flatten()
-                .sum();
+            let sum: u64 = black_box(&seq_vec).iter().flatten().sum();
             black_box(sum);
         })
     });
