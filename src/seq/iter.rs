@@ -48,7 +48,7 @@ pub(crate) type SeqVecBitReader<'a, E> =
 /// ## Trait Implementations
 ///
 /// - [`Iterator`]: Core iteration functionality.
-/// - [`FusedIterator`]: Guarantees that after returning `None`, all subsequent
+/// - [`std::iter::FusedIterator`]: Guarantees that after returning `None`, all subsequent
 ///   calls return `None`.
 ///
 /// Does **not** implement [`ExactSizeIterator`] because the element count is
@@ -197,7 +197,7 @@ impl<'a, T: Storable, E: Endianness> std::iter::FusedIterator for SeqIter<'a, T,
 ///
 /// - [`Iterator`]: Core iteration.
 /// - [`ExactSizeIterator`]: The number of sequences is known.
-/// - [`FusedIterator`]: After `None`, always returns `None`.
+/// - [`std::iter::FusedIterator`]: After `None`, always returns `None`.
 /// - [`DoubleEndedIterator`]: Supports iteration from both ends.
 ///
 /// ## Examples
@@ -370,9 +370,9 @@ where
 {
 }
 
-/// An owning iterator over all sequences in a [`SeqVec`].
+/// An owning iterator over all sequences in a [`crate::seq::SeqVec`].
 ///
-/// This iterator consumes a [`SeqVec<T, E, Vec<u64>>`] and yields [`SeqIter`]
+/// This iterator consumes a [`crate::seq::SeqVec<T, E, Vec<u64>>`] and yields [`SeqIter`]
 /// instances for each sequence. The iterator owns the underlying data buffer,
 /// ensuring it lives as long as the iterator.
 ///
@@ -388,7 +388,7 @@ where
 /// - [`Iterator`]: Core iteration.
 /// - [`ExactSizeIterator`]: The number of sequences is known.
 /// - [`DoubleEndedIterator`]: Supports iteration from both ends.
-/// - [`FusedIterator`]: After `None`, always returns `None`.
+/// - [`std::iter::FusedIterator`]: After `None`, always returns `None`.
 ///
 /// ## Examples
 ///

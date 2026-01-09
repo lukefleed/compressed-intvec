@@ -1,8 +1,8 @@
 //! Convenience macros for creating a [`SeqVec`] with a familiar syntax.
 
-/// Creates a [`LESeqVec`] containing the given sequences.
+/// Creates a [`crate::seq::LESeqVec`] containing the given sequences.
 ///
-/// This macro constructs a [`SeqVec`] with little-endian encoding and automatic
+/// This macro constructs a [`crate::seq::SeqVec`] with little-endian encoding and automatic
 /// codec selection, using the default `u64` word type for storage.
 ///
 /// # Examples
@@ -36,7 +36,7 @@ macro_rules! seq_vec {
     };
 }
 
-/// Creates a [`LESeqVec`] of signed integers.
+/// Creates a [`crate::seq::LESeqVec`] of signed integers.
 ///
 /// This macro is similar to [`seq_vec!`](crate::seq_vec), but automatically
 /// casts all elements to `i64` before creating the vector. This is useful when

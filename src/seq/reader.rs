@@ -42,8 +42,8 @@ use dsi_bitstream::{
 ///
 /// ## Design Rationale
 ///
-/// Unlike the stateless [`SeqVec`] accessors, `SeqVecReader` maintains an
-/// internal [`IntVecBitReader`] and [`CodecReader`] that are reused across
+/// Unlike the stateless [`crate::seq::SeqVec`] accessors, `SeqVecReader` maintains an
+/// internal `IntVecBitReader` and `CodecReader` that are reused across
 /// multiple accesses. This design mirrors [`IntVecReader`](crate::variable::IntVecReader)
 /// in the `variable` module.
 ///
