@@ -209,7 +209,18 @@ where
     /// ```
     #[inline]
     pub fn get_vec(&self, index: usize) -> Option<Vec<T>> {
-        self.get(index).map(|iter| iter.collect())
+        self.get(index).map(|iter| {
+            // Estimate capacity: assume ~4 bits per element on average
+            // (reasonable for common codecs like Gamma, Delta, Rice).
+            let bit_range = unsafe {
+                self.seqvec.sequence_end_bit_unchecked(index)
+                    - self.seqvec.sequence_start_bit_unchecked(index)
+            };
+            let estimated_capacity = (bit_range / 4).max(1) as usize;
+            let mut buf = Vec::with_capacity(estimated_capacity);
+            buf.extend(iter);
+            buf
+        })
     }
 
     /// Retrieves the sequence at `index` into the provided buffer, returning the

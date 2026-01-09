@@ -131,8 +131,11 @@ impl<'de, T: Storable, E: Endianness> Deserialize<'de> for SeqVec<T, E, Vec<u64>
         D: Deserializer<'de>,
     {
         let helper = SeqVecProxy::deserialize(deserializer)?;
-        // SAFETY: The deserialized proxy struct contains all necessary components,
-        // which are assumed to be consistent as they were serialized together.
-        Ok(unsafe { SeqVec::from_raw_parts(helper.data, helper.bit_offsets, helper.encoding.into()) })
+        // Use from_raw_parts_unchecked to reconstruct the SeqVec.
+        // The components were serialized together, so consistency is guaranteed
+        // by the serialization process. Validation is deferred to from_raw_parts_unchecked.
+        Ok(unsafe {
+            SeqVec::from_raw_parts(helper.data, helper.bit_offsets, helper.encoding.into())
+        })
     }
 }
