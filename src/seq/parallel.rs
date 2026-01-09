@@ -68,6 +68,49 @@ where
         })
     }
 
+    /// Consumes the [`SeqVec`] and decodes all sequences into separate vectors
+    /// in parallel.
+    ///
+    /// This method is a parallel version of [`into_vecs`](super::SeqVec::into_vecs),
+    /// leveraging Rayon to decompress multiple sequences concurrently. Each
+    /// sequence is fully decompressed by its assigned thread.
+    ///
+    /// # Performance
+    ///
+    /// Parallelization is beneficial when:
+    /// - The dataset is large enough to amortize thread overhead.
+    /// - Sequences are reasonably sized.
+    ///
+    /// For small datasets or very fast codecs, the sequential [`into_vecs`]
+    /// method may be faster due to better cache locality.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "parallel")] {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[
+    ///     &[1, 2, 3],
+    ///     &[10, 20],
+    ///     &[100, 200, 300],
+    /// ];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    ///
+    /// // Decode all sequences in parallel
+    /// let all_sequences: Vec<Vec<u32>> = vec.par_into_vecs();
+    ///
+    /// assert_eq!(all_sequences.len(), 3);
+    /// assert_eq!(all_sequences[0], vec![1, 2, 3]);
+    /// assert_eq!(all_sequences[1], vec![10, 20]);
+    /// # }
+    /// ```
+    ///
+    /// [`into_vecs`]: super::SeqVec::into_vecs
+    pub fn par_into_vecs(self) -> Vec<Vec<T>> {
+        self.par_iter().collect()
+    }
+
     /// Retrieves multiple sequences in parallel.
     ///
     /// This method uses Rayon to parallelize the retrieval of multiple sequences

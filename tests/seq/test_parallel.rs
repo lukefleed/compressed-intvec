@@ -44,7 +44,19 @@ where
         context
     );
 
-    // --- Test 2: par_get_many_sequences() with safe bounds checking ---
+    // --- Test 2: par_into_vecs() ---
+    // Consume the SeqVec and decode all sequences in parallel
+    let vec_for_into: SeqVec<T, E> =
+        SeqVec::from_slices(&sequences).expect(&format!("Build failed: {}", context));
+    let collected_into: Vec<Vec<T>> = vec_for_into.par_into_vecs();
+
+    assert_eq!(
+        collected_into, sequences,
+        "par_into_vecs() results mismatch for {}",
+        context
+    );
+
+    // --- Test 3: par_get_many_sequences() with safe bounds checking ---
     if !sequences.is_empty() {
         // Generate some indices (evens, if available)
         let indices: Vec<usize> = (0..sequences.len()).filter(|x| x % 2 == 0).collect();
@@ -67,7 +79,7 @@ where
         }
     }
 
-    // --- Test 3: par_get_many_sequences() with out-of-bounds should fail ---
+    // --- Test 4: par_get_many_sequences() with out-of-bounds should fail ---
     if !sequences.is_empty() {
         let mut indices = vec![0];
         if !sequences.is_empty() {
