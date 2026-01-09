@@ -39,7 +39,7 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
         b.iter(|| {
             let sum: u64 = black_box(&seq_vec)
                 .iter()
-                .flat_map(|seq_iter| seq_iter)
+                .flatten()
                 .sum();
             black_box(sum);
         })

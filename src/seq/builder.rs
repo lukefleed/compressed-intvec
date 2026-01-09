@@ -420,7 +420,6 @@ fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
     mut offsets: Vec<u64>,
 ) -> Result<(Vec<u64>, Vec<u64>), SeqVecError>
 where
-    E: Endianness,
     I: IntoIterator<Item = S>,
     S: AsRef<[T]>,
     SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,

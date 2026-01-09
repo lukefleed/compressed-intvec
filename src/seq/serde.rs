@@ -38,9 +38,8 @@
 use super::SeqVec;
 use crate::fixed::FixedVec;
 use crate::variable::traits::Storable;
-use dsi_bitstream::prelude::{Codes, Endianness, LE};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
+use dsi_bitstream::prelude::{Codes, Endianness};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 /// A serializable proxy for `dsi-bitstream::prelude::Codes`.
 /// This is an internal detail to bridge `Codes` with `serde`.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -95,47 +94,89 @@ impl From<CodesSerde> for Codes {
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for SeqVec<T, E, B> {
+/// A proxy struct for serializing `SeqVec`.
+///
+/// This struct extracts only the data fields without generic type parameters,
+/// allowing serde to serialize the contents without requiring the generic types
+/// to implement `Serialize`.
+#[derive(Serialize)]
+struct SeqVecSerializeProxy<'a> {
+    data: &'a [u64],
+    bit_offsets_data: &'a [u64],
+    bit_offsets_len: usize,
+    bit_offsets_bit_width: usize,
+    encoding: CodesSerde,
+}
+
+/// A proxy struct for deserializing `SeqVec`.
+///
+/// This struct holds the raw data fields needed to reconstruct a `SeqVec`.
+/// It decouples deserialization from the generic type parameters.
+#[derive(Deserialize)]
+struct SeqVecDeserializeProxy {
+    data: Vec<u64>,
+    bit_offsets_data: Vec<u64>,
+    bit_offsets_len: usize,
+    bit_offsets_bit_width: usize,
+    encoding: CodesSerde,
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Serialize for SeqVec<T, E, B> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        #[derive(Serialize)]
-        struct SerializeProxy<'a, B: AsRef<[u64]> + Serialize> {
-            data: &'a [u64],
-            bit_offsets: &'a FixedVec<u64, u64, LE, B>,
-            encoding: CodesSerde,
-        }
-
-        let proxy = SerializeProxy {
+        let proxy = SeqVecSerializeProxy {
             data: self.data.as_ref(),
-            bit_offsets: &self.bit_offsets,
+            bit_offsets_data: self.bit_offsets.as_limbs(),
+            bit_offsets_len: self.bit_offsets.len(),
+            bit_offsets_bit_width: self.bit_offsets.bit_width(),
             encoding: self.encoding.into(),
         };
         proxy.serialize(serializer)
     }
 }
 
-/// A helper struct for deserializing an owned `SeqVec`.
-#[derive(Deserialize)]
-#[serde(rename = "SeqVec")]
-struct SeqVecProxy {
-    data: Vec<u64>,
-    bit_offsets: FixedVec<u64, u64, LE, Vec<u64>>,
-    encoding: CodesSerde,
-}
-
-impl<'de, T: Storable, E: Endianness> Deserialize<'de> for SeqVec<T, E, Vec<u64>> {
+impl<'de, T: Storable + 'static, E: Endianness> Deserialize<'de> for SeqVec<T, E, Vec<u64>> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let helper = SeqVecProxy::deserialize(deserializer)?;
-        // Use from_raw_parts_unchecked to reconstruct the SeqVec.
-        // The components were serialized together, so consistency is guaranteed
-        // by the serialization process. Validation is deferred to from_raw_parts_unchecked.
+        let proxy = SeqVecDeserializeProxy::deserialize(deserializer)?;
+
+        // Validate bit_width
+        let word_size_bits = std::mem::size_of::<u64>() * 8;
+        if proxy.bit_offsets_bit_width > word_size_bits {
+            return Err(de::Error::custom(format!(
+                "Deserialized bit_offsets bit_width ({}) cannot be greater than word size ({})",
+                proxy.bit_offsets_bit_width, word_size_bits
+            )));
+        }
+
+        // Validate buffer size
+        let required_bits = proxy.bit_offsets_len.saturating_mul(proxy.bit_offsets_bit_width);
+        let required_data_words = required_bits.div_ceil(word_size_bits);
+
+        if proxy.bit_offsets_data.len() < required_data_words {
+            return Err(de::Error::custom(format!(
+                "Deserialized bit_offsets buffer is too small. It has {} words, but at least {} are required.",
+                proxy.bit_offsets_data.len(),
+                required_data_words
+            )));
+        }
+
+        // Reconstruct the FixedVec<u64, u64, E, Vec<u64>>
+        let bit_offsets = unsafe {
+            FixedVec::new_unchecked(
+                proxy.bit_offsets_data,
+                proxy.bit_offsets_len,
+                proxy.bit_offsets_bit_width,
+            )
+        };
+
+        // Reconstruct the SeqVec
         Ok(unsafe {
-            SeqVec::from_raw_parts(helper.data, helper.bit_offsets, helper.encoding.into())
+            SeqVec::from_raw_parts(proxy.data, bit_offsets, proxy.encoding.into())
         })
     }
 }
