@@ -12,14 +12,12 @@
 //! [`IntVec`]: crate::variable::IntVec
 
 use super::{codec, traits::Storable, IntVec, IntVecBitWriter, IntVecError, VariableCodecSpec};
+use crate::common::codec_writer::CodecWriter;
 use crate::fixed::{BitWidth, FixedVec};
 use dsi_bitstream::{
-    codes::{
-        DeltaWrite, ExpGolombWrite, GammaWrite, GolombWrite, OmegaWrite, PiWrite, RiceWrite,
-        VByteBeWrite, VByteLeWrite, ZetaWrite,
-    },
+    dispatch::StaticCodeWrite,
     impls::MemWordWriterVec,
-    prelude::{BitWrite, Codes, CodesWrite, Endianness, LE},
+    prelude::{BitWrite, CodesWrite, Endianness, LE},
 };
 use std::marker::PhantomData;
 
@@ -87,7 +85,7 @@ impl<T: Storable, E: Endianness> IntVecBuilder<T, E> {
     ///
     /// # Examples
     ///
-    /// ``` 
+    /// ```
     /// use compressed_intvec::variable::{IntVec, SIntVec, VariableCodecSpec};
     ///
     /// let data: &[i16] = &[-100, 0, 50, -2, 1000];
@@ -131,33 +129,17 @@ impl<T: Storable, E: Endianness> IntVecBuilder<T, E> {
         let mut temp_samples = Vec::with_capacity(sample_capacity);
         let mut current_bit_offset = 0;
 
+        // Resolve the codec dispatch ONCE at the beginning.
+        // This eliminates per-element match overhead for common codecs.
+        let code_writer = CodecWriter::new(resolved_code);
+
         // Iterate through the data, writing compressed values and recording samples.
         for (i, &value) in input.iter().enumerate() {
             if i % self.k == 0 {
                 temp_samples.push(current_bit_offset as u64);
             }
 
-            // Use our own dispatcher to call the appropriate write method.
-            // This avoids the limitations of dsi-bitstream's FuncCodeWriter.
-            let bits_written = match resolved_code {
-                Codes::Gamma => writer.write_gamma(value.to_word()).unwrap(),
-                Codes::Delta => writer.write_delta(value.to_word()).unwrap(),
-                Codes::Zeta { k } => writer.write_zeta(value.to_word(), k).unwrap(),
-                Codes::Golomb { b } => writer.write_golomb(value.to_word(), b as u64).unwrap(),
-                Codes::Rice { log2_b } => writer.write_rice(value.to_word(), log2_b).unwrap(),
-                Codes::Unary => writer.write_unary(value.to_word()).unwrap(),
-                Codes::Omega => writer.write_omega(value.to_word()).unwrap(),
-                Codes::Pi { k } => writer.write_pi(value.to_word(), k).unwrap(),
-                Codes::ExpGolomb { k } => writer.write_exp_golomb(value.to_word(), k).unwrap(),
-                Codes::VByteLe => writer.write_vbyte_le(value.to_word()).unwrap(),
-                Codes::VByteBe => writer.write_vbyte_be(value.to_word()).unwrap(),
-                _ => {
-                    return Err(IntVecError::InvalidParameters(
-                        "The specified codec is not supported for slice-based construction."
-                            .to_string(),
-                    ));
-                }
-            };
+            let bits_written = code_writer.write(&mut writer, value.to_word())?;
             current_bit_offset += bits_written;
         }
         // Write a final stopper to ensure the last value can always be read safely.
@@ -173,9 +155,7 @@ impl<T: Storable, E: Endianness> IntVecBuilder<T, E> {
         let mut data = writer.into_inner().unwrap().into_inner();
         data.shrink_to_fit();
 
-        Ok(unsafe {
-            IntVec::new_unchecked(data, samples, self.k, input.len(), resolved_code)
-        })
+        Ok(unsafe { IntVec::new_unchecked(data, samples, self.k, input.len(), resolved_code) })
     }
 }
 
@@ -285,31 +265,15 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> IntVecFromIterBuilde
         let mut temp_samples = Vec::new();
         let mut current_bit_offset = 0;
 
+        // Resolve the codec dispatch ONCE at the beginning.
+        let code_writer = CodecWriter::new(resolved_code);
+
         for (i, value) in self.iter.into_iter().enumerate() {
             if i % self.k == 0 {
                 temp_samples.push(current_bit_offset as u64);
             }
 
-            // Use our own dispatcher to call the appropriate write method.
-            let bits_written = match resolved_code {
-                Codes::Gamma => writer.write_gamma(value.to_word()).unwrap(),
-                Codes::Delta => writer.write_delta(value.to_word()).unwrap(),
-                Codes::Zeta { k } => writer.write_zeta(value.to_word(), k).unwrap(),
-                Codes::Golomb { b } => writer.write_golomb(value.to_word(), b as u64).unwrap(),
-                Codes::Rice { log2_b } => writer.write_rice(value.to_word(), log2_b).unwrap(),
-                Codes::Unary => writer.write_unary(value.to_word()).unwrap(),
-                Codes::Omega => writer.write_omega(value.to_word()).unwrap(),
-                Codes::Pi { k } => writer.write_pi(value.to_word(), k).unwrap(),
-                Codes::ExpGolomb { k } => writer.write_exp_golomb(value.to_word(), k).unwrap(),
-                Codes::VByteLe => writer.write_vbyte_le(value.to_word()).unwrap(),
-                Codes::VByteBe => writer.write_vbyte_be(value.to_word()).unwrap(),
-                _ => {
-                    return Err(IntVecError::InvalidParameters(
-                        "The specified codec is not supported for iterator-based construction."
-                            .to_string(),
-                    ));
-                }
-            };
+            let bits_written = code_writer.write(&mut writer, value.to_word())?;
             current_bit_offset += bits_written;
             len += 1;
         }

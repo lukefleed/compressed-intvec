@@ -96,9 +96,9 @@ fn benchmark_construction(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
-        .warm_up_time(Duration::from_millis(10))
-        .measurement_time(Duration::from_secs(2));
+        .sample_size(50)
+        .warm_up_time(Duration::from_millis(500))
+        .measurement_time(Duration::from_secs(5));
     targets = benchmark_construction
 }
 criterion_main!(benches);
