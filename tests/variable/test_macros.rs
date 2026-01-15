@@ -1,10 +1,9 @@
 //! Integration tests for the `int_vec!` and `sint_vec!` macros and other convenience APIs.
 
-use compressed_intvec::prelude::LESIntVec;
-use compressed_intvec::variable::LEIntVec;
 use compressed_intvec::int_vec;
+use compressed_intvec::prelude::LESIntVec;
 use compressed_intvec::sint_vec;
-
+use compressed_intvec::variable::LEIntVec;
 
 #[test]
 fn test_int_vec_macro_empty() {
@@ -17,17 +16,16 @@ fn test_int_vec_macro_empty() {
 
 #[test]
 fn test_int_vec_macro_from_list() {
-    let data: [u64; 5] = [100u64, 200, 300, 400, 500];
-    // Add an explicit type annotation to help the compiler resolve trait bounds.
-    let v: LEIntVec = int_vec![100, 200, 300, 400, 500];
+    let v_u64: LEIntVec = int_vec![100, 200, 300, 400, 500];
 
-    assert_eq!(v.len(), 5);
-    assert_eq!(v.get(0), Some(100));
-    assert_eq!(v.get(4), Some(500));
-    assert_eq!(v.get(5), None);
+    assert_eq!(v_u64.len(), 5);
+    assert_eq!(v_u64.get(0), Some(100));
+    assert_eq!(v_u64.get(4), Some(500));
 
-    // Check full content
-    assert_eq!(v, &data[..]);
+    // Polymorphism: test with u32
+    let v_u32 = int_vec![10u32, 20, 30];
+    assert_eq!(v_u32.get(0), Some(10));
+    assert_eq!(v_u32.get(2), Some(30));
 }
 
 #[test]

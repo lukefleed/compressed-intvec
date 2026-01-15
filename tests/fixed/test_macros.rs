@@ -1,7 +1,7 @@
 //! Integration tests for the `fixed_vec!` macro.
 
 use compressed_intvec::fixed::{SFixedVec, UFixedVec};
-use compressed_intvec::fixed_vec;
+use compressed_intvec::{fixed_vec, sfixed_vec};
 
 #[test]
 fn test_fixed_vec_macro_empty() {
@@ -70,4 +70,24 @@ fn test_fixed_vec_macro_from_repeated_element() {
     }
     assert_eq!(v_signed.bit_width(), 4);
     let _: SFixedVec<isize> = v_signed;
+}
+
+#[test]
+fn test_sfixed_vec_macro() {
+    // Empty
+    let v_empty: SFixedVec<i64> = sfixed_vec![];
+    assert!(v_empty.is_empty());
+
+    // From list
+    let v = sfixed_vec![-100, 200, -300];
+    assert_eq!(v.len(), 3);
+    assert_eq!(v.get(0), Some(-100));
+    assert_eq!(v.get(2), Some(-300));
+    let _: SFixedVec<i64> = v;
+
+    // From repetition
+    let v_rep = sfixed_vec![-42; 10];
+    assert_eq!(v_rep.len(), 10);
+    assert_eq!(v_rep.get(5), Some(-42));
+    let _: SFixedVec<i64> = v_rep;
 }

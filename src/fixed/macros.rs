@@ -71,6 +71,39 @@ macro_rules! fixed_vec {
     };
 }
 
+/// Creates a [`FixedVec`] of signed integers (forces `i64`).
+///
+/// This macro is similar to [`fixed_vec!`], but automatically casts all
+/// elements to `i64`. This ensures that ZigZag encoding is used for
+/// signed values.
+///
+/// # Examples
+///
+/// ```
+/// use compressed_intvec::sfixed_vec;
+/// let vec = sfixed_vec![-1, 2, -3];
+/// assert_eq!(vec.get(0), Some(-1));
+/// ```
+#[macro_export]
+macro_rules! sfixed_vec {
+    // Empty case
+    () => {
+        $crate::fixed::FixedVec::<i64, usize, dsi_bitstream::prelude::LE>::builder()
+            .build(&[])
+            .unwrap()
+    };
+
+    // From list: `sfixed_vec![a, b, c]`
+    ($($elem:expr),+ $(,)?) => {
+        $crate::fixed::macros::from_slice(&[$($elem as i64),+])
+    };
+
+    // From element and length: `sfixed_vec![elem; len]`
+    ($elem:expr; $len:expr) => {
+        $crate::fixed::macros::from_repetition($elem as i64, $len)
+    };
+}
+
 // --- Macro Helper Functions (Not part of the public API) ---
 
 use crate::fixed::{

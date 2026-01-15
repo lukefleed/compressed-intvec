@@ -1,18 +1,14 @@
-//! Integration tests for the `seq_vec!` and `seq_vec_signed!` macros.
+//! Integration tests for the `seq_vec!` and `sseq_vec!` macros.
 
-use compressed_intvec::{seq_vec, seq_vec_signed};
-use compressed_intvec::seq::{LESeqVec, LESEqVec, BESEqVec, BESeqVec};
+use compressed_intvec::seq::{BESEqVec, BESeqVec, LESeqVec, SSeqVec};
+use compressed_intvec::{seq_vec, sseq_vec};
 
 // --- Tests for seq_vec! macro (unsigned) ---
 
 #[test]
 fn test_seq_vec_macro_basic() {
-    // Explicit type to guide the macro
-    let v: LESeqVec<u32> = seq_vec![
-        [1, 2, 3],
-        [4, 5],
-        []
-    ];
+    // Polymorphism: infers u32
+    let v = seq_vec![[1u32, 2, 3], [4, 5], []];
 
     assert_eq!(v.len(), 3, "seq_vec! length mismatch");
     assert_eq!(
@@ -50,10 +46,7 @@ fn test_seq_vec_macro_single_sequence() {
 
 #[test]
 fn test_seq_vec_macro_large_values() {
-    let v: BESeqVec<u32> = seq_vec![
-        [u32::MAX - 1, u32::MAX],
-        [1000000, 2000000]
-    ];
+    let v: BESeqVec<u32> = seq_vec![[u32::MAX - 1, u32::MAX], [1000000, 2000000]];
     assert_eq!(v.len(), 2, "Large values length");
     assert_eq!(
         v.get(0).unwrap().collect::<Vec<_>>(),
@@ -64,10 +57,7 @@ fn test_seq_vec_macro_large_values() {
 
 #[test]
 fn test_seq_vec_macro_with_trailing_comma() {
-    let v: LESeqVec<u32> = seq_vec![
-        [1, 2],
-        [3, 4],
-    ];
+    let v: LESeqVec<u32> = seq_vec![[1, 2], [3, 4],];
     assert_eq!(v.len(), 2, "Trailing comma should not affect length");
     assert_eq!(
         v.get(0).unwrap().collect::<Vec<_>>(),
@@ -76,41 +66,34 @@ fn test_seq_vec_macro_with_trailing_comma() {
     );
 }
 
-// --- Tests for seq_vec_signed! macro (signed) ---
+// --- Tests for sseq_vec! macro (signed) ---
 
 #[test]
-fn test_seq_vec_signed_macro_basic() {
-    let v: LESEqVec<i32> = seq_vec_signed![
-        [-1, -2],
-        [10, 20]
-    ];
+fn test_sseq_vec_macro_basic() {
+    let v: SSeqVec<i64> = sseq_vec![[-1, -2], [10, 20]];
 
-    assert_eq!(v.len(), 2, "seq_vec_signed! length");
+    assert_eq!(v.len(), 2, "sseq_vec! length");
     assert_eq!(
         v.get(0).unwrap().collect::<Vec<_>>(),
         vec![-1, -2],
-        "seq_vec_signed! first sequence"
+        "sseq_vec! first sequence"
     );
     assert_eq!(
         v.get(1).unwrap().collect::<Vec<_>>(),
         vec![10, 20],
-        "seq_vec_signed! second sequence"
+        "sseq_vec! second sequence"
     );
 }
 
 #[test]
-fn test_seq_vec_signed_macro_empty() {
-    let v: LESEqVec<i64> = seq_vec_signed![];
-    assert!(v.is_empty(), "seq_vec_signed![] should be empty");
+fn test_sseq_vec_macro_empty() {
+    let v: SSeqVec<i64> = sseq_vec![];
+    assert!(v.is_empty(), "sseq_vec![] should be empty");
 }
 
 #[test]
-fn test_seq_vec_signed_macro_mixed_values() {
-    let v: BESEqVec<i16> = seq_vec_signed![
-        [-100, -50, 0],
-        [50, 100],
-        [-1, -2, -3, -4]
-    ];
+fn test_sseq_vec_macro_mixed_values() {
+    let v: SSeqVec<i64> = sseq_vec![[-100, -50, 0], [50, 100], [-1, -2, -3, -4]];
 
     assert_eq!(v.len(), 3, "Mixed values length");
     assert_eq!(
@@ -125,6 +108,11 @@ fn test_seq_vec_signed_macro_mixed_values() {
     );
     assert_eq!(
         v.get(2).unwrap().collect::<Vec<_>>(),
+        vec![-1, -2, -3, -4],
+        "Mixed values third sequence"
+    );
+}
+
         vec![-4, -3, -2, -1],
         "Mixed values third sequence"
     );
@@ -143,10 +131,7 @@ fn test_seq_vec_signed_macro_single_sequence() {
 
 #[test]
 fn test_seq_vec_signed_macro_extreme_values() {
-    let v: BESEqVec<i64> = seq_vec_signed![
-        [i64::MIN, i64::MIN + 1],
-        [i64::MAX - 1, i64::MAX]
-    ];
+    let v: BESEqVec<i64> = seq_vec_signed![[i64::MIN, i64::MIN + 1], [i64::MAX - 1, i64::MAX]];
 
     assert_eq!(v.len(), 2, "Extreme values length");
     let first = v.get(0).unwrap().collect::<Vec<_>>();
@@ -155,10 +140,7 @@ fn test_seq_vec_signed_macro_extreme_values() {
 
 #[test]
 fn test_seq_vec_signed_macro_with_trailing_comma() {
-    let v: LESEqVec<i16> = seq_vec_signed![
-        [-10, -5],
-        [5, 10],
-    ];
+    let v: LESEqVec<i16> = seq_vec_signed![[-10, -5], [5, 10],];
     assert_eq!(v.len(), 2, "Trailing comma should not affect length");
 }
 
@@ -175,6 +157,9 @@ fn test_seq_vec_macro_le_vs_be_consistency() {
     let le_collected: Vec<Vec<u32>> = vec_le.iter().map(|s| s.collect()).collect();
     let be_collected: Vec<Vec<u32>> = vec_be.iter().map(|s| s.collect()).collect();
 
-    assert_eq!(le_collected, be_collected, "LE and BE should have same content");
+    assert_eq!(
+        le_collected, be_collected,
+        "LE and BE should have same content"
+    );
     assert_eq!(le_collected, sequences, "Content should match original");
 }

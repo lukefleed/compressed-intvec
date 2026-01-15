@@ -20,11 +20,8 @@
 ///
 /// # Note on Types
 ///
-/// All input elements are automatically cast to [`u64`]. To avoid ambiguity, it is
-/// good practice to use a type suffix on at least the first literal (e.g., `100u64`).
-///
-/// For more control over these parameters, or to use a different integer type,
-/// please use the [`IntVec::builder`](crate::variable::IntVec::builder).
+/// The macro infers the element type from the input. For explicit control over
+/// parameters, use [`IntVec::builder`](crate::variable::IntVec::builder).
 ///
 /// # Examples
 ///
@@ -36,20 +33,18 @@
 /// assert!(v.is_empty());
 /// ```
 ///
-/// Create an [`LEIntVec`] from a list of elements:
+/// Create an [`IntVec`] from a list of elements:
 /// ```
 /// # use compressed_intvec::int_vec;
-///   # use compressed_intvec::prelude::LEIntVec;
-///   let v: LEIntVec = int_vec![100u64, 200, 300, 1024];
+///   let v = int_vec![100u32, 200, 300, 1024];
 /// assert_eq!(v.len(), 4);
 /// assert_eq!(v.get(1), Some(200));
 /// ```
 ///
-/// Create an [`LEIntVec`] with a repeated element:
+/// Create an [`IntVec`] with a repeated element:
 /// ```
 /// # use compressed_intvec::int_vec;
-///   # use compressed_intvec::prelude::LEIntVec;
-///   let v: LEIntVec = int_vec![42u64; 100];
+///   let v = int_vec![42u8; 100];
 /// assert_eq!(v.len(), 100);
 /// assert_eq!(v.get(50), Some(42));
 /// ```
@@ -59,20 +54,20 @@
 #[macro_export]
 macro_rules! int_vec {
     () => {
-        $crate::variable::IntVec::builder().build(&[0u64; 0]).unwrap()
+        $crate::variable::IntVec::<u64, dsi_bitstream::prelude::LE>::builder().build(&[0u64; 0]).unwrap()
     };
     ($($elem:expr),* $(,)?) => {
-        $crate::variable::IntVec::builder()
+        $crate::variable::IntVec::<_, dsi_bitstream::prelude::LE>::builder()
             .codec($crate::variable::VariableCodecSpec::Auto)
             .k(16)
-            .build(&[$($elem as u64),*])
+            .build(&[$($elem),*])
             .unwrap()
     };
     ($elem:expr; $len:expr) => {
         {
             let mut v = ::std::vec::Vec::with_capacity($len);
-            v.resize($len, $elem as u64);
-            $crate::variable::IntVec::builder()
+            v.resize($len, $elem);
+            $crate::variable::IntVec::<_, dsi_bitstream::prelude::LE>::builder()
                 .codec($crate::variable::VariableCodecSpec::Auto)
                 .k(16)
                 .build(&v)
@@ -130,10 +125,10 @@ macro_rules! int_vec {
 #[macro_export]
 macro_rules! sint_vec {
     () => {
-        $crate::variable::IntVec::builder().build(&[0i64; 0]).unwrap()
+        $crate::variable::IntVec::<i64, dsi_bitstream::prelude::LE>::builder().build(&[0i64; 0]).unwrap()
     };
     ($($elem:expr),* $(,)?) => {
-        $crate::variable::IntVec::builder()
+        $crate::variable::IntVec::<i64, dsi_bitstream::prelude::LE>::builder()
             .codec($crate::variable::VariableCodecSpec::Auto)
             .k(16)
             .build(&[$($elem as i64),*])
@@ -143,7 +138,7 @@ macro_rules! sint_vec {
         {
             let mut v = ::std::vec::Vec::with_capacity($len);
             v.resize($len, $elem as i64);
-            $crate::variable::IntVec::builder()
+            $crate::variable::IntVec::<i64, dsi_bitstream::prelude::LE>::builder()
                 .codec($crate::variable::VariableCodecSpec::Auto)
                 .k(16)
                 .build(&v)

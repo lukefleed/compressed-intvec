@@ -26,7 +26,7 @@ pub use crate::variable::{
     BEIntVec, BESIntVec, IntVec, IntVecError, LEIntVec, LESIntVec, SIntVec, UIntVec,
 };
 
-// Add to prelude.rs:
+// --- Sequence Vector Prelude ---
 pub use crate::seq::{
     BESeqVec, LESeqVec, SSeqVec, SeqIter, SeqVec, SeqVecBuilder, SeqVecError,
     SeqVecFromIterBuilder, SeqVecIntoIter, SeqVecIter, SeqVecReader, SeqVecSeqReader, SeqVecSlice,
@@ -34,5 +34,9 @@ pub use crate::seq::{
 };
 
 // --- Macros Prelude ---
+pub use crate::fixed_vec;
 pub use crate::int_vec;
+pub use crate::seq_vec;
+pub use crate::sfixed_vec;
 pub use crate::sint_vec;
+pub use crate::sseq_vec;
