@@ -106,6 +106,16 @@ name = "bench_random_write"
 harness = false
 path = "benches/fixed/bench_random_write.rs"
 
+[[bench]]
+name = "bench_seq_access_patterns"
+harness = false
+path = "benches/seq/bench_seq_access_patterns.rs"
+
+[[bench]]
+name = "bench_seq_readers"
+harness = false
+path = "benches/seq/bench_seq_readers.rs"
+
 [features]
 default = ["parallel"]
 parallel = ["rayon"]
