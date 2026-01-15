@@ -68,6 +68,7 @@ use std::marker::PhantomData;
 #[derive(Debug, Clone)]
 pub struct SeqVecBuilder<T: Storable, E: Endianness> {
     codec_spec: VariableCodecSpec,
+    store_lengths: bool,
     _markers: PhantomData<(T, E)>,
 }
 
@@ -86,6 +87,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     pub fn new() -> Self {
         Self {
             codec_spec: VariableCodecSpec::Auto,
+            store_lengths: false,
             _markers: PhantomData,
         }
     }
@@ -105,6 +107,19 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     #[inline]
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
+        self
+    }
+
+    /// Enables or disables storing explicit sequence lengths.
+    ///
+    /// When enabled, the builder stores a compact [`FixedVec`] of per-sequence
+    /// lengths. This allows O(1) length queries and enables faster decoding
+    /// paths that avoid end-bit checks.
+    ///
+    /// The default is `false` to minimize memory usage.
+    #[inline]
+    pub fn store_lengths(mut self, store: bool) -> Self {
+        self.store_lengths = store;
         self
     }
 
@@ -214,18 +229,30 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
             let empty_offsets = FixedVec::<u64, u64, E>::builder()
                 .bit_width(BitWidth::Minimal)
                 .build(&[0u64])?;
+            let seq_lengths = if self.store_lengths {
+                Some(
+                    FixedVec::<usize, u64, E>::builder()
+                        .bit_width(BitWidth::Minimal)
+                        .build(&[])?,
+                )
+            } else {
+                None
+            };
             return Ok(SeqVec {
                 data: Vec::new(),
                 bit_offsets: empty_offsets,
+                seq_lengths,
                 encoding: resolved_codec,
                 _markers: PhantomData,
             });
         }
 
-        let (data, offsets) = encode_sequences_impl(
+        let (data, offsets, lengths) = encode_sequences_impl(
             sequences.iter(),
             resolved_codec,
             Vec::with_capacity(num_sequences + 1),
+            self.store_lengths,
+            num_sequences,
         )?;
 
         // Build the bit offsets index with minimal bit width.
@@ -233,9 +260,20 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
             .bit_width(BitWidth::Minimal)
             .build(&offsets)?;
 
+        let seq_lengths = if let Some(lengths) = lengths {
+            Some(
+                FixedVec::<usize, u64, E>::builder()
+                    .bit_width(BitWidth::Minimal)
+                    .build(&lengths)?,
+            )
+        } else {
+            None
+        };
+
         Ok(SeqVec {
             data,
             bit_offsets,
+            seq_lengths,
             encoding: resolved_codec,
             _markers: PhantomData,
         })
@@ -278,6 +316,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 pub struct SeqVecFromIterBuilder<T: Storable, E: Endianness, I> {
     iter: I,
     codec_spec: VariableCodecSpec,
+    store_lengths: bool,
     _markers: PhantomData<(T, E)>,
 }
 
@@ -297,6 +336,7 @@ where
         Self {
             iter,
             codec_spec: VariableCodecSpec::Gamma,
+            store_lengths: false,
             _markers: PhantomData,
         }
     }
@@ -312,6 +352,19 @@ where
     #[inline]
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
+        self
+    }
+
+    /// Enables or disables storing explicit sequence lengths.
+    ///
+    /// When enabled, the builder stores a compact [`FixedVec`] of per-sequence
+    /// lengths. This allows O(1) length queries and enables faster decoding
+    /// paths that avoid end-bit checks.
+    ///
+    /// The default is `false` to minimize memory usage.
+    #[inline]
+    pub fn store_lengths(mut self, store: bool) -> Self {
+        self.store_lengths = store;
         self
     }
 
@@ -359,16 +412,27 @@ where
         let (lower, _) = iter.size_hint();
         let offsets = Vec::with_capacity(lower.saturating_add(1));
 
-        let (data, offsets) = encode_sequences_impl(iter, resolved_codec, offsets)?;
+        let (data, offsets, lengths) =
+            encode_sequences_impl(iter, resolved_codec, offsets, self.store_lengths, lower)?;
 
         // Handle empty iterator case.
         if offsets.is_empty() {
             let empty_offsets = FixedVec::<u64, u64, E>::builder()
                 .bit_width(BitWidth::Minimal)
                 .build(&[0u64])?;
+            let seq_lengths = if self.store_lengths {
+                Some(
+                    FixedVec::<usize, u64, E>::builder()
+                        .bit_width(BitWidth::Minimal)
+                        .build(&[])?,
+                )
+            } else {
+                None
+            };
             return Ok(SeqVec {
                 data: Vec::new(),
                 bit_offsets: empty_offsets,
+                seq_lengths,
                 encoding: resolved_codec,
                 _markers: PhantomData,
             });
@@ -379,9 +443,20 @@ where
             .bit_width(BitWidth::Minimal)
             .build(&offsets)?;
 
+        let seq_lengths = if let Some(lengths) = lengths {
+            Some(
+                FixedVec::<usize, u64, E>::builder()
+                    .bit_width(BitWidth::Minimal)
+                    .build(&lengths)?,
+            )
+        } else {
+            None
+        };
+
         Ok(SeqVec {
             data,
             bit_offsets,
+            seq_lengths,
             encoding: resolved_codec,
             _markers: PhantomData,
         })
@@ -412,13 +487,18 @@ impl CodecSpecExt for VariableCodecSpec {
 /// This function encodes all sequences using a single resolved codec and
 /// pre-allocated offsets vector. It resolves the codec dispatch once at the
 /// beginning (via `CodecWriter`) rather than per-element, improving throughput.
+/// Return type for `encode_sequences_impl`: encoded data, bit offsets, and optional lengths.
+type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<usize>>);
+
 ///
 /// Returns the encoded data (word vector) and bit offset boundaries.
 fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
     sequences: I,
     resolved_codec: Codes,
     mut offsets: Vec<u64>,
-) -> Result<(Vec<u64>, Vec<u64>), SeqVecError>
+    store_lengths: bool,
+    lengths_capacity: usize,
+) -> Result<EncodeSequencesResult, SeqVecError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<[T]>,
@@ -433,11 +513,23 @@ where
     // This eliminates per-element match overhead for common codecs.
     let code_writer = CodecWriter::new(resolved_codec);
 
+    // Prepare optional length storage.
+    let mut lengths = if store_lengths {
+        Some(Vec::with_capacity(lengths_capacity))
+    } else {
+        None
+    };
+
     // Process each sequence, recording bit offsets at boundaries.
     for seq in sequences {
+        let seq_ref = seq.as_ref();
         offsets.push(current_bit_offset);
 
-        for elem in seq.as_ref() {
+        if let Some(ref mut lengths) = lengths {
+            lengths.push(seq_ref.len());
+        }
+
+        for elem in seq_ref {
             let bits_written = code_writer.write(&mut writer, elem.to_word())?;
             current_bit_offset += bits_written as u64;
         }
@@ -451,7 +543,7 @@ where
     let mut data = writer.into_inner()?.into_inner();
     data.shrink_to_fit();
 
-    Ok((data, offsets))
+    Ok((data, offsets, lengths))
 }
 
 // --- Integration with SeqVec ---
@@ -533,6 +625,29 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
         SeqVec {
             data,
             bit_offsets,
+            seq_lengths: None,
+            encoding,
+            _markers: PhantomData,
+        }
+    }
+
+    /// Creates a `SeqVec` from raw parts with optional stored lengths.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `data`, `bit_offsets`, and `seq_lengths`
+    /// (if present) are consistent with each other and the codec.
+    #[inline]
+    pub unsafe fn from_raw_parts_with_lengths(
+        data: Vec<u64>,
+        bit_offsets: crate::fixed::FixedVec<u64, u64, E, Vec<u64>>,
+        seq_lengths: Option<crate::fixed::FixedVec<usize, u64, E, Vec<u64>>>,
+        encoding: dsi_bitstream::prelude::Codes,
+    ) -> Self {
+        SeqVec {
+            data,
+            bit_offsets,
+            seq_lengths,
             encoding,
             _markers: PhantomData,
         }

@@ -20,6 +20,7 @@ use dsi_bitstream::{
     impls::{BufBitReader, MemWordReader},
     prelude::{BitRead, BitSeek, Endianness},
 };
+use std::cell::Cell;
 use std::marker::PhantomData;
 
 /// Type alias for the bit reader used internally by [`SeqVec`] accessors.
@@ -51,9 +52,9 @@ pub(crate) type SeqVecBitReader<'a, E> =
 /// - [`std::iter::FusedIterator`]: Guarantees that after returning `None`, all subsequent
 ///   calls return `None`.
 ///
-/// Does **not** implement [`ExactSizeIterator`] because the element count is
-/// unknown without fully decoding the sequence. The [`size_hint`](Iterator::size_hint)
-/// method provides bounds based on the remaining bits.
+/// Implements [`ExactSizeIterator`] when explicit lengths are available. If
+/// lengths are not stored, computing an exact size hint requires decoding the
+/// remaining elements to count them.
 ///
 /// ## Examples
 ///
@@ -76,6 +77,8 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
+    /// The underlying data buffer for optional length computations.
+    data: &'a [u64],
     /// The bitstream reader, positioned at the current element.
     reader: SeqVecBitReader<'a, E>,
     /// The hybrid codec reader for decoding elements.
@@ -84,9 +87,15 @@ where
     code_reader: CodecReader<'a, E>,
     /// The bit position at which this sequence ends (exclusive).
     end_bit: u64,
+    /// The codec used for this sequence.
+    encoding: Codes,
     /// Cached bit position used only for the `size_hint()` method.
     /// This avoids calling the mutable `bit_pos()` method during non-mutable size queries.
     cached_bit_pos: u64,
+    /// Optional remaining length of the sequence.
+    ///
+    /// When available, this enables exact size hints without extra decoding.
+    remaining_len: Cell<Option<usize>>,
     /// Marker for the element type.
     _marker: PhantomData<T>,
 }
@@ -120,12 +129,55 @@ where
         let code_reader = CodecReader::new(encoding);
 
         Self {
+            data,
             reader,
             code_reader,
             end_bit,
+            encoding,
             cached_bit_pos: start_bit,
+            remaining_len: Cell::new(None),
             _marker: PhantomData,
         }
+    }
+
+    /// Creates a new iterator over a sequence with a known length.
+    ///
+    /// This constructor is used when explicit sequence lengths are stored,
+    /// enabling exact size hints without additional decoding.
+    #[inline]
+    pub(crate) fn new_with_len(
+        data: &'a [u64],
+        start_bit: u64,
+        end_bit: u64,
+        encoding: Codes,
+        len: Option<usize>,
+    ) -> Self {
+        let iter = Self::new(data, start_bit, end_bit, encoding);
+        if let Some(len) = len {
+            iter.remaining_len.set(Some(len));
+        }
+        iter
+    }
+
+    /// Returns the remaining length of the sequence, computing it if necessary.
+    #[inline]
+    fn remaining_len(&self) -> usize {
+        if let Some(len) = self.remaining_len.get() {
+            return len;
+        }
+
+        let mut reader = SeqVecBitReader::<E>::new(MemWordReader::new(self.data));
+        let _ = reader.set_bit_pos(self.cached_bit_pos);
+        let code_reader = CodecReader::new(self.encoding);
+
+        let mut count = 0usize;
+        while reader.bit_pos().unwrap_or(self.cached_bit_pos) < self.end_bit {
+            let _ = code_reader.read(&mut reader).unwrap();
+            count += 1;
+        }
+
+        self.remaining_len.set(Some(count));
+        count
     }
 
     /// Returns the ending bit position for this sequence (exclusive).
@@ -150,34 +202,42 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         // Termination check: Query current bit position and compare against end.
         // This branch is highly predictable (false until sequence ends).
-        let current_bit = self.reader.bit_pos().unwrap_or(0);
+        let current_bit = self.reader.bit_pos().unwrap_or(self.cached_bit_pos);
         if current_bit >= self.end_bit {
             return None;
         }
-
-        // Update cached position for size_hint() (called only on immutable reference).
-        self.cached_bit_pos = current_bit;
 
         // Decode the next element using the optimized codec reader.
         // CodecReader provides fast-path dispatch via function pointers for
         // common codecs, with fallback to dynamic dispatch for uncommon parameters.
         let word = self.code_reader.read(&mut self.reader).unwrap();
 
+        // Update cached position for size_hint() using the reader's state.
+        self.cached_bit_pos = self.reader.bit_pos().unwrap_or(current_bit);
+
+        if let Some(len) = self.remaining_len.get() {
+            self.remaining_len.set(Some(len.saturating_sub(1)));
+        }
+
         Some(T::from_word(word))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let bits_remaining = self.end_bit.saturating_sub(self.cached_bit_pos);
+        let remaining = self.remaining_len();
+        (remaining, Some(remaining))
+    }
+}
 
-        if bits_remaining == 0 {
-            return (0, Some(0));
-        }
-
-        // Lower bound: at least one element exists if any bits remain.
-        // Upper bound: maximum elements assuming each uses 1 bit (minimum for
-        // unary/gamma codes encoding the value 0).
-        (1, Some(bits_remaining as usize))
+impl<'a, T: Storable, E: Endianness> ExactSizeIterator for SeqIter<'a, T, E>
+where
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    #[inline]
+    fn len(&self) -> usize {
+        self.remaining_len()
     }
 }
 
@@ -223,6 +283,8 @@ where
     data: &'a [u64],
     /// Reference to the bit offsets index.
     bit_offsets: &'a FixedVec<u64, u64, E, B>,
+    /// Optional reference to stored sequence lengths.
+    seq_lengths: Option<&'a FixedVec<usize, u64, E, Vec<u64>>>,
     /// The codec used for compression.
     encoding: Codes,
     /// Current front index (for forward iteration).
@@ -249,12 +311,14 @@ where
     pub(crate) fn new(
         data: &'a [u64],
         bit_offsets: &'a FixedVec<u64, u64, E, B>,
+        seq_lengths: Option<&'a FixedVec<usize, u64, E, Vec<u64>>>,
         encoding: Codes,
         num_sequences: usize,
     ) -> Self {
         Self {
             data,
             bit_offsets,
+            seq_lengths,
             encoding,
             front: 0,
             back: num_sequences,
@@ -287,10 +351,19 @@ where
         // num_sequences + 1 elements, so indices front and front + 1 are valid.
         let start_bit = unsafe { self.bit_offsets.get_unchecked(self.front) };
         let end_bit = unsafe { self.bit_offsets.get_unchecked(self.front + 1) };
+        let len = self
+            .seq_lengths
+            .map(|lengths| unsafe { lengths.get_unchecked(self.front) });
 
         self.front += 1;
 
-        Some(SeqIter::new(self.data, start_bit, end_bit, self.encoding))
+        Some(SeqIter::new_with_len(
+            self.data,
+            start_bit,
+            end_bit,
+            self.encoding,
+            len,
+        ))
     }
 
     #[inline]
@@ -334,8 +407,17 @@ where
         // index, and back + 1 <= original num_sequences.
         let start_bit = unsafe { self.bit_offsets.get_unchecked(self.back) };
         let end_bit = unsafe { self.bit_offsets.get_unchecked(self.back + 1) };
+        let len = self
+            .seq_lengths
+            .map(|lengths| unsafe { lengths.get_unchecked(self.back) });
 
-        Some(SeqIter::new(self.data, start_bit, end_bit, self.encoding))
+        Some(SeqIter::new_with_len(
+            self.data,
+            start_bit,
+            end_bit,
+            self.encoding,
+            len,
+        ))
     }
 
     #[inline]
@@ -426,6 +508,8 @@ where
     data: &'static [u64],
     /// The codec used for decoding.
     encoding: Codes,
+    /// Optional stored sequence lengths.
+    seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
     /// This field owns the data buffer, ensuring it lives as long as the iterator.
     _data_owner: Vec<u64>,
     /// This field owns the bit offsets buffer.
@@ -446,6 +530,7 @@ where
     pub(crate) fn new(vec: super::SeqVec<T, E, Vec<u64>>) -> Self {
         let encoding = vec.encoding;
         let num_sequences = vec.num_sequences();
+        let seq_lengths = vec.seq_lengths;
 
         // Extract the owned buffers.
         //
@@ -470,6 +555,7 @@ where
             bit_offsets: bit_offsets_ref,
             data: data_ref,
             encoding,
+            seq_lengths,
             _data_owner,
             _bit_offsets_owner,
             _markers: PhantomData,
@@ -495,10 +581,20 @@ where
 
         let start_bit = self.bit_offsets[self.current_index];
         let end_bit = self.bit_offsets[self.current_index + 1];
+        let len = self
+            .seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(self.current_index) });
 
         self.current_index += 1;
 
-        Some(SeqIter::new(self.data, start_bit, end_bit, self.encoding))
+        Some(SeqIter::new_with_len(
+            self.data,
+            start_bit,
+            end_bit,
+            self.encoding,
+            len,
+        ))
     }
 
     #[inline]
@@ -541,7 +637,18 @@ where
         let start_bit = self.bit_offsets[self.num_sequences];
         let end_bit = self.bit_offsets[self.num_sequences + 1];
 
-        Some(SeqIter::new(self.data, start_bit, end_bit, self.encoding))
+        let len = self
+            .seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(self.num_sequences) });
+
+        Some(SeqIter::new_with_len(
+            self.data,
+            start_bit,
+            end_bit,
+            self.encoding,
+            len,
+        ))
     }
 }
 

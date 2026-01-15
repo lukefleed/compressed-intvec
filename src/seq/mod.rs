@@ -36,13 +36,18 @@
 //!
 //! ## Sequence Length
 //!
-//! Sequence lengths are **not stored explicitly**. The iterator for a sequence
+//! Sequence lengths are **not stored by default**. The iterator for a sequence
 //! terminates when the current bit position reaches the start of the next
 //! sequence. This means:
 //!
 //! - Retrieving a sequence is O(length) for decoding — unavoidable.
-//! - Computing sequence length requires full iteration. If O(1) length queries
-//!   are critical, consider caching lengths externally.
+//! - Computing sequence length requires full iteration unless lengths are stored.
+//!
+//! You can opt-in to storing explicit lengths via
+//! [`SeqVecBuilder::store_lengths`](crate::seq::SeqVecBuilder::store_lengths).
+//! When enabled, O(1) length queries become available via
+//! [`SeqVec::sequence_len`](crate::seq::SeqVec::sequence_len), and decoding
+//! can avoid the end-bit check in hot loops.
 //!
 //! ## Immutability
 //!
@@ -118,10 +123,11 @@ pub use slice::SeqVecSlice;
 // Re-export codec spec for convenience.
 pub use crate::variable::codec::VariableCodecSpec;
 
+use crate::common::codec_reader::CodecReader;
 use crate::fixed::{Error as FixedVecError, FixedVec};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
-    dispatch::{Codes, CodesRead},
+    dispatch::{Codes, CodesRead, StaticCodeRead},
     impls::{BufBitWriter, MemWordWriterVec},
     prelude::{BitRead, BitSeek, BitWrite, CodesWrite, Endianness, BE, LE},
 };
@@ -214,6 +220,10 @@ pub struct SeqVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// containing the total bit length.
     /// Uses the same endianness `E` as the struct for design consistency.
     bit_offsets: FixedVec<u64, u64, E, B>,
+    /// Optional per-sequence lengths stored in a compact fixed-width vector.
+    ///
+    /// This is always owned to avoid lifetime complexity for borrowed data.
+    seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
     /// The compression codec used for all elements.
     encoding: Codes,
     /// Zero-sized markers for the generic type parameters.
@@ -250,6 +260,11 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for SeqVec<T
         // Add heap-allocated memory for the bit_offsets index.
         total +=
             self.bit_offsets.mem_size(flags) - core::mem::size_of::<FixedVec<u64, u64, E, B>>();
+        // Add heap-allocated memory for optional sequence lengths.
+        if let Some(lengths) = &self.seq_lengths {
+            total +=
+                lengths.mem_size(flags) - core::mem::size_of::<FixedVec<usize, u64, E, Vec<u64>>>();
+        }
         total
     }
 }
@@ -375,6 +390,19 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
             flags,
         )?;
 
+        if let Some(lengths) = &self.seq_lengths {
+            lengths._mem_dbg_depth_on(
+                writer,
+                total_size,
+                max_depth,
+                prefix,
+                Some("seq_lengths"),
+                false,
+                core::mem::size_of_val(lengths),
+                flags,
+            )?;
+        }
+
         let code_wrapper = CodeWrapper(&self.encoding);
         code_wrapper._mem_dbg_depth_on(
             writer,
@@ -495,6 +523,48 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
         Ok(Self {
             data,
             bit_offsets,
+            seq_lengths: None,
+            encoding,
+            _markers: PhantomData,
+        })
+    }
+
+    /// Creates a [`SeqVec`] from raw components with optional stored lengths.
+    ///
+    /// The `seq_lengths` parameter must be consistent with `bit_offsets` when
+    /// provided (lengths count must equal `num_sequences()`).
+    pub fn from_parts_with_lengths(
+        data: B,
+        bit_offsets_data: B,
+        bit_offsets_len: usize,
+        bit_offsets_num_bits: usize,
+        seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
+        encoding: Codes,
+    ) -> Result<Self, SeqVecError> {
+        if bit_offsets_len == 0 {
+            return Err(SeqVecError::InvalidParameters(
+                "bit_offsets must have at least one entry (the sentinel)".to_string(),
+            ));
+        }
+
+        if let Some(lengths) = &seq_lengths {
+            if lengths.len() + 1 != bit_offsets_len {
+                return Err(SeqVecError::InvalidParameters(
+                    "seq_lengths length must match number of sequences".to_string(),
+                ));
+            }
+        }
+
+        let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
+            bit_offsets_data,
+            bit_offsets_len,
+            bit_offsets_num_bits,
+        )?;
+
+        Ok(Self {
+            data,
+            bit_offsets,
+            seq_lengths,
             encoding,
             _markers: PhantomData,
         })
@@ -515,6 +585,29 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
         Self {
             data,
             bit_offsets,
+            seq_lengths: None,
+            encoding,
+            _markers: PhantomData,
+        }
+    }
+
+    /// Creates a [`SeqVec`] from pre-built components with optional lengths
+    /// without validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure all components are consistent and valid.
+    #[inline]
+    pub unsafe fn from_parts_with_lengths_unchecked(
+        data: B,
+        bit_offsets: FixedVec<u64, u64, E, B>,
+        seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
+        encoding: Codes,
+    ) -> Self {
+        Self {
+            data,
+            bit_offsets,
+            seq_lengths,
             encoding,
             _markers: PhantomData,
         }
@@ -555,6 +648,21 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
     #[inline]
     pub fn bit_offsets_ref(&self) -> &FixedVec<u64, u64, E, B> {
         &self.bit_offsets
+    }
+
+    /// Returns the length of sequence `index` if explicit lengths are stored.
+    ///
+    /// Returns `None` if `index` is out of bounds or if lengths were not
+    /// stored at construction time.
+    #[inline]
+    pub fn sequence_len(&self, index: usize) -> Option<usize> {
+        if index >= self.num_sequences() {
+            return None;
+        }
+
+        self.seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(index) })
     }
 
     /// Returns the total number of bits in the compressed data.
@@ -660,8 +768,12 @@ where
 
         let start_bit = self.sequence_start_bit_unchecked(index);
         let end_bit = self.sequence_end_bit_unchecked(index);
+        let len = self
+            .seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(index) });
 
-        SeqIter::new(self.data.as_ref(), start_bit, end_bit, self.encoding)
+        SeqIter::new_with_len(self.data.as_ref(), start_bit, end_bit, self.encoding, len)
     }
 
     /// Returns the elements of sequence `index` as a newly allocated `Vec`.
@@ -716,25 +828,57 @@ where
 
         // SAFETY: Bounds check has been performed.
         let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
-        let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
 
         buf.clear();
 
         // Create reader and codec dispatcher once, then decode all elements
         // directly into the buffer without creating an intermediate SeqIter.
         // This avoids iterator overhead and enables better compiler optimization.
-        let mut reader = SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
-            self.data.as_ref(),
-        ));
+        let mut reader =
+            SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()));
         let _ = reader.set_bit_pos(start_bit);
+        let code_reader = CodecReader::new(self.encoding);
 
-        // Hot loop: Decode elements until reaching the sequence boundary.
-        while reader.bit_pos().unwrap_or(start_bit) < end_bit {
-            let word = self.encoding.read(&mut reader).unwrap();
-            buf.push(T::from_word(word));
+        if let Some(lengths) = &self.seq_lengths {
+            let count = unsafe { lengths.get_unchecked(index) };
+            self.decode_counted(&mut reader, &code_reader, buf, count);
+        } else {
+            let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
+            self.decode_until(&mut reader, &code_reader, buf, end_bit);
         }
 
         Some(buf.len())
+    }
+
+    /// Decodes a known number of elements into `buf`.
+    #[inline(always)]
+    fn decode_counted<'a>(
+        &self,
+        reader: &mut SeqVecBitReader<'a, E>,
+        code_reader: &CodecReader<'a, E>,
+        buf: &mut Vec<T>,
+        count: usize,
+    ) {
+        buf.reserve(count);
+        for _ in 0..count {
+            let word = code_reader.read(reader).unwrap();
+            buf.push(T::from_word(word));
+        }
+    }
+
+    /// Decodes elements until the reader reaches `end_bit`.
+    #[inline(always)]
+    fn decode_until<'a>(
+        &self,
+        reader: &mut SeqVecBitReader<'a, E>,
+        code_reader: &CodecReader<'a, E>,
+        buf: &mut Vec<T>,
+        end_bit: u64,
+    ) {
+        while reader.bit_pos().unwrap_or(end_bit) < end_bit {
+            let word = code_reader.read(reader).unwrap();
+            buf.push(T::from_word(word));
+        }
     }
 
     /// Returns an iterator over all sequences.
@@ -759,6 +903,7 @@ where
         SeqVecIter::new(
             self.data.as_ref(),
             &self.bit_offsets,
+            self.seq_lengths.as_ref(),
             self.encoding,
             self.num_sequences(),
         )

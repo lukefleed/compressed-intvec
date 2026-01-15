@@ -105,6 +105,7 @@ struct SeqVecSerializeProxy<'a> {
     bit_offsets_data: &'a [u64],
     bit_offsets_len: usize,
     bit_offsets_bit_width: usize,
+    seq_lengths: Option<SeqLengthsSerializeProxy<'a>>,
     encoding: CodesSerde,
 }
 
@@ -118,7 +119,24 @@ struct SeqVecDeserializeProxy {
     bit_offsets_data: Vec<u64>,
     bit_offsets_len: usize,
     bit_offsets_bit_width: usize,
+    seq_lengths: Option<SeqLengthsDeserializeProxy>,
     encoding: CodesSerde,
+}
+
+/// A proxy struct for serializing sequence lengths.
+#[derive(Serialize)]
+struct SeqLengthsSerializeProxy<'a> {
+    data: &'a [u64],
+    len: usize,
+    bit_width: usize,
+}
+
+/// A proxy struct for deserializing sequence lengths.
+#[derive(Deserialize)]
+struct SeqLengthsDeserializeProxy {
+    data: Vec<u64>,
+    len: usize,
+    bit_width: usize,
 }
 
 impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Serialize for SeqVec<T, E, B> {
@@ -131,6 +149,14 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Serialize for SeqVec<T, E, B> 
             bit_offsets_data: self.bit_offsets.as_limbs(),
             bit_offsets_len: self.bit_offsets.len(),
             bit_offsets_bit_width: self.bit_offsets.bit_width(),
+            seq_lengths: self
+                .seq_lengths
+                .as_ref()
+                .map(|lengths| SeqLengthsSerializeProxy {
+                    data: lengths.as_limbs(),
+                    len: lengths.len(),
+                    bit_width: lengths.bit_width(),
+                }),
             encoding: self.encoding.into(),
         };
         proxy.serialize(serializer)
@@ -176,7 +202,50 @@ impl<'de, T: Storable + 'static, E: Endianness> Deserialize<'de> for SeqVec<T, E
             )
         };
 
+        let seq_lengths = if let Some(lengths_proxy) = proxy.seq_lengths {
+            if lengths_proxy.bit_width > word_size_bits {
+                return Err(de::Error::custom(format!(
+                    "Deserialized seq_lengths bit_width ({}) cannot be greater than word size ({})",
+                    lengths_proxy.bit_width, word_size_bits
+                )));
+            }
+
+            let required_bits = lengths_proxy.len.saturating_mul(lengths_proxy.bit_width);
+            let required_data_words = required_bits.div_ceil(word_size_bits);
+
+            if lengths_proxy.data.len() < required_data_words {
+                return Err(de::Error::custom(format!(
+                    "Deserialized seq_lengths buffer is too small. It has {} words, but at least {} are required.",
+                    lengths_proxy.data.len(),
+                    required_data_words
+                )));
+            }
+
+            if lengths_proxy.len + 1 != proxy.bit_offsets_len {
+                return Err(de::Error::custom(
+                    "Deserialized seq_lengths length must match number of sequences",
+                ));
+            }
+
+            Some(unsafe {
+                FixedVec::new_unchecked(
+                    lengths_proxy.data,
+                    lengths_proxy.len,
+                    lengths_proxy.bit_width,
+                )
+            })
+        } else {
+            None
+        };
+
         // Reconstruct the SeqVec
-        Ok(unsafe { SeqVec::from_raw_parts(proxy.data, bit_offsets, proxy.encoding.into()) })
+        Ok(unsafe {
+            SeqVec::from_raw_parts_with_lengths(
+                proxy.data,
+                bit_offsets,
+                seq_lengths,
+                proxy.encoding.into(),
+            )
+        })
     }
 }

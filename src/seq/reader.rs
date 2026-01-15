@@ -174,11 +174,18 @@ where
 
         // Create a fresh iterator for this sequence. The iterator owns its own
         // bitstream reader, so it can outlive this function call.
-        SeqIter::new(
+        let len = self
+            .seqvec
+            .seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(index) });
+
+        SeqIter::new_with_len(
             self.seqvec.data.as_ref(),
             start_bit,
             end_bit,
             self.seqvec.encoding,
+            len,
         )
     }
 
@@ -203,6 +210,12 @@ where
     #[inline]
     pub fn get_vec(&self, index: usize) -> Option<Vec<T>> {
         self.get(index).map(|iter| {
+            if let Some(len) = self.seqvec.sequence_len(index) {
+                let mut buf = Vec::with_capacity(len);
+                buf.extend(iter);
+                return buf;
+            }
+
             // Estimate capacity: assume ~4 bits per element on average
             // (reasonable for common codecs like Gamma, Delta, Rice).
             let bit_range = unsafe {
@@ -256,21 +269,31 @@ where
 
         // SAFETY: Bounds check has been performed.
         let start_bit = unsafe { self.seqvec.sequence_start_bit_unchecked(index) };
-        let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
 
         buf.clear();
 
         // Always seek to the start position (random access pattern).
         let _ = self.reader.set_bit_pos(start_bit);
 
-        // Decode all elements in the sequence using the reusable reader and codec dispatcher.
-        // Track current position separately since we can't rely on reader.bit_pos().
-        let mut current_pos = start_bit;
-        while current_pos < end_bit {
-            let word = self.code_reader.read(&mut self.reader).unwrap();
-            buf.push(T::from_word(word));
-            // Update position estimate after read
-            current_pos = self.reader.bit_pos().unwrap_or(current_pos);
+        if let Some(lengths) = &self.seqvec.seq_lengths {
+            let count = unsafe { lengths.get_unchecked(index) };
+            buf.reserve(count);
+            for _ in 0..count {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                buf.push(T::from_word(word));
+            }
+        } else {
+            let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
+
+            // Decode all elements in the sequence using the reusable reader and codec dispatcher.
+            // Track current position separately since we can't rely on reader.bit_pos().
+            let mut current_pos = start_bit;
+            while current_pos < end_bit {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                buf.push(T::from_word(word));
+                // Update position estimate after read
+                current_pos = self.reader.bit_pos().unwrap_or(current_pos);
+            }
         }
 
         Some(buf.len())

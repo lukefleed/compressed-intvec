@@ -275,9 +275,6 @@ where
     #[inline]
     pub fn get_into(&mut self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
         let start_bit = self.seqvec.sequence_start_bit(index)?;
-        // SAFETY: If start_bit is Some, then index is valid, so index+1 is a
-        // valid index into bit_offsets (which has N+1 elements).
-        let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
 
         // Clear the buffer for fresh data. The allocation is preserved.
         buf.clear();
@@ -289,14 +286,27 @@ where
             self.reader.set_bit_pos(start_bit).unwrap();
         }
 
-        // Hot loop: Decode elements until we reach the sequence boundary.
-        // Performance critical: Use reader.bit_pos() directly in the loop
-        // condition instead of maintaining a separate tracking variable.
-        // This reduces memory traffic - we query the reader's state instead
-        // of writing to self.current_bit_pos on every iteration.
-        while self.reader.bit_pos().unwrap() < end_bit {
-            let word = self.code_reader.read(&mut self.reader).unwrap();
-            buf.push(T::from_word(word));
+        if let Some(lengths) = &self.seqvec.seq_lengths {
+            let count = unsafe { lengths.get_unchecked(index) } as usize;
+            buf.reserve(count);
+            for _ in 0..count {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                buf.push(T::from_word(word));
+            }
+        } else {
+            // SAFETY: If start_bit is Some, then index is valid, so index+1 is a
+            // valid index into bit_offsets (which has N+1 elements).
+            let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
+
+            // Hot loop: Decode elements until we reach the sequence boundary.
+            // Performance critical: Use reader.bit_pos() directly in the loop
+            // condition instead of maintaining a separate tracking variable.
+            // This reduces memory traffic - we query the reader's state instead
+            // of writing to self.current_bit_pos on every iteration.
+            while self.reader.bit_pos().unwrap() < end_bit {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                buf.push(T::from_word(word));
+            }
         }
 
         // Update state once after loop completion. This single write is much
@@ -338,6 +348,12 @@ where
     /// ```
     #[inline]
     pub fn get_vec(&mut self, index: usize) -> Option<Vec<T>> {
+        if let Some(len) = self.seqvec.sequence_len(index) {
+            let mut buf = Vec::with_capacity(len);
+            self.get_into(index, &mut buf)?;
+            return Some(buf);
+        }
+
         let start_bit = self.seqvec.sequence_start_bit(index)?;
         // SAFETY: If start_bit is Some, then index is valid.
         let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };

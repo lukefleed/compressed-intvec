@@ -95,8 +95,7 @@ fn test_builder_empty_sequences() {
 
 #[test]
 fn test_builder_mixed_empty_non_empty() {
-    let sequences: Vec<Vec<u32>> =
-        vec![vec![1, 2], vec![], vec![3, 4, 5], vec![], vec![6]];
+    let sequences: Vec<Vec<u32>> = vec![vec![1, 2], vec![], vec![3, 4, 5], vec![], vec![6]];
 
     let vec = SeqVec::builder()
         .codec(VariableCodecSpec::Delta)
@@ -149,6 +148,31 @@ fn test_builder_with_different_types() {
             .build(&sequences);
         assert!(vec.is_ok());
     }
+}
+
+#[test]
+fn test_builder_store_lengths() {
+    let sequences: Vec<Vec<u32>> = vec![vec![1, 2], vec![], vec![3, 4, 5]];
+
+    let vec_with_lengths = SeqVec::builder()
+        .codec(VariableCodecSpec::Gamma)
+        .store_lengths(true)
+        .build(&sequences)
+        .unwrap();
+
+    assert_eq!(vec_with_lengths.sequence_len(0), Some(2));
+    assert_eq!(vec_with_lengths.sequence_len(1), Some(0));
+    assert_eq!(vec_with_lengths.sequence_len(2), Some(3));
+    assert_eq!(vec_with_lengths.sequence_len(3), None);
+
+    let vec_without_lengths = SeqVec::builder()
+        .codec(VariableCodecSpec::Gamma)
+        .store_lengths(false)
+        .build(&sequences)
+        .unwrap();
+
+    assert_eq!(vec_without_lengths.sequence_len(0), None);
+    assert_eq!(vec_without_lengths.sequence_len(2), None);
 }
 
 // --- SeqVecFromIterBuilder Tests ---
