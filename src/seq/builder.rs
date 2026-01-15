@@ -497,7 +497,7 @@ fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
     resolved_codec: Codes,
     mut offsets: Vec<u64>,
     store_lengths: bool,
-    lengths_capacity: usize,
+    lengths_capacity_hint: usize,
 ) -> Result<EncodeSequencesResult, SeqVecError>
 where
     I: IntoIterator<Item = S>,
@@ -515,7 +515,7 @@ where
 
     // Prepare optional length storage.
     let mut lengths = if store_lengths {
-        Some(Vec::with_capacity(lengths_capacity))
+        Some(Vec::with_capacity(lengths_capacity_hint))
     } else {
         None
     };

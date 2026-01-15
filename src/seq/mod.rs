@@ -650,10 +650,17 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
         &self.bit_offsets
     }
 
+    /// Returns `true` if explicit sequence lengths were stored at construction time.
+    #[inline]
+    pub fn has_stored_lengths(&self) -> bool {
+        self.seq_lengths.is_some()
+    }
+
     /// Returns the length of sequence `index` if explicit lengths are stored.
     ///
     /// Returns `None` if `index` is out of bounds or if lengths were not
-    /// stored at construction time.
+    /// stored at construction time. Use [`has_stored_lengths`](Self::has_stored_lengths)
+    /// to distinguish between these cases.
     #[inline]
     pub fn sequence_len(&self, index: usize) -> Option<usize> {
         if index >= self.num_sequences() {
@@ -875,7 +882,7 @@ where
         buf: &mut Vec<T>,
         end_bit: u64,
     ) {
-        while reader.bit_pos().unwrap_or(end_bit) < end_bit {
+        while reader.bit_pos().unwrap() < end_bit {
             let word = code_reader.read(reader).unwrap();
             buf.push(T::from_word(word));
         }
