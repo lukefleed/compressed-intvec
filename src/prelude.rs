@@ -26,6 +26,13 @@ pub use crate::variable::{
     BEIntVec, BESIntVec, IntVec, IntVecError, LEIntVec, LESIntVec, SIntVec, UIntVec,
 };
 
+// Add to prelude.rs:
+pub use crate::seq::{
+    BESeqVec, LESeqVec, SSeqVec, SeqIter, SeqVec, SeqVecBuilder, SeqVecError,
+    SeqVecFromIterBuilder, SeqVecIntoIter, SeqVecIter, SeqVecReader, SeqVecSeqReader, SeqVecSlice,
+    USeqVec,
+};
+
 // --- Macros Prelude ---
 pub use crate::int_vec;
 pub use crate::sint_vec;
