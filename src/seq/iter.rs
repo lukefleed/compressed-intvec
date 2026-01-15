@@ -84,8 +84,9 @@ where
     code_reader: CodecReader<'a, E>,
     /// The bit position at which this sequence ends (exclusive).
     end_bit: u64,
-    /// The current bit position within the bitstream (tracks progress).
-    current_bit: u64,
+    /// Cached bit position used only for the `size_hint()` method.
+    /// This avoids calling the mutable `bit_pos()` method during non-mutable size queries.
+    cached_bit_pos: u64,
     /// Marker for the element type.
     _marker: PhantomData<T>,
 }
@@ -122,7 +123,7 @@ where
             reader,
             code_reader,
             end_bit,
-            current_bit: start_bit,
+            cached_bit_pos: start_bit,
             _marker: PhantomData,
         }
     }
@@ -147,28 +148,27 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        // Termination check: compare current position against end boundary.
+        // Termination check: Query current bit position and compare against end.
         // This branch is highly predictable (false until sequence ends).
-        if self.current_bit >= self.end_bit {
+        let current_bit = self.reader.bit_pos().unwrap_or(0);
+        if current_bit >= self.end_bit {
             return None;
         }
+
+        // Update cached position for size_hint() (called only on immutable reference).
+        self.cached_bit_pos = current_bit;
 
         // Decode the next element using the optimized codec reader.
         // CodecReader provides fast-path dispatch via function pointers for
         // common codecs, with fallback to dynamic dispatch for uncommon parameters.
         let word = self.code_reader.read(&mut self.reader).unwrap();
 
-        // Update current bit position after reading. Since the read operation
-        // advances the reader's internal position, we estimate the new position
-        // by querying the reader (this is infallible for in-memory readers).
-        self.current_bit = self.reader.bit_pos().unwrap();
-
         Some(T::from_word(word))
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let bits_remaining = self.end_bit.saturating_sub(self.current_bit);
+        let bits_remaining = self.end_bit.saturating_sub(self.cached_bit_pos);
 
         if bits_remaining == 0 {
             return (0, Some(0));

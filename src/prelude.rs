@@ -29,7 +29,7 @@ pub use crate::variable::{
 // --- Sequence Vector Prelude ---
 pub use crate::seq::{
     BESeqVec, LESeqVec, SSeqVec, SeqIter, SeqVec, SeqVecBuilder, SeqVecError,
-    SeqVecFromIterBuilder, SeqVecIntoIter, SeqVecIter, SeqVecReader, SeqVecSeqReader, SeqVecSlice,
+    SeqVecFromIterBuilder, SeqVecIntoIter, SeqVecIter, SeqVecReader, SeqVecSlice,
     USeqVec,
 };
 

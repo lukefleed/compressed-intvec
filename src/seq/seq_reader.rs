@@ -16,8 +16,26 @@
 //!    sequences that are contiguous or nearby in the bitstream.
 //! 3. **Reuses the codec dispatcher** ([`CodecReader`]) to amortize setup costs.
 //!
-//! This makes it highly efficient for graph traversal algorithms (BFS, DFS) where
-//! sequences (adjacency lists) are accessed in a forward or clustered pattern.
+//! ## Seek Avoidance Optimization
+//!
+//! The seek-skipping behavior (avoiding `set_bit_pos()` when the reader is
+//! already at the target position) provides **negligible benefit in practice**.
+//! Benchmark analysis shows:
+//!
+//! - A seek operation costs ~3 nanoseconds.
+//! - Typical decode times range from 45–450 nanoseconds per sequence.
+//! - The seek overhead represents **0.7% to 6.7%** of total time, and often
+//!   less due to instruction-level parallelism.
+//! - Across sequential, clustered, and random access patterns, throughput
+//!   differs by **less than 2%** compared to [`SeqVecReader`].
+//!
+//! This optimization is only meaningfully beneficial for extremely short
+//! sequences (1–2 elements), which are atypical in real-world graph or
+//! adjacency list workloads.
+//!
+//! The type is retained for **API consistency** with the `variable` module
+//! and as a building block for potential future optimizations that might
+//! provide greater benefit.
 //!
 //! ## Comparison with [`SeqVecReader`]
 //!

@@ -1,8 +1,8 @@
 // benches/seq/bench_seq_access_patterns.rs
 //
-// Benchmarks for SeqVec access patterns. Compares SeqVecReader (stateless)
-// against SeqVecSeqReader (stateful) to measure the benefit of state tracking
-// when accessing sequences with spatial locality.
+// Benchmarks for SeqVec access patterns. Compares different access patterns
+// (sequential, clustered, random) to measure the impact of spatial locality
+// on compressed sequence decoding performance.
 
 use compressed_intvec::seq::{LESeqVec, SeqVec, VariableCodecSpec};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
@@ -142,22 +142,6 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             })
         });
 
-        // SeqVecSeqReader (stateful) with get_into - should win on Sequential/Clustered
-        group.bench_function("SeqReader_get_into", |b| {
-            b.iter(|| {
-                let mut seq_reader = seqvec.seq_reader();
-                let mut buffer = Vec::with_capacity(64);
-                let mut sum = 0u64;
-                for &idx in black_box(&indices) {
-                    seq_reader.get_into(idx, &mut buffer).unwrap();
-                    for &val in &buffer {
-                        sum += val as u64;
-                    }
-                }
-                black_box(sum)
-            })
-        });
-
         group.finish();
     }
 }
@@ -184,14 +168,14 @@ fn benchmark_sorted_batch(c: &mut Criterion) {
     let mut group = c.benchmark_group("SeqBatchAccess");
     group.throughput(Throughput::Elements(total_elements));
 
-    // Random order with SeqVecSeqReader
-    group.bench_function("Unsorted_SeqReader", |b| {
+    // Random order with SeqVecReader
+    group.bench_function("Unsorted_Reader", |b| {
         b.iter(|| {
-            let mut seq_reader = seqvec.seq_reader();
+            let mut reader = seqvec.reader();
             let mut buffer = Vec::with_capacity(64);
             let mut sum = 0u64;
             for &idx in black_box(&indices) {
-                seq_reader.get_into(idx, &mut buffer).unwrap();
+                reader.get_into(idx, &mut buffer).unwrap();
                 for &val in &buffer {
                     sum += val as u64;
                 }
@@ -200,14 +184,14 @@ fn benchmark_sorted_batch(c: &mut Criterion) {
         })
     });
 
-    // Sorted order with SeqVecSeqReader
-    group.bench_function("Sorted_SeqReader", |b| {
+    // Sorted order with SeqVecReader
+    group.bench_function("Sorted_Reader", |b| {
         b.iter(|| {
-            let mut seq_reader = seqvec.seq_reader();
+            let mut reader = seqvec.reader();
             let mut buffer = Vec::with_capacity(64);
             let mut sum = 0u64;
             for &idx in black_box(&sorted_indices) {
-                seq_reader.get_into(idx, &mut buffer).unwrap();
+                reader.get_into(idx, &mut buffer).unwrap();
                 for &val in &buffer {
                     sum += val as u64;
                 }

@@ -112,22 +112,6 @@ fn benchmark_api_methods(c: &mut Criterion) {
             })
         });
 
-        // SeqVecSeqReader with get_into (stateful + buffer reuse)
-        group.bench_function("seq_reader_get_into", |b| {
-            b.iter(|| {
-                let mut seq_reader = seqvec.seq_reader();
-                let mut buffer = Vec::with_capacity(seq_len);
-                let mut sum = 0u64;
-                for &idx in black_box(&indices) {
-                    seq_reader.get_into(idx, &mut buffer).unwrap();
-                    for &val in &buffer {
-                        sum += val as u64;
-                    }
-                }
-                black_box(sum)
-            })
-        });
-
         group.finish();
     }
 }
@@ -208,11 +192,10 @@ fn benchmark_codec_read(c: &mut Criterion) {
 
         group.bench_function(codec_name, |b| {
             b.iter(|| {
-                let mut seq_reader = seqvec.seq_reader();
                 let mut buffer = Vec::with_capacity(seq_len);
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
-                    seq_reader.get_into(idx, &mut buffer).unwrap();
+                    seqvec.get_into(idx, &mut buffer).unwrap();
                     for &val in &buffer {
                         sum += val as u64;
                     }

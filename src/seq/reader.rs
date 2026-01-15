@@ -15,13 +15,6 @@
 //! - **`get_into()`**: Decodes directly into a buffer using the internal reader,
 //!   avoiding iterator overhead.
 //!
-//! # Comparison with `SeqVecSeqReader`
-//!
-//! | Reader | Stateful | `get()` | `get_into()` | Use Case |
-//! |--------|----------|---------|-------------|----------|
-//! | `SeqVecReader` | Yes (always seeks) | Fresh `SeqIter` | Reuses reader | **Random access** |
-//! | `SeqVecSeqReader` | Yes (may skip seeks) | Fresh `SeqIter` | Reuses reader + position | **Sequential access** |
-//!
 //! [`SeqVec`]: crate::seq::SeqVec
 //! [`SeqIter`]: crate::seq::SeqIter
 

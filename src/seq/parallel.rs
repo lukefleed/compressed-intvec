@@ -182,7 +182,7 @@ where
         let mut results = vec![Vec::new(); indices.len()];
 
         results.par_iter_mut().enumerate().for_each_init(
-            || self.seq_reader(),
+            || self.reader(),
             |reader, (original_pos, result)| {
                 let target_index = indices[original_pos];
                 // SAFETY: bounds are guaranteed by the caller.

@@ -106,7 +106,6 @@ mod macros;
 #[cfg(feature = "parallel")]
 mod parallel;
 mod reader;
-mod seq_reader;
 #[cfg(feature = "serde")]
 mod serde;
 mod slice;
@@ -114,7 +113,6 @@ mod slice;
 pub use builder::{SeqVecBuilder, SeqVecFromIterBuilder};
 pub use iter::{SeqIter, SeqVecIntoIter, SeqVecIter};
 pub use reader::SeqVecReader;
-pub use seq_reader::SeqVecSeqReader;
 pub use slice::SeqVecSlice;
 
 // Re-export codec spec for convenience.
@@ -712,9 +710,30 @@ where
     /// ```
     #[inline]
     pub fn get_into(&self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
-        let iter = self.get(index)?;
+        if index >= self.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
+        let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
+
         buf.clear();
-        buf.extend(iter);
+
+        // Create reader and codec dispatcher once, then decode all elements
+        // directly into the buffer without creating an intermediate SeqIter.
+        // This avoids iterator overhead and enables better compiler optimization.
+        let mut reader = SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
+            self.data.as_ref(),
+        ));
+        let _ = reader.set_bit_pos(start_bit);
+
+        // Hot loop: Decode elements until reaching the sequence boundary.
+        while reader.bit_pos().unwrap_or(start_bit) < end_bit {
+            let word = self.encoding.read(&mut reader).unwrap();
+            buf.push(T::from_word(word));
+        }
+
         Some(buf.len())
     }
 
@@ -863,66 +882,6 @@ where
             slice::SeqVecSlice::new(self, mid..self.num_sequences()),
         ))
     }
-
-    /// Creates a stateful reader optimized for sequential access patterns.
-    ///
-    /// The returned [`SeqVecSeqReader`] maintains internal state to optimize
-    /// access patterns that are sequential or have high locality (e.g., BFS/DFS
-    /// graph traversal). The primary benefit is in the [`get_into`](SeqVecSeqReader::get_into)
-    /// method, which:
-    ///
-    /// - **Reuses the internal bitstream reader** across multiple accesses.
-    /// - **Tracks the current bit position** to avoid seeks when accessing
-    ///   nearby sequences.
-    /// - **Reuses the codec dispatcher** to amortize setup costs.
-    ///
-    /// ## Performance Characteristics
-    ///
-    /// When accessing sequences in increasing order or with spatial locality,
-    /// [`get_into`](SeqVecSeqReader::get_into) can significantly outperform
-    /// repeated calls to [`get`](Self::get) or [`SeqVecReader::get`] by:
-    ///
-    /// - Eliminating redundant seeks when bit offsets are consecutive or close.
-    /// - Reusing a single buffer allocation across multiple sequence retrievals.
-    ///
-    /// For random access with no locality, performance degrades gracefully to
-    /// match [`SeqVecReader`].
-    ///
-    /// ## When to Use
-    ///
-    /// Prefer [`seq_reader`](Self::seq_reader) when:
-    /// - Accessing sequences in order or near-order (e.g., BFS, DFS).
-    /// - You can reuse a buffer with [`get_into`](SeqVecSeqReader::get_into).
-    /// - Throughput is more important than API simplicity.
-    ///
-    /// For random access or when a lazy [`SeqIter`] is preferred, use
-    /// [`reader`](Self::reader) or direct [`get`](Self::get) instead.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let mut seq_reader = vec.seq_reader();
-    /// let mut buffer = Vec::new();
-    ///
-    /// // Accessing sequences in order is highly efficient
-    /// seq_reader.get_into(0, &mut buffer).unwrap();
-    /// assert_eq!(buffer, &[1, 2, 3]);
-    ///
-    /// seq_reader.get_into(1, &mut buffer).unwrap(); // Continues from previous position
-    /// assert_eq!(buffer, &[10, 20]);
-    ///
-    /// seq_reader.get_into(2, &mut buffer).unwrap(); // No seek required
-    /// assert_eq!(buffer, &[100]);
-    /// ```
-    #[inline]
-    pub fn seq_reader(&self) -> SeqVecSeqReader<'_, T, E, B> {
-        SeqVecSeqReader::new(self)
-    }
 }
 
 // --- PartialEq Implementation ---
@@ -1036,13 +995,12 @@ where
         // Sort by sequence index to enable efficient sequential scanning
         indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
 
-        // Create a sequential reader for efficient access
-        let mut seq_reader = SeqVecSeqReader::new(self);
+        // Decode sequences in order using get_into for buffer reuse
         let mut buffer = Vec::new();
 
         for &(target_index, original_position) in &indexed_indices {
-            // Decode the sequence into the buffer
-            seq_reader.get_into(target_index, &mut buffer).unwrap();
+            // Decode the sequence into the buffer using the reader
+            self.get_into(target_index, &mut buffer);
             // Store in the correct position
             results[original_position] = buffer.clone();
         }
