@@ -116,6 +116,14 @@ where
     /// will decode the sequence lazily. The iterator owns its own bitstream
     /// reader, so multiple iterators can exist simultaneously.
     ///
+    /// # Note on Reader Reuse
+    ///
+    /// This method does **not** reuse the internal reader of `SeqVecReader`. The
+    /// returned [`SeqIter`] owns its own independent `SeqVecBitReader` and
+    /// `CodecReader`. For reader reuse in buffer-filling patterns, use
+    /// [`get_into()`](Self::get_into) instead, which benefits from the internal
+    /// reader and codec dispatcher.
+    ///
     /// # Examples
     ///
     /// ```
@@ -192,8 +200,11 @@ where
     /// Retrieves the sequence at `index` as a `Vec<T>`, or `None` if out of
     /// bounds.
     ///
-    /// This is a convenience method that allocates a new vector and collects all
-    /// elements from the sequence iterator.
+    /// This method reuses the internal bitstream reader and codec dispatcher,
+    /// providing better performance than calling [`get()`](Self::get) and
+    /// collecting into a vector. For optimal memory allocation, ensure
+    /// [`SeqVec::store_lengths(true)`](super::SeqVec::store_lengths) was used
+    /// during construction.
     ///
     /// # Examples
     ///
@@ -208,25 +219,9 @@ where
     /// assert_eq!(reader.get_vec(2), None);
     /// ```
     #[inline]
-    pub fn get_vec(&self, index: usize) -> Option<Vec<T>> {
-        self.get(index).map(|iter| {
-            if let Some(len) = self.seqvec.sequence_len(index) {
-                let mut buf = Vec::with_capacity(len);
-                buf.extend(iter);
-                return buf;
-            }
-
-            // Estimate capacity: assume ~4 bits per element on average
-            // (reasonable for common codecs like Gamma, Delta, Rice).
-            let bit_range = unsafe {
-                self.seqvec.sequence_end_bit_unchecked(index)
-                    - self.seqvec.sequence_start_bit_unchecked(index)
-            };
-            let estimated_capacity = (bit_range / 4).max(1) as usize;
-            let mut buf = Vec::with_capacity(estimated_capacity);
-            buf.extend(iter);
-            buf
-        })
+    pub fn get_vec(&mut self, index: usize) -> Option<Vec<T>> {
+        let mut buf = Vec::new();
+        self.get_into(index, &mut buf).map(|_| buf)
     }
 
     /// Retrieves the sequence at `index` into the provided buffer, returning the
@@ -285,14 +280,11 @@ where
         } else {
             let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
 
-            // Decode all elements in the sequence using the reusable reader and codec dispatcher.
-            // Track current position separately since we can't rely on reader.bit_pos().
-            let mut current_pos = start_bit;
-            while current_pos < end_bit {
+            // Decode all elements in the sequence until we reach the end boundary.
+            // For IntVecBitReader backed by MemWordReader, bit_pos() is infallible.
+            while self.reader.bit_pos().unwrap() < end_bit {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
                 buf.push(T::from_word(word));
-                // Update position estimate after read
-                current_pos = self.reader.bit_pos().unwrap_or(current_pos);
             }
         }
 
