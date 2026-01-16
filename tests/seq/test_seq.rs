@@ -24,6 +24,7 @@ where
         + Copy
         + Send
         + Sync
+        + AsPrimitive<u64>
         + 'static,
     for<'a> compressed_intvec::seq::iter::SeqVecBitReader<'a, E>: dsi_bitstream::prelude::BitRead<E, Error = core::convert::Infallible>
         + dsi_bitstream::prelude::CodesRead<E>
@@ -231,6 +232,55 @@ where
         "get_into(out_of_bounds) should be None {}",
         context("get_into()")
     );
+
+    // Test for_each_in_sequence()
+    for i in 0..sequences.len() {
+        let mut collected = Vec::new();
+        let result = vec.for_each_in_sequence(i, |value| {
+            collected.push(value);
+        });
+        assert_eq!(
+            result,
+            Some(()),
+            "for_each_in_sequence({}) should return Some(()) {}",
+            i,
+            context("for_each_in_sequence()")
+        );
+        assert_eq!(
+            &collected,
+            &sequences[i],
+            "for_each_in_sequence({}) content mismatch {}",
+            i,
+            context("for_each_in_sequence()")
+        );
+    }
+
+    assert_eq!(
+        vec.for_each_in_sequence(sequences.len(), |_| {}),
+        None,
+        "for_each_in_sequence(out_of_bounds) should be None {}",
+        context("for_each_in_sequence()")
+    );
+
+    // Test fold_sequence()
+    for i in 0..sequences.len() {
+        let expected_sum: u64 = sequences[i].iter().map(|v| (*v).as_()).sum();
+        let folded_sum = vec.fold_sequence(i, 0u64, |acc, value| acc + value.as_());
+        assert_eq!(
+            folded_sum,
+            Some(expected_sum),
+            "fold_sequence({}) sum mismatch {}",
+            i,
+            context("fold_sequence()")
+        );
+    }
+
+    assert_eq!(
+        vec.fold_sequence(sequences.len(), 0u64, |acc, value| acc + value.as_()),
+        None,
+        "fold_sequence(out_of_bounds) should be None {}",
+        context("fold_sequence()")
+    );
 }
 
 // --- Macro for Type-Parameterized Testing ---
@@ -433,4 +483,20 @@ fn test_signed_random_data() {
 
     assert_eq!(vec.get_vec(0), Some(seq1));
     assert_eq!(vec.get_vec(1), Some(seq2));
+}
+
+#[test]
+fn test_get_many_sequences() {
+    let sequences: Vec<Vec<u32>> = vec![vec![1, 2, 3], vec![10], vec![100, 200]];
+    let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
+
+    // Unsorted indices should return sequences in input order
+    let indices = vec![2usize, 0usize];
+    let res = vec.get_many_sequences(&indices).unwrap();
+    assert_eq!(res, vec![sequences[2].clone(), sequences[0].clone()]);
+
+    // Empty input returns empty result
+    let empty: Vec<usize> = vec![];
+    let res_empty = vec.get_many_sequences(&empty).unwrap();
+    assert!(res_empty.is_empty());
 }

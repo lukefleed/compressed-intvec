@@ -872,6 +872,119 @@ where
         Some(buf.len())
     }
 
+    /// Applies a function to each element of sequence `index` without allocation.
+    ///
+    /// This is a streaming API that decodes each value and calls `f` immediately,
+    /// avoiding materialization into an intermediate buffer. Returns `None` if
+    /// `index >= num_sequences()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    ///
+    /// let mut sum = 0u64;
+    /// vec.for_each_in_sequence(0, |value| {
+    ///     sum += value as u64;
+    /// });
+    /// assert_eq!(sum, 6);
+    /// ```
+    #[inline]
+    pub fn for_each_in_sequence<F>(&self, index: usize, mut f: F) -> Option<()>
+    where
+        F: FnMut(T),
+    {
+        if index >= self.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
+
+        let mut reader =
+            SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()));
+        let _ = reader.set_bit_pos(start_bit);
+        let code_reader = CodecReader::new(self.encoding);
+
+        if let Some(lengths) = &self.seq_lengths {
+            let count = unsafe { lengths.get_unchecked(index) };
+            for _ in 0..count {
+                let word = code_reader.read(&mut reader).unwrap();
+                f(T::from_word(word));
+            }
+        } else {
+            // Track the position locally to keep the loop condition in registers.
+            let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
+            let mut current_pos = start_bit;
+            while current_pos < end_bit {
+                let word = code_reader.read(&mut reader).unwrap();
+                f(T::from_word(word));
+                current_pos = reader.bit_pos().unwrap();
+            }
+        }
+
+        Some(())
+    }
+
+    /// Folds the elements of sequence `index` into an accumulator.
+    ///
+    /// This is a streaming API that avoids intermediate allocation while
+    /// computing a derived value from the decoded elements.
+    /// Returns `None` if `index >= num_sequences()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    ///
+    /// let sum = vec.fold_sequence(0, 0u64, |acc, value| acc + value as u64);
+    /// assert_eq!(sum, Some(6));
+    /// ```
+    #[inline]
+    pub fn fold_sequence<F, R>(&self, index: usize, init: R, mut f: F) -> Option<R>
+    where
+        F: FnMut(R, T) -> R,
+    {
+        if index >= self.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
+
+        let mut reader =
+            SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()));
+        let _ = reader.set_bit_pos(start_bit);
+        let code_reader = CodecReader::new(self.encoding);
+
+        let mut acc = init;
+
+        if let Some(lengths) = &self.seq_lengths {
+            let count = unsafe { lengths.get_unchecked(index) };
+            for _ in 0..count {
+                let word = code_reader.read(&mut reader).unwrap();
+                acc = f(acc, T::from_word(word));
+            }
+        } else {
+            // Track the position locally to keep the loop condition in registers.
+            let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
+            let mut current_pos = start_bit;
+            while current_pos < end_bit {
+                let word = code_reader.read(&mut reader).unwrap();
+                acc = f(acc, T::from_word(word));
+                current_pos = reader.bit_pos().unwrap();
+            }
+        }
+
+        Some(acc)
+    }
+
     /// Decodes a known number of elements into `buf`.
     #[inline(always)]
     fn decode_counted<'a>(
@@ -1159,17 +1272,15 @@ where
             .map(|(i, &idx)| (idx, i))
             .collect();
 
-        // Sort by sequence index to enable efficient sequential scanning
+        // Sort by sequence index to enable more sequential bitstream access.
         indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
 
-        // Decode sequences in order using get_into for buffer reuse
-        let mut buffer = Vec::new();
+        // Reuse a single reader and decode directly into the final output slot.
+        let mut reader = self.reader();
 
         for &(target_index, original_position) in &indexed_indices {
-            // Decode the sequence into the buffer using the reader
-            self.get_into(target_index, &mut buffer);
-            // Store in the correct position
-            results[original_position] = buffer.clone();
+            let output = &mut results[original_position];
+            let _ = reader.get_into(target_index, output);
         }
 
         results

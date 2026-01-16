@@ -116,6 +116,11 @@ name = "bench_seq_readers"
 harness = false
 path = "benches/seq/bench_seq_readers.rs"
 
+[[bench]]
+name = "bench_seq_streaming"
+harness = false
+path = "benches/seq/bench_seq_streaming.rs"
+
 [features]
 default = ["parallel"]
 parallel = ["rayon"]
