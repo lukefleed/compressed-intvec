@@ -235,9 +235,6 @@ pub struct SeqVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
 /// A [`SeqVec`] with little-endian bit ordering.
 pub type LESeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 
-/// Type alias for a tuple of two [`SeqVecSlice`] references.
-pub type SeqVecSlicePair<'a, T, E, B> = (SeqVecSlice<'a, T, E, B>, SeqVecSlice<'a, T, E, B>);
-
 /// A [`SeqVec`] with big-endian bit ordering.
 pub type BESeqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
 
@@ -249,6 +246,24 @@ pub type USeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 /// Signed integers are transparently encoded using zig-zag encoding via the
 /// [`Storable`] trait.
 pub type SSeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
+
+/// A [`SeqVec`] for signed integers with big-endian bit ordering.
+///
+/// Signed integers are transparently encoded using zig-zag encoding via the
+/// [`Storable`] trait.
+pub type BESEqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
+
+/// A [`SeqVec`] for signed integers with little-endian bit ordering.
+///
+/// This is an alias for [`SSeqVec`], provided for consistency with the naming
+/// pattern `{Endianness}{SignedUnsigned}SeqVec`.
+///
+/// Signed integers are transparently encoded using zig-zag encoding via the
+/// [`Storable`] trait.
+pub type LESEqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
+
+/// Type alias for a tuple of two [`SeqVecSlice`] references.
+pub type SeqVecSlicePair<'a, T, E, B> = (SeqVecSlice<'a, T, E, B>, SeqVecSlice<'a, T, E, B>);
 
 // --- MemSize Implementation ---
 

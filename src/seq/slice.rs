@@ -373,7 +373,10 @@ where
 /// element of this iterator is a [`SeqIter`] for a sequence within the slice.
 pub struct SeqVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
     slice: &'a SeqVecSlice<'a, T, E, B>,
-    current_index: usize,
+    /// Current front index for forward iteration.
+    front: usize,
+    /// Current back index (exclusive) for backward iteration.
+    back: usize,
 }
 
 // --- IntoIterator Implementation ---
@@ -413,7 +416,8 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSliceIter<'a, T, E, 
     fn new(slice: &'a SeqVecSlice<'a, T, E, B>) -> Self {
         Self {
             slice,
-            current_index: 0,
+            front: 0,
+            back: slice.len(),
         }
     }
 }
@@ -431,18 +435,34 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.slice.len() {
+        if self.front >= self.back {
             return None;
         }
-        // SAFETY: The iterator's logic guarantees the index is in bounds.
-        let seq_iter = unsafe { self.slice.get_unchecked(self.current_index) };
-        self.current_index += 1;
-        Some(seq_iter)
+        let index = self.front;
+        self.front += 1;
+        // SAFETY: The iterator's invariant ensures `index` is in bounds.
+        Some(unsafe { self.slice.get_unchecked(index) })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.slice.len().saturating_sub(self.current_index);
+        let remaining = self.back.saturating_sub(self.front);
         (remaining, Some(remaining))
+    }
+
+    #[inline]
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        let remaining = self.back.saturating_sub(self.front);
+        if n >= remaining {
+            self.front = self.back;
+            return None;
+        }
+        self.front += n;
+        self.next()
+    }
+
+    #[inline]
+    fn count(self) -> usize {
+        self.back.saturating_sub(self.front)
     }
 }
 
@@ -456,7 +476,7 @@ where
         + BitSeek<Error = core::convert::Infallible>,
 {
     fn len(&self) -> usize {
-        self.slice.len().saturating_sub(self.current_index)
+        self.back.saturating_sub(self.front)
     }
 }
 
@@ -482,14 +502,23 @@ where
 {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.slice.len() {
+        if self.front >= self.back {
             return None;
         }
-        let back_index = self.slice.len() - 1 - self.current_index;
-        // SAFETY: The index calculation ensures `back_index` is in bounds.
-        let seq_iter = unsafe { self.slice.get_unchecked(back_index) };
-        self.current_index += 1;
-        Some(seq_iter)
+        self.back -= 1;
+        // SAFETY: The iterator's invariant ensures `back` is in bounds.
+        Some(unsafe { self.slice.get_unchecked(self.back) })
+    }
+
+    #[inline]
+    fn nth_back(&mut self, n: usize) -> Option<Self::Item> {
+        let remaining = self.back.saturating_sub(self.front);
+        if n >= remaining {
+            self.back = self.front;
+            return None;
+        }
+        self.back -= n;
+        self.next_back()
     }
 }
 
