@@ -60,7 +60,7 @@ use super::{iter::SeqVecBitReader, SeqIter, SeqVec};
 use crate::common::codec_reader::{CodecReader, IntVecBitReader};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
-    dispatch::{CodesRead, StaticCodeRead},
+    dispatch::CodesRead,
     prelude::{BitRead, BitSeek, Endianness},
 };
 
@@ -144,9 +144,6 @@ where
     reader: IntVecBitReader<'a, E>,
     /// The hybrid dispatcher that handles codec reading robustly.
     code_reader: CodecReader<'a, E>,
-    /// The index of the sequence *after* the one most recently accessed. This
-    /// acts as a cursor for the current position.
-    current_sequence_index: usize,
     /// The current bit position of the reader. This is used to determine whether
     /// a seek is required or if we can continue decoding forward.
     current_bit_pos: u64,
@@ -174,7 +171,6 @@ where
                 seqvec.data.as_ref(),
             )),
             code_reader,
-            current_sequence_index: 0,
             current_bit_pos: 0,
         }
     }
@@ -299,21 +295,24 @@ where
             let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
 
             // Hot loop: Decode elements until we reach the sequence boundary.
-            // Performance critical: Use reader.bit_pos() directly in the loop
-            // condition instead of maintaining a separate tracking variable.
-            // This reduces memory traffic - we query the reader's state instead
-            // of writing to self.current_bit_pos on every iteration.
-            while self.reader.bit_pos().unwrap() < end_bit {
+            // Use a local variable for position tracking to enable LLVM to keep
+            // the comparison in registers. The loop condition becomes a simple
+            // register-to-register comparison, minimizing pipeline pressure.
+            let mut current_pos = start_bit;
+            while current_pos < end_bit {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
                 buf.push(T::from_word(word));
+                current_pos = self.reader.bit_pos().unwrap();
             }
+            self.current_bit_pos = current_pos;
         }
 
-        // Update state once after loop completion. This single write is much
-        // cheaper than N writes inside the loop, and allows better register
-        // allocation and instruction scheduling by the compiler.
-        self.current_bit_pos = self.reader.bit_pos().unwrap();
-        self.current_sequence_index = index + 1;
+        // For sequences with stored lengths, update current_bit_pos after decoding.
+        if self.seqvec.seq_lengths.is_none() {
+            // current_bit_pos was already updated in the else branch above.
+        } else {
+            self.current_bit_pos = self.reader.bit_pos().unwrap();
+        }
 
         Some(buf.len())
     }
@@ -348,25 +347,48 @@ where
     /// ```
     #[inline]
     pub fn get_vec(&mut self, index: usize) -> Option<Vec<T>> {
-        if let Some(len) = self.seqvec.sequence_len(index) {
-            let mut buf = Vec::with_capacity(len);
-            self.get_into(index, &mut buf)?;
-            return Some(buf);
-        }
-
+        // Perform single bounds check upfront.
         let start_bit = self.seqvec.sequence_start_bit(index)?;
-        // SAFETY: If start_bit is Some, then index is valid.
-        let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
 
+        // Estimate capacity based on bit span. Assume at least 8 bits per element
+        // on average. Common variable-length codecs (gamma, delta, rice) typically
+        // use 8-16 bits per element for moderate values in adjacency lists.
+        let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
         let bit_count = (end_bit - start_bit) as usize;
-        // Estimate capacity: assume at least 8 bits per element on average.
-        // This reduces reallocations for long sequences without over-allocating
-        // for short ones. Common codecs (gamma, delta, rice) typically use 8-16
-        // bits per element for moderate values.
         let estimated_capacity = (bit_count / 8).max(1);
 
         let mut buf = Vec::with_capacity(estimated_capacity);
-        self.get_into(index, &mut buf)?;
+        buf.clear(); // Ensure clean state (though vec is fresh).
+
+        // Only seek if not already positioned at the sequence start.
+        if self.current_bit_pos != start_bit {
+            self.reader.set_bit_pos(start_bit).unwrap();
+        }
+
+        if let Some(lengths) = &self.seqvec.seq_lengths {
+            let count = unsafe { lengths.get_unchecked(index) } as usize;
+            buf.reserve(count);
+            for _ in 0..count {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                buf.push(T::from_word(word));
+            }
+        } else {
+            // Inline decoding logic with pre-computed offsets to avoid redundant
+            // bounds check that would occur if we called get_into().
+            let mut current_pos = start_bit;
+            while current_pos < end_bit {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                buf.push(T::from_word(word));
+                current_pos = self.reader.bit_pos().unwrap();
+            }
+            self.current_bit_pos = current_pos;
+        }
+
+        // Update position if lengths were stored.
+        if self.seqvec.seq_lengths.is_some() {
+            self.current_bit_pos = self.reader.bit_pos().unwrap();
+        }
+
         Some(buf)
     }
 }
