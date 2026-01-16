@@ -62,10 +62,15 @@ where
     /// # }
     /// ```
     pub fn par_iter(&self) -> impl ParallelIterator<Item = Vec<T>> + '_ {
-        (0..self.num_sequences()).into_par_iter().map(move |i| {
-            // SAFETY: i < num_sequences() by loop invariant
-            unsafe { self.get_unchecked(i).collect() }
-        })
+        let num_sequences = self.num_sequences();
+        (0..num_sequences).into_par_iter().map_init(
+            || self.reader(),
+            move |reader, i| {
+                let mut buf = Vec::new();
+                reader.get_into(i, &mut buf).unwrap();
+                buf
+            },
+        )
     }
 
     /// Consumes the [`SeqVec`] and decodes all sequences into separate vectors
@@ -108,7 +113,19 @@ where
     ///
     /// [`into_vecs`]: super::SeqVec::into_vecs
     pub fn par_into_vecs(self) -> Vec<Vec<T>> {
-        self.par_iter().collect()
+        let num_sequences = self.num_sequences();
+        let seqvec = &self;
+        (0..num_sequences)
+            .into_par_iter()
+            .map_init(
+                || seqvec.reader(),
+                move |reader, i| {
+                    let mut buf = Vec::new();
+                    reader.get_into(i, &mut buf).unwrap();
+                    buf
+                },
+            )
+            .collect()
     }
 
     /// Retrieves multiple sequences in parallel.
@@ -145,9 +162,11 @@ where
             return Ok(Vec::new());
         }
 
+        let num_sequences = self.num_sequences();
+
         // Bounds checking
         for &index in indices {
-            if index >= self.num_sequences() {
+            if index >= num_sequences {
                 return Err(SeqVecError::IndexOutOfBounds(index));
             }
         }
@@ -165,12 +184,13 @@ where
     pub unsafe fn par_get_many_sequences_unchecked(&self, indices: &[usize]) -> Vec<Vec<T>> {
         #[cfg(debug_assertions)]
         {
+            let num_sequences = self.num_sequences();
             for &index in indices {
                 debug_assert!(
-                    index < self.num_sequences(),
+                    index < num_sequences,
                     "Index out of bounds: index was {} but num_sequences was {}",
                     index,
-                    self.num_sequences()
+                    num_sequences
                 );
             }
         }
