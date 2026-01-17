@@ -3,8 +3,8 @@
 // Dedicated benchmarks for SeqVec streaming access APIs.
 //
 // Measures:
-// 1. get() iteration vs for_each_in_sequence() vs fold_sequence()
-// 2. Baseline comparison against get_into() with buffer reuse
+// 1. get() iteration vs for_each() vs fold()
+// 2. Baseline comparison against decode_into() with buffer reuse
 
 use compressed_intvec::seq::{LESeqVec, SeqVec, VariableCodecSpec};
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
@@ -69,13 +69,13 @@ fn benchmark_streaming_apis(c: &mut Criterion) {
             })
         });
 
-        // for_each_in_sequence() streaming callback
-        group.bench_function("for_each_in_sequence", |b| {
+        // for_each() streaming callback
+        group.bench_function("for_each", |b| {
             b.iter(|| {
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
                     seqvec
-                        .for_each_in_sequence(idx, |value| {
+                        .for_each(idx, |value| {
                             sum += value as u64;
                         })
                         .unwrap();
@@ -84,13 +84,13 @@ fn benchmark_streaming_apis(c: &mut Criterion) {
             })
         });
 
-        // fold_sequence() streaming fold
-        group.bench_function("fold_sequence", |b| {
+        // fold() streaming fold
+        group.bench_function("fold", |b| {
             b.iter(|| {
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
                     let local_sum = seqvec
-                        .fold_sequence(idx, 0u64, |acc, value| acc + value as u64)
+                        .fold(idx, 0u64, |acc, value| acc + value as u64)
                         .unwrap();
                     sum += local_sum;
                 }
@@ -98,13 +98,13 @@ fn benchmark_streaming_apis(c: &mut Criterion) {
             })
         });
 
-        // get_into() with buffer reuse
-        group.bench_function("get_into_reuse", |b| {
+        // decode_into() with buffer reuse
+        group.bench_function("decode_into_reuse", |b| {
             b.iter(|| {
                 let mut buffer = Vec::with_capacity(seq_len);
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
-                    seqvec.get_into(idx, &mut buffer).unwrap();
+                    seqvec.decode_into(idx, &mut buffer).unwrap();
                     for &val in &buffer {
                         sum += val as u64;
                     }

@@ -67,7 +67,7 @@ where
             || self.reader(),
             move |reader, i| {
                 let mut buf = Vec::new();
-                reader.get_into(i, &mut buf).unwrap();
+                reader.decode_into(i, &mut buf).unwrap();
                 buf
             },
         )
@@ -121,7 +121,7 @@ where
                 || seqvec.reader(),
                 move |reader, i| {
                     let mut buf = Vec::new();
-                    reader.get_into(i, &mut buf).unwrap();
+                    reader.decode_into(i, &mut buf).unwrap();
                     buf
                 },
             )
@@ -153,11 +153,11 @@ where
     /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
     ///
     /// let indices = [3, 0, 2];
-    /// let sequences = vec.par_get_many_sequences(&indices).unwrap();
+    /// let sequences = vec.par_decode_many(&indices).unwrap();
     /// assert_eq!(sequences.len(), 3);
     /// # }
     /// ```
-    pub fn par_get_many_sequences(&self, indices: &[usize]) -> Result<Vec<Vec<T>>, SeqVecError> {
+    pub fn par_decode_many(&self, indices: &[usize]) -> Result<Vec<Vec<T>>, SeqVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
         }
@@ -172,7 +172,7 @@ where
         }
 
         // SAFETY: We have pre-checked the bounds of all indices.
-        Ok(unsafe { self.par_get_many_sequences_unchecked(indices) })
+        Ok(unsafe { self.par_decode_many_unchecked(indices) })
     }
 
     /// Retrieves multiple sequences in parallel without bounds checking.
@@ -181,7 +181,7 @@ where
     ///
     /// Calling this method with any out-of-bounds index in the `indices` slice
     /// is undefined behavior. In debug builds, assertions will panic.
-    pub unsafe fn par_get_many_sequences_unchecked(&self, indices: &[usize]) -> Vec<Vec<T>> {
+    pub unsafe fn par_decode_many_unchecked(&self, indices: &[usize]) -> Vec<Vec<T>> {
         #[cfg(debug_assertions)]
         {
             let num_sequences = self.num_sequences();
@@ -206,7 +206,7 @@ where
             |reader, (original_pos, result)| {
                 let target_index = indices[original_pos];
                 // SAFETY: bounds are guaranteed by the caller.
-                reader.get_into(target_index, result).unwrap();
+                reader.decode_into(target_index, result).unwrap();
             },
         );
 

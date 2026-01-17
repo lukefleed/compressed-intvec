@@ -56,7 +56,7 @@ where
         context
     );
 
-    // --- Test 3: par_get_many_sequences() with safe bounds checking ---
+    // --- Test 3: par_decode_many() with safe bounds checking ---
     if !sequences.is_empty() {
         // Generate some indices (evens, if available)
         let indices: Vec<usize> = (0..sequences.len()).filter(|x| x % 2 == 0).collect();
@@ -67,29 +67,29 @@ where
 
             // Safe version with bounds checking
             let results = vec
-                .par_get_many_sequences(&indices)
-                .expect("par_get_many_sequences failed");
+                .par_decode_many(&indices)
+                .expect("par_decode_many failed");
             let results_vec: Vec<Vec<T>> = results.into_iter().map(|s| s.collect()).collect();
 
             assert_eq!(
                 results_vec, expected_subset,
-                "par_get_many_sequences mismatch for {}",
+                "par_decode_many mismatch for {}",
                 context
             );
         }
     }
 
-    // --- Test 4: par_get_many_sequences() with out-of-bounds should fail ---
+    // --- Test 4: par_decode_many() with out-of-bounds should fail ---
     if !sequences.is_empty() {
         let mut indices = vec![0];
         if !sequences.is_empty() {
             indices.push(sequences.len()); // This is out-of-bounds
         }
 
-        let result = vec.par_get_many_sequences(&indices);
+        let result = vec.par_decode_many(&indices);
         assert!(
             result.is_err(),
-            "par_get_many_sequences should fail with out-of-bounds index in {}",
+            "par_decode_many should fail with out-of-bounds index in {}",
             context
         );
     }

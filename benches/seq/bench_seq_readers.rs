@@ -3,7 +3,7 @@
 // Benchmarks for SeqVec reader methods and API variants.
 //
 // Measures:
-// 1. API methods: get() vs get_vec() vs get_into()
+// 1. API methods: get() vs decode_vec() vs decode_into()
 // 2. Buffer reuse benefit
 // 3. Sequence length impact on method overhead
 
@@ -83,12 +83,12 @@ fn benchmark_api_methods(c: &mut Criterion) {
             })
         });
 
-        // get_vec() (allocates Vec per call)
-        group.bench_function("get_vec", |b| {
+        // decode_vec() (allocates Vec per call)
+        group.bench_function("decode_vec", |b| {
             b.iter(|| {
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
-                    let seq = seqvec.get_vec(idx).unwrap();
+                    let seq = seqvec.decode_vec(idx).unwrap();
                     for val in seq {
                         sum += val as u64;
                     }
@@ -97,13 +97,13 @@ fn benchmark_api_methods(c: &mut Criterion) {
             })
         });
 
-        // get_into() with buffer reuse
-        group.bench_function("get_into_reuse", |b| {
+        // decode_into() with buffer reuse
+        group.bench_function("decode_into_reuse", |b| {
             b.iter(|| {
                 let mut buffer = Vec::with_capacity(seq_len);
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
-                    seqvec.get_into(idx, &mut buffer).unwrap();
+                    seqvec.decode_into(idx, &mut buffer).unwrap();
                     for &val in &buffer {
                         sum += val as u64;
                     }
@@ -148,13 +148,13 @@ fn benchmark_buffer_reuse(c: &mut Criterion) {
         })
     });
 
-    // Reuse buffer with get_into
+    // Reuse buffer with decode_into
     group.bench_function("Reuse_Buffer", |b| {
         b.iter(|| {
             let mut buffer = Vec::with_capacity(seq_len);
             let mut sum = 0u64;
             for &idx in black_box(&indices) {
-                seqvec.get_into(idx, &mut buffer).unwrap();
+                seqvec.decode_into(idx, &mut buffer).unwrap();
                 for &val in &buffer {
                     sum += val as u64;
                 }
@@ -195,7 +195,7 @@ fn benchmark_codec_read(c: &mut Criterion) {
                 let mut buffer = Vec::with_capacity(seq_len);
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
-                    seqvec.get_into(idx, &mut buffer).unwrap();
+                    seqvec.decode_into(idx, &mut buffer).unwrap();
                     for &val in &buffer {
                         sum += val as u64;
                     }

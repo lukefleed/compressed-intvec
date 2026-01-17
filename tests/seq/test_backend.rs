@@ -37,7 +37,7 @@ fn test_owned_to_borrowed_conversion() {
 
     // 4. Verify data is identical.
     for i in 0..sequences.len() {
-        assert_eq!(owned_vec.get_vec(i), borrowed_vec.get_vec(i));
+        assert_eq!(owned_vec.decode_vec(i), borrowed_vec.decode_vec(i));
     }
 
     // 5. Verify all sequences through iterators match.
@@ -65,7 +65,7 @@ fn test_borrowed_backend_preserves_data() {
 
     // Verify all sequences
     for i in 0..sequences.len() {
-        assert_eq!(borrowed.get_vec(i), Some(sequences[i].clone()));
+        assert_eq!(borrowed.decode_vec(i), Some(sequences[i].clone()));
     }
 }
 
@@ -87,7 +87,7 @@ fn test_borrowed_backend_with_different_endianness() {
     .unwrap();
 
     for i in 0..sequences.len() {
-        assert_eq!(borrowed.get_vec(i), Some(sequences[i].clone()));
+        assert_eq!(borrowed.decode_vec(i), Some(sequences[i].clone()));
     }
 }
 
@@ -109,7 +109,7 @@ fn test_from_parts_with_empty_sequences() {
 
     assert_eq!(borrowed.num_sequences(), 3);
     for i in 0..3 {
-        assert_eq!(borrowed.get_vec(i), Some(vec![]));
+        assert_eq!(borrowed.decode_vec(i), Some(vec![]));
     }
 }
 
@@ -131,7 +131,7 @@ fn test_from_parts_with_mixed_sequences() {
     .unwrap();
 
     for i in 0..sequences.len() {
-        assert_eq!(borrowed.get_vec(i), Some(sequences[i].clone()));
+        assert_eq!(borrowed.decode_vec(i), Some(sequences[i].clone()));
     }
 }
 
@@ -173,7 +173,7 @@ fn test_multiple_borrowed_views_from_same_owned() {
 
     // Both views should be identical
     for i in 0..sequences.len() {
-        assert_eq!(borrowed1.get_vec(i), borrowed2.get_vec(i));
+        assert_eq!(borrowed1.decode_vec(i), borrowed2.decode_vec(i));
     }
 }
 
@@ -243,7 +243,7 @@ fn test_borrowed_with_u64_data() {
     .unwrap();
 
     for i in 0..sequences.len() {
-        assert_eq!(borrowed.get_vec(i), Some(sequences[i].clone()));
+        assert_eq!(borrowed.decode_vec(i), Some(sequences[i].clone()));
     }
 }
 
@@ -265,7 +265,7 @@ fn test_borrowed_with_signed_data() {
     .unwrap();
 
     for i in 0..sequences.len() {
-        assert_eq!(borrowed.get_vec(i), Some(sequences[i].clone()));
+        assert_eq!(borrowed.decode_vec(i), Some(sequences[i].clone()));
     }
 }
 

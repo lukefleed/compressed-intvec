@@ -126,14 +126,14 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             })
         });
 
-        // SeqVecReader (stateless) with get_into
-        group.bench_function("Reader_get_into", |b| {
+        // SeqVecReader (stateless) with decode_into
+        group.bench_function("Reader_decode_into", |b| {
             b.iter(|| {
                 let mut reader = seqvec.reader();
                 let mut buffer = Vec::with_capacity(64);
                 let mut sum = 0u64;
                 for &idx in black_box(&indices) {
-                    reader.get_into(idx, &mut buffer).unwrap();
+                    reader.decode_into(idx, &mut buffer).unwrap();
                     for &val in &buffer {
                         sum += val as u64;
                     }
@@ -175,7 +175,7 @@ fn benchmark_sorted_batch(c: &mut Criterion) {
             let mut buffer = Vec::with_capacity(64);
             let mut sum = 0u64;
             for &idx in black_box(&indices) {
-                reader.get_into(idx, &mut buffer).unwrap();
+                reader.decode_into(idx, &mut buffer).unwrap();
                 for &val in &buffer {
                     sum += val as u64;
                 }
@@ -191,7 +191,7 @@ fn benchmark_sorted_batch(c: &mut Criterion) {
             let mut buffer = Vec::with_capacity(64);
             let mut sum = 0u64;
             for &idx in black_box(&sorted_indices) {
-                reader.get_into(idx, &mut buffer).unwrap();
+                reader.decode_into(idx, &mut buffer).unwrap();
                 for &val in &buffer {
                     sum += val as u64;
                 }
@@ -200,12 +200,12 @@ fn benchmark_sorted_batch(c: &mut Criterion) {
         })
     });
 
-    // get_many_sequences (internally sorts)
-    group.bench_function("get_many_sequences", |b| {
+    // decode_many (internally sorts)
+    group.bench_function("decode_many", |b| {
         b.iter(|| {
             let results = seqvec
-                .get_many_sequences(black_box(&indices))
-                .expect("get_many_sequences failed");
+                .decode_many(black_box(&indices))
+                .expect("decode_many failed");
             let sum: u64 = results
                 .iter()
                 .flat_map(|seq| seq.iter())

@@ -209,23 +209,23 @@ where
 
     // --- Sequence Access ---
 
-    // Test get_vec
+    // Test decode_vec
     for i in 0..num_seqs {
         let result = vec
             .slice(0, num_seqs)
             .unwrap()
-            .get_vec(i)
-            .unwrap_or_else(|| panic!("get_vec({}) failed {}", i, context("get_vec")));
+            .decode_vec(i)
+            .unwrap_or_else(|| panic!("decode_vec({}) failed {}", i, context("decode_vec")));
         assert_eq!(
             &result,
             &sequences[i],
-            "get_vec({}) content mismatch {}",
+            "decode_vec({}) content mismatch {}",
             i,
-            context("slice().get_vec()")
+            context("slice().decode_vec()")
         );
     }
 
-    // Test get_into
+    // Test decode_into
     if !sequences.is_empty() {
         let slice = vec
             .slice(0, num_seqs)
@@ -234,21 +234,21 @@ where
 
         for i in 0..num_seqs {
             let len = slice
-                .get_into(i, &mut buf)
-                .unwrap_or_else(|| panic!("get_into({}) failed {}", i, context("get_into")));
+                .decode_into(i, &mut buf)
+                .unwrap_or_else(|| panic!("decode_into({}) failed {}", i, context("decode_into")));
             assert_eq!(
                 len,
                 sequences[i].len(),
-                "get_into({}) returned incorrect length {}",
+                "decode_into({}) returned incorrect length {}",
                 i,
-                context("slice().get_into()")
+                context("slice().decode_into()")
             );
             assert_eq!(
                 &buf,
                 &sequences[i],
-                "get_into({}) content mismatch {}",
+                "decode_into({}) content mismatch {}",
                 i,
-                context("slice().get_into()")
+                context("slice().decode_into()")
             );
         }
     }
@@ -501,7 +501,7 @@ fn test_slice_all_empty_sequences() {
     assert_eq!(slice.len(), 3);
 
     for i in 0..3 {
-        let seq = slice.get_vec(i).unwrap();
+        let seq = slice.decode_vec(i).unwrap();
         assert!(seq.is_empty(), "Sequence {} should be empty", i);
     }
 }
@@ -529,7 +529,7 @@ fn test_slice_many_empty_sequences() {
     assert_eq!(slice.len(), 30);
 
     for i in 0..30 {
-        assert_eq!(slice.get_vec(i), Some(vec![]));
+        assert_eq!(slice.decode_vec(i), Some(vec![]));
     }
 }
 

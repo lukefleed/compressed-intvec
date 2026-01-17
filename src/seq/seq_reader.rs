@@ -8,7 +8,7 @@
 //! # Performance
 //!
 //! [`SeqVecSeqReader`] maintains internal state for the current decoding position.
-//! The primary optimization is in the [`get_into`](SeqVecSeqReader::get_into)
+//! The primary optimization is in the [`decode_into`](SeqVecSeqReader::decode_into)
 //! method, which:
 //!
 //! 1. **Reuses the internal bitstream reader** across multiple sequence accesses.
@@ -39,11 +39,11 @@
 //!
 //! ## Comparison with [`SeqVecReader`]
 //!
-//! Unlike [`SeqVecReader`] which is stateless and creates a fresh [`SeqIter`]
+//! Unlike [`SeqVecReader`] which is stateless and creates a fresh decoder
 //! for each access, [`SeqVecSeqReader`] maintains persistent state. The benefit
 //! is most pronounced when:
 //!
-//! - Using [`get_into`](SeqVecSeqReader::get_into) to materialize sequences
+//! - Using [`decode_into`](SeqVecSeqReader::decode_into) to materialize sequences
 //!   into a reusable buffer.
 //! - Accessing sequences in index order or with high spatial locality.
 //! - The bit offsets of consecutive sequences are close together.
@@ -53,14 +53,13 @@
 //!
 //! [`SeqVec`]: crate::seq::SeqVec
 //! [`SeqVecReader`]: crate::seq::SeqVecReader
-//! [`SeqIter`]: crate::seq::SeqIter
 //! [`CodecReader`]: crate::common::codec_reader::CodecReader
 
-use super::{iter::SeqVecBitReader, SeqIter, SeqVec};
+use super::{iter::SeqVecBitReader, SeqVec};
 use crate::common::codec_reader::{CodecReader, IntVecBitReader};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
-    dispatch::CodesRead,
+    dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 
@@ -73,22 +72,18 @@ use dsi_bitstream::{
 ///
 /// ## API Overview
 ///
-/// - [`get`](Self::get): Returns a [`SeqIter`] over the requested sequence.
-///   This provides API uniformity but does not benefit from state tracking.
-///   Prefer [`get_into`](Self::get_into) for performance-critical paths.
-///
-/// - [`get_into`](Self::get_into): **Performance-optimized method.** Decodes
+/// - [`decode_into`](Self::decode_into): **Performance-optimized method.** Decodes
 ///   the sequence directly into a provided buffer, reusing the internal reader
 ///   and avoiding seeks when possible.
 ///
-/// - [`get_vec`](Self::get_vec): Convenience method that allocates a new
-///   `Vec<T>` for each sequence. For repeated access, prefer [`get_into`](Self::get_into)
+/// - [`decode_vec`](Self::decode_vec): Convenience method that allocates a new
+///   `Vec<T>` for each sequence. For repeated access, prefer [`decode_into`](Self::decode_into)
 ///   with a reusable buffer.
 ///
 /// ## Performance Characteristics
 ///
 /// When accessing sequences in increasing index order (or nearby indices),
-/// [`get_into`](Self::get_into) can avoid the overhead of seeking by continuing
+/// [`decode_into`](Self::decode_into) can avoid the overhead of seeking by continuing
 /// from the current reader position. This is particularly effective when:
 ///
 /// - Bit offsets are consecutive or close together.
@@ -114,18 +109,17 @@ use dsi_bitstream::{
 /// let mut buffer = Vec::new();
 ///
 /// // Accessing sequences in order is highly efficient
-/// seq_reader.get_into(0, &mut buffer).unwrap();
+/// seq_reader.decode_into(0, &mut buffer).unwrap();
 /// assert_eq!(buffer, &[1, 2, 3]);
 ///
-/// seq_reader.get_into(1, &mut buffer).unwrap(); // Continues from previous position
+/// seq_reader.decode_into(1, &mut buffer).unwrap(); // Continues from previous position
 /// assert_eq!(buffer, &[10, 20, 30, 40]);
 ///
-/// seq_reader.get_into(2, &mut buffer).unwrap(); // No seek required
+/// seq_reader.decode_into(2, &mut buffer).unwrap(); // No seek required
 /// assert_eq!(buffer, &[100]);
 /// ```
 ///
 /// [`SeqVec`]: crate::seq::SeqVec
-/// [`SeqIter`]: crate::seq::SeqIter
 pub struct SeqVecSeqReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
     for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
@@ -175,53 +169,6 @@ where
         }
     }
 
-    /// Retrieves an iterator over sequence `index`, or `None` if out of bounds.
-    ///
-    /// This method provides API uniformity with [`SeqVecReader::get`](super::SeqVecReader::get)
-    /// and [`SeqVec::get`](super::SeqVec::get), but **does not benefit** from
-    /// the reader's internal state tracking. It creates a fresh [`SeqIter`]
-    /// for the sequence, identical to calling [`SeqVec::get`](super::SeqVec::get)
-    /// directly.
-    ///
-    /// For performance-critical sequential access, use [`get_into`](Self::get_into)
-    /// instead, which reuses the internal reader and can avoid seeks.
-    ///
-    /// ## Note on State Usage
-    ///
-    /// This method does **not** benefit from the reader's internal state. It creates
-    /// a fresh [`SeqIter`] with its own reader, equivalent to calling
-    /// [`SeqVec::get`](crate::seq::SeqVec::get) directly. The purpose of this method
-    /// is to provide API consistency with [`get_into`](Self::get_into). For stateful
-    /// access that reuses the internal reader and avoids seeks, use [`get_into`](Self::get_into)
-    /// or [`get_vec`](Self::get_vec).
-    ///
-    /// ## Returns
-    ///
-    /// - `Some(SeqIter)` if the index is valid.
-    /// - `None` if the index is out of bounds.
-    ///
-    /// ## Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[10, 20, 30], &[100, 200]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let mut reader = vec.seq_reader();
-    ///
-    /// // Returns a lazy iterator (does not use internal state)
-    /// let iter = reader.get(0).unwrap();
-    /// assert_eq!(iter.collect::<Vec<_>>(), vec![10, 20, 30]);
-    /// ```
-    #[inline]
-    pub fn get(&mut self, index: usize) -> Option<SeqIter<'a, T, E>> {
-        // Delegate to SeqVec's get method. This does not use our internal state,
-        // but provides API consistency. For stateful access that reuses the internal
-        // reader and avoids seeks, use get_into() instead.
-        self.seqvec.get(index)
-    }
-
     /// Reads sequence `index` into `buf`, reusing the internal reader.
     ///
     /// This is the **primary performance-optimized method** of [`SeqVecSeqReader`].
@@ -259,19 +206,35 @@ where
     /// let mut buffer = Vec::new();
     ///
     /// // Sequential access reuses the reader efficiently
-    /// reader.get_into(0, &mut buffer).unwrap();
+    /// reader.decode_into(0, &mut buffer).unwrap();
     /// assert_eq!(buffer, &[1, 2, 3]);
     ///
-    /// reader.get_into(1, &mut buffer).unwrap();
+    /// reader.decode_into(1, &mut buffer).unwrap();
     /// assert_eq!(buffer, &[10, 20]);
     ///
-    /// reader.get_into(2, &mut buffer).unwrap();
+    /// reader.decode_into(2, &mut buffer).unwrap();
     /// assert_eq!(buffer, &[100]);
     /// ```
     #[inline]
-    pub fn get_into(&mut self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
+    pub fn decode_into(&mut self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
         let start_bit = self.seqvec.sequence_start_bit(index)?;
 
+        // SAFETY: Bounds check has been performed.
+        Some(unsafe { self.decode_into_unchecked(index, start_bit, buf) })
+    }
+
+    /// Reads sequence `index` into `buf` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline]
+    pub unsafe fn decode_into_unchecked(
+        &mut self,
+        index: usize,
+        start_bit: u64,
+        buf: &mut Vec<T>,
+    ) -> usize {
         // Clear the buffer for fresh data. The allocation is preserved.
         buf.clear();
 
@@ -283,16 +246,14 @@ where
         }
 
         if let Some(lengths) = &self.seqvec.seq_lengths {
-            let count = unsafe { lengths.get_unchecked(index) } as usize;
+            let count = lengths.get_unchecked(index) as usize;
             buf.reserve(count);
             for _ in 0..count {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
                 buf.push(T::from_word(word));
             }
         } else {
-            // SAFETY: If start_bit is Some, then index is valid, so index+1 is a
-            // valid index into bit_offsets (which has N+1 elements).
-            let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
+            let end_bit = self.seqvec.sequence_end_bit_unchecked(index);
 
             // Hot loop: Decode elements until we reach the sequence boundary.
             // Use a local variable for position tracking to enable LLVM to keep
@@ -314,14 +275,14 @@ where
             self.current_bit_pos = self.reader.bit_pos().unwrap();
         }
 
-        Some(buf.len())
+        buf.len()
     }
 
     /// Convenience: returns sequence `index` as a newly allocated `Vec<T>`.
     ///
-    /// This method provides a simpler API than [`get_into`](Self::get_into),
+    /// This method provides a simpler API than [`decode_into`](Self::decode_into),
     /// but allocates a fresh vector for each call. For repeated access with
-    /// high performance requirements, prefer [`get_into`](Self::get_into) with
+    /// high performance requirements, prefer [`decode_into`](Self::decode_into) with
     /// a reusable buffer to avoid allocations.
     ///
     /// ## Returns
@@ -339,14 +300,14 @@ where
     ///
     /// let mut reader = vec.seq_reader();
     ///
-    /// let seq0 = reader.get_vec(0).unwrap();
+    /// let seq0 = reader.decode_vec(0).unwrap();
     /// assert_eq!(seq0, vec![1, 2, 3]);
     ///
-    /// let seq1 = reader.get_vec(1).unwrap();
+    /// let seq1 = reader.decode_vec(1).unwrap();
     /// assert_eq!(seq1, vec![10, 20]);
     /// ```
     #[inline]
-    pub fn get_vec(&mut self, index: usize) -> Option<Vec<T>> {
+    pub fn decode_vec(&mut self, index: usize) -> Option<Vec<T>> {
         // Perform single bounds check upfront.
         let start_bit = self.seqvec.sequence_start_bit(index)?;
 
@@ -374,7 +335,7 @@ where
             }
         } else {
             // Inline decoding logic with pre-computed offsets to avoid redundant
-            // bounds check that would occur if we called get_into().
+            // bounds check that would occur if we called decode_into().
             let mut current_pos = start_bit;
             while current_pos < end_bit {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
@@ -390,5 +351,114 @@ where
         }
 
         Some(buf)
+    }
+
+    /// Applies a function to each element of sequence `index` without allocation.
+    ///
+    /// This method reuses the internal reader and codec dispatcher. Returns
+    /// `None` if `index` is out of bounds.
+    #[inline]
+    pub fn for_each<F>(&mut self, index: usize, f: F) -> Option<()>
+    where
+        F: FnMut(T),
+    {
+        let start_bit = self.seqvec.sequence_start_bit(index)?;
+
+        // SAFETY: Bounds check has been performed.
+        unsafe { self.for_each_unchecked(index, start_bit, f) };
+        Some(())
+    }
+
+    /// Applies a function to each element of sequence `index` without bounds
+    /// checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline]
+    pub unsafe fn for_each_unchecked<F>(&mut self, index: usize, start_bit: u64, mut f: F)
+    where
+        F: FnMut(T),
+    {
+        if self.current_bit_pos != start_bit {
+            self.reader.set_bit_pos(start_bit).unwrap();
+        }
+
+        if let Some(lengths) = &self.seqvec.seq_lengths {
+            let count = lengths.get_unchecked(index) as usize;
+            for _ in 0..count {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                f(T::from_word(word));
+            }
+            self.current_bit_pos = self.reader.bit_pos().unwrap();
+        } else {
+            let end_bit = self.seqvec.sequence_end_bit_unchecked(index);
+            let mut current_pos = start_bit;
+            while current_pos < end_bit {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                f(T::from_word(word));
+                current_pos = self.reader.bit_pos().unwrap();
+            }
+            self.current_bit_pos = current_pos;
+        }
+    }
+
+    /// Folds the elements of sequence `index` into an accumulator.
+    ///
+    /// This method reuses the internal reader and codec dispatcher. Returns
+    /// `None` if `index` is out of bounds.
+    #[inline]
+    pub fn fold<F, R>(&mut self, index: usize, init: R, f: F) -> Option<R>
+    where
+        F: FnMut(R, T) -> R,
+    {
+        let start_bit = self.seqvec.sequence_start_bit(index)?;
+
+        // SAFETY: Bounds check has been performed.
+        Some(unsafe { self.fold_unchecked(index, start_bit, init, f) })
+    }
+
+    /// Folds the elements of sequence `index` into an accumulator without bounds
+    /// checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline]
+    pub unsafe fn fold_unchecked<F, R>(
+        &mut self,
+        index: usize,
+        start_bit: u64,
+        init: R,
+        mut f: F,
+    ) -> R
+    where
+        F: FnMut(R, T) -> R,
+    {
+        if self.current_bit_pos != start_bit {
+            self.reader.set_bit_pos(start_bit).unwrap();
+        }
+
+        let mut acc = init;
+
+        if let Some(lengths) = &self.seqvec.seq_lengths {
+            let count = lengths.get_unchecked(index) as usize;
+            for _ in 0..count {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                acc = f(acc, T::from_word(word));
+            }
+            self.current_bit_pos = self.reader.bit_pos().unwrap();
+        } else {
+            let end_bit = self.seqvec.sequence_end_bit_unchecked(index);
+            let mut current_pos = start_bit;
+            while current_pos < end_bit {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                acc = f(acc, T::from_word(word));
+                current_pos = self.reader.bit_pos().unwrap();
+            }
+            self.current_bit_pos = current_pos;
+        }
+
+        acc
     }
 }

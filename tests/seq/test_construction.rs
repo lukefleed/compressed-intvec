@@ -33,7 +33,7 @@ fn test_builder_with_gamma_codec() {
     assert!(vec.is_ok());
     let vec = vec.unwrap();
     assert_eq!(vec.num_sequences(), 3);
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2, 3]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2, 3]));
 }
 
 #[test]
@@ -46,7 +46,7 @@ fn test_builder_with_delta_codec() {
 
     assert!(vec.is_ok());
     let vec = vec.unwrap();
-    assert_eq!(vec.get_vec(1), Some(vec![10, 20]));
+    assert_eq!(vec.decode_vec(1), Some(vec![10, 20]));
 }
 
 #[test]
@@ -59,8 +59,8 @@ fn test_builder_with_zeta_codec() {
 
     assert!(vec.is_ok());
     let vec = vec.unwrap();
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2, 3]));
-    assert_eq!(vec.get_vec(1), Some(vec![10, 20]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2, 3]));
+    assert_eq!(vec.decode_vec(1), Some(vec![10, 20]));
 }
 
 #[test]
@@ -73,8 +73,8 @@ fn test_builder_with_byte_codec() {
 
     assert!(vec.is_ok());
     let vec = vec.unwrap();
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2, 3]));
-    assert_eq!(vec.get_vec(2), Some(vec![100, 200]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2, 3]));
+    assert_eq!(vec.decode_vec(2), Some(vec![100, 200]));
 }
 
 #[test]
@@ -89,7 +89,7 @@ fn test_builder_empty_sequences() {
     let vec = vec.unwrap();
     assert_eq!(vec.num_sequences(), 3);
     for i in 0..3 {
-        assert_eq!(vec.get_vec(i), Some(vec![]));
+        assert_eq!(vec.decode_vec(i), Some(vec![]));
     }
 }
 
@@ -104,11 +104,11 @@ fn test_builder_mixed_empty_non_empty() {
     assert!(vec.is_ok());
     let vec = vec.unwrap();
     assert_eq!(vec.num_sequences(), 5);
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2]));
-    assert_eq!(vec.get_vec(1), Some(vec![]));
-    assert_eq!(vec.get_vec(2), Some(vec![3, 4, 5]));
-    assert_eq!(vec.get_vec(3), Some(vec![]));
-    assert_eq!(vec.get_vec(4), Some(vec![6]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2]));
+    assert_eq!(vec.decode_vec(1), Some(vec![]));
+    assert_eq!(vec.decode_vec(2), Some(vec![3, 4, 5]));
+    assert_eq!(vec.decode_vec(3), Some(vec![]));
+    assert_eq!(vec.decode_vec(4), Some(vec![6]));
 }
 
 #[test]
@@ -188,9 +188,9 @@ fn test_from_iter_builder_gamma() {
     assert!(vec.is_ok());
     let vec = vec.unwrap();
     assert_eq!(vec.num_sequences(), 3);
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2, 3]));
-    assert_eq!(vec.get_vec(1), Some(vec![10, 20]));
-    assert_eq!(vec.get_vec(2), Some(vec![100]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2, 3]));
+    assert_eq!(vec.decode_vec(1), Some(vec![10, 20]));
+    assert_eq!(vec.decode_vec(2), Some(vec![100]));
 }
 
 #[test]
@@ -203,8 +203,8 @@ fn test_from_iter_builder_delta() {
 
     assert!(vec.is_ok());
     let vec = vec.unwrap();
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2, 3]));
-    assert_eq!(vec.get_vec(1), Some(vec![10, 20]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2, 3]));
+    assert_eq!(vec.decode_vec(1), Some(vec![10, 20]));
 }
 
 #[test]
@@ -218,9 +218,9 @@ fn test_from_iter_builder_with_empty_sequences() {
     assert!(vec.is_ok());
     let vec = vec.unwrap();
     assert_eq!(vec.num_sequences(), 3);
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2]));
-    assert_eq!(vec.get_vec(1), Some(vec![]));
-    assert_eq!(vec.get_vec(2), Some(vec![3, 4, 5]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2]));
+    assert_eq!(vec.decode_vec(1), Some(vec![]));
+    assert_eq!(vec.decode_vec(2), Some(vec![3, 4, 5]));
 }
 
 #[test]
@@ -245,7 +245,7 @@ fn test_from_iter_builder_single_sequence() {
     assert!(vec.is_ok());
     let vec = vec.unwrap();
     assert_eq!(vec.num_sequences(), 1);
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2, 3, 4, 5]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2, 3, 4, 5]));
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn test_from_slices_and_builder_consistency() {
     // Should decode to same data
     assert_eq!(vec1.num_sequences(), vec2.num_sequences());
     for i in 0..sequences.len() {
-        assert_eq!(vec1.get_vec(i), vec2.get_vec(i));
+        assert_eq!(vec1.decode_vec(i), vec2.decode_vec(i));
     }
 }
 
@@ -329,7 +329,7 @@ fn test_builder_determinism() {
 
     // Same codec should produce same encoding for same data
     for i in 0..sequences.len() {
-        assert_eq!(vec1.get_vec(i), vec2.get_vec(i));
+        assert_eq!(vec1.decode_vec(i), vec2.decode_vec(i));
     }
 }
 
@@ -343,7 +343,7 @@ fn test_builder_large_sequences() {
         .build(&sequences)
         .unwrap();
 
-    assert_eq!(vec.get_vec(0), Some(large_seq));
+    assert_eq!(vec.decode_vec(0), Some(large_seq));
 }
 
 #[test]
@@ -356,5 +356,5 @@ fn test_from_iter_builder_large_sequences() {
         .build()
         .unwrap();
 
-    assert_eq!(vec.get_vec(0), Some(large_seq));
+    assert_eq!(vec.decode_vec(0), Some(large_seq));
 }

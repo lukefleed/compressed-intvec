@@ -3,7 +3,7 @@
 //! This test suite validates:
 //! - Construction via [`SeqVec::from_slices`]
 //! - Query methods: `num_sequences()`, `is_empty()`, `encoding()`, bit offset queries
-//! - Access methods: `get()`, `get_vec()`, `get_into()`
+//! - Access methods: `get()`, `decode_vec()`, `decode_into()`
 //! - Type-parameterized testing across all integer types and endianness
 
 use compressed_intvec::seq::{LESeqVec, SeqVec};
@@ -181,105 +181,105 @@ where
         );
     }
 
-    // Test get_vec()
+    // Test decode_vec()
     for i in 0..sequences.len() {
-        let vec_result = vec.get_vec(i);
+        let vec_result = vec.decode_vec(i);
         assert_eq!(
             vec_result,
             Some(sequences[i].clone()),
-            "get_vec({}) mismatch {}",
+            "decode_vec({}) mismatch {}",
             i,
-            context("get_vec()")
+            context("decode_vec()")
         );
     }
 
-    // Test get_vec() out of bounds
+    // Test decode_vec() out of bounds
     assert_eq!(
-        vec.get_vec(sequences.len()),
+        vec.decode_vec(sequences.len()),
         None,
-        "get_vec(out_of_bounds) should be None {}",
-        context("get_vec()")
+        "decode_vec(out_of_bounds) should be None {}",
+        context("decode_vec()")
     );
 
-    // Test get_into() with buffer reuse
+    // Test decode_into() with buffer reuse
     if !sequences.is_empty() {
         let mut buf = Vec::new();
 
         for i in 0..sequences.len() {
-            let len_result = vec.get_into(i, &mut buf);
+            let len_result = vec.decode_into(i, &mut buf);
             assert_eq!(
                 len_result,
                 Some(sequences[i].len()),
-                "get_into({}) returned incorrect length {}",
+                "decode_into({}) returned incorrect length {}",
                 i,
-                context("get_into()")
+                context("decode_into()")
             );
             assert_eq!(
                 &buf,
                 &sequences[i],
-                "get_into({}) content mismatch {}",
+                "decode_into({}) content mismatch {}",
                 i,
-                context("get_into()")
+                context("decode_into()")
             );
         }
     }
 
-    // Test get_into() out of bounds
+    // Test decode_into() out of bounds
     let mut buf = Vec::new();
     assert_eq!(
-        vec.get_into(sequences.len(), &mut buf),
+        vec.decode_into(sequences.len(), &mut buf),
         None,
-        "get_into(out_of_bounds) should be None {}",
-        context("get_into()")
+        "decode_into(out_of_bounds) should be None {}",
+        context("decode_into()")
     );
 
-    // Test for_each_in_sequence()
+    // Test for_each()
     for i in 0..sequences.len() {
         let mut collected = Vec::new();
-        let result = vec.for_each_in_sequence(i, |value| {
+        let result = vec.for_each(i, |value| {
             collected.push(value);
         });
         assert_eq!(
             result,
             Some(()),
-            "for_each_in_sequence({}) should return Some(()) {}",
+            "for_each({}) should return Some(()) {}",
             i,
-            context("for_each_in_sequence()")
+            context("for_each()")
         );
         assert_eq!(
             &collected,
             &sequences[i],
-            "for_each_in_sequence({}) content mismatch {}",
+            "for_each({}) content mismatch {}",
             i,
-            context("for_each_in_sequence()")
+            context("for_each()")
         );
     }
 
     assert_eq!(
-        vec.for_each_in_sequence(sequences.len(), |_| {}),
+        vec.for_each(sequences.len(), |_| {}),
         None,
-        "for_each_in_sequence(out_of_bounds) should be None {}",
-        context("for_each_in_sequence()")
+        "for_each(out_of_bounds) should be None {}",
+        context("for_each()")
     );
 
-    // Test fold_sequence()
+    // Test fold()
     for i in 0..sequences.len() {
         let expected_sum: u64 = sequences[i].iter().map(|v| (*v).as_()).sum();
-        let folded_sum = vec.fold_sequence(i, 0u64, |acc, value| acc + value.as_());
+        let folded_sum = vec.fold(i, 0u64, |acc, value| acc + value.as_());
         assert_eq!(
             folded_sum,
             Some(expected_sum),
-            "fold_sequence({}) sum mismatch {}",
+            "fold({}) sum mismatch {}",
             i,
-            context("fold_sequence()")
+            context("fold()")
         );
     }
 
     assert_eq!(
-        vec.fold_sequence(sequences.len(), 0u64, |acc, value| acc + value.as_()),
+        vec.fold(sequences.len(), 0u64, |acc, value| acc + value.as_()),
         None,
-        "fold_sequence(out_of_bounds) should be None {}",
-        context("fold_sequence()")
+        "fold(out_of_bounds) should be None {}",
+        context("fold()")
     );
 }
 
@@ -373,7 +373,7 @@ fn test_empty_seqvec() {
     assert_eq!(vec.num_sequences(), 0);
     assert!(vec.is_empty());
     assert_eq!(vec.get(0), None);
-    assert_eq!(vec.get_vec(0), None);
+    assert_eq!(vec.decode_vec(0), None);
 
     let collected: Vec<_> = vec.iter().collect();
     assert!(collected.is_empty());
@@ -386,7 +386,7 @@ fn test_single_sequence() {
 
     assert_eq!(vec.num_sequences(), 1);
     assert!(!vec.is_empty());
-    assert_eq!(vec.get_vec(0), Some(vec![42]));
+    assert_eq!(vec.decode_vec(0), Some(vec![42]));
 }
 
 #[test]
@@ -397,7 +397,7 @@ fn test_all_empty_sequences() {
     assert_eq!(vec.num_sequences(), 3);
 
     for i in 0..3 {
-        let seq = vec.get_vec(i).unwrap();
+        let seq = vec.decode_vec(i).unwrap();
         assert!(seq.is_empty(), "Sequence {} should be empty", i);
     }
 }
@@ -408,11 +408,11 @@ fn test_mixed_empty_non_empty() {
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
     assert_eq!(vec.num_sequences(), 5);
-    assert_eq!(vec.get_vec(0), Some(vec![1, 2]));
-    assert_eq!(vec.get_vec(1), Some(vec![]));
-    assert_eq!(vec.get_vec(2), Some(vec![3, 4, 5]));
-    assert_eq!(vec.get_vec(3), Some(vec![]));
-    assert_eq!(vec.get_vec(4), Some(vec![6]));
+    assert_eq!(vec.decode_vec(0), Some(vec![1, 2]));
+    assert_eq!(vec.decode_vec(1), Some(vec![]));
+    assert_eq!(vec.decode_vec(2), Some(vec![3, 4, 5]));
+    assert_eq!(vec.decode_vec(3), Some(vec![]));
+    assert_eq!(vec.decode_vec(4), Some(vec![6]));
 }
 
 #[test]
@@ -423,7 +423,7 @@ fn test_single_element_sequences() {
     assert_eq!(vec.num_sequences(), 4);
 
     for i in 0..4 {
-        let seq = vec.get_vec(i).unwrap();
+        let seq = vec.decode_vec(i).unwrap();
         assert_eq!(seq.len(), 1);
         assert_eq!(seq[0], (i + 1) as u32);
     }
@@ -436,8 +436,8 @@ fn test_large_sequences() {
     let sequences: Vec<Vec<u32>> = vec![seq1.clone(), seq2.clone()];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
-    assert_eq!(vec.get_vec(0), Some(seq1));
-    assert_eq!(vec.get_vec(1), Some(seq2));
+    assert_eq!(vec.decode_vec(0), Some(seq1));
+    assert_eq!(vec.decode_vec(1), Some(seq2));
 }
 
 #[test]
@@ -445,9 +445,9 @@ fn test_identical_values() {
     let sequences: Vec<Vec<u32>> = vec![vec![42; 100], vec![99; 50], vec![1; 200]];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
-    assert_eq!(vec.get_vec(0), Some(vec![42; 100]));
-    assert_eq!(vec.get_vec(1), Some(vec![99; 50]));
-    assert_eq!(vec.get_vec(2), Some(vec![1; 200]));
+    assert_eq!(vec.decode_vec(0), Some(vec![42; 100]));
+    assert_eq!(vec.decode_vec(1), Some(vec![99; 50]));
+    assert_eq!(vec.decode_vec(2), Some(vec![1; 200]));
 }
 
 #[test]
@@ -455,8 +455,8 @@ fn test_all_zeros() {
     let sequences: Vec<Vec<u32>> = vec![vec![0; 50], vec![0; 100]];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
-    assert_eq!(vec.get_vec(0), Some(vec![0; 50]));
-    assert_eq!(vec.get_vec(1), Some(vec![0; 100]));
+    assert_eq!(vec.decode_vec(0), Some(vec![0; 50]));
+    assert_eq!(vec.decode_vec(1), Some(vec![0; 100]));
 }
 
 #[test]
@@ -468,9 +468,9 @@ fn test_random_data() {
 
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
-    assert_eq!(vec.get_vec(0), Some(seq1));
-    assert_eq!(vec.get_vec(1), Some(seq2));
-    assert_eq!(vec.get_vec(2), Some(seq3));
+    assert_eq!(vec.decode_vec(0), Some(seq1));
+    assert_eq!(vec.decode_vec(1), Some(seq2));
+    assert_eq!(vec.decode_vec(2), Some(seq3));
 }
 
 #[test]
@@ -481,22 +481,22 @@ fn test_signed_random_data() {
 
     let vec: LESeqVec<i32> = SeqVec::from_slices(&sequences).unwrap();
 
-    assert_eq!(vec.get_vec(0), Some(seq1));
-    assert_eq!(vec.get_vec(1), Some(seq2));
+    assert_eq!(vec.decode_vec(0), Some(seq1));
+    assert_eq!(vec.decode_vec(1), Some(seq2));
 }
 
 #[test]
-fn test_get_many_sequences() {
+fn test_decode_many_sequences() {
     let sequences: Vec<Vec<u32>> = vec![vec![1, 2, 3], vec![10], vec![100, 200]];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
     // Unsorted indices should return sequences in input order
     let indices = vec![2usize, 0usize];
-    let res = vec.get_many_sequences(&indices).unwrap();
+    let res = vec.decode_many(&indices).unwrap();
     assert_eq!(res, vec![sequences[2].clone(), sequences[0].clone()]);
 
     // Empty input returns empty result
     let empty: Vec<usize> = vec![];
-    let res_empty = vec.get_many_sequences(&empty).unwrap();
+    let res_empty = vec.decode_many(&empty).unwrap();
     assert!(res_empty.is_empty());
 }

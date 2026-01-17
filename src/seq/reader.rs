@@ -10,15 +10,12 @@
 //! enabling efficient reuse across multiple sequence accesses. This design mirrors
 //! [`IntVecReader`](crate::variable::IntVecReader) in the `variable` module.
 //!
-//! - **`get()`**: Returns a fresh [`SeqIter`] for lazy decoding (unavoidable due
-//!   to Rust's borrowing rules — the iterator must own its reader).
-//! - **`get_into()`**: Decodes directly into a buffer using the internal reader,
+//! - **`decode_into()`**: Decodes directly into a buffer using the internal reader,
 //!   avoiding iterator overhead.
 //!
 //! [`SeqVec`]: crate::seq::SeqVec
-//! [`SeqIter`]: crate::seq::SeqIter
 
-use super::{iter::SeqVecBitReader, SeqIter, SeqVec};
+use super::{iter::SeqVecBitReader, SeqVec};
 use crate::common::codec_reader::{CodecReader, IntVecBitReader};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
@@ -40,16 +37,9 @@ use dsi_bitstream::{
 /// multiple accesses. This design mirrors [`IntVecReader`](crate::variable::IntVecReader)
 /// in the `variable` module.
 ///
-/// The distinction between `get()` and `get_into()` reflects the constraints
-/// of Rust's borrowing rules:
-///
-/// - **`get()`**: Returns a [`SeqIter`] that owns its own bitstream reader.
-///   This allows lazy decoding and multiple iterators to coexist, but does not
-///   benefit from reader reuse.
-///
-/// - **`get_into()`**: Decodes directly into a provided buffer using the
-///   internal reader. This bypasses [`SeqIter`] creation and reuses the reader,
-///   providing better performance for buffer-filling patterns.
+/// The reader exposes only stateful, allocation-aware APIs that benefit from
+/// internal reader reuse. For lazy iteration, use [`SeqVec::get`](crate::seq::SeqVec::get)
+/// directly.
 ///
 /// # Examples
 ///
@@ -66,13 +56,13 @@ use dsi_bitstream::{
 /// // Create a reusable reader
 /// let mut reader = vec.reader();
 ///
-/// // Perform multiple random reads with optimized get_into()
+/// // Perform multiple random reads with optimized decode_into()
 /// let mut buffer = Vec::new();
-/// reader.get_into(2, &mut buffer).unwrap();
+/// reader.decode_into(2, &mut buffer).unwrap();
 /// assert_eq!(buffer, vec![1000, 2000, 3000, 4000]);
 ///
-/// // Or use get() for lazy iteration
-/// let seq0: Vec<u32> = reader.get(0).unwrap().collect();
+/// // Or use SeqVec::get() for lazy iteration
+/// let seq0: Vec<u32> = vec.get(0).unwrap().collect();
 /// assert_eq!(seq0, vec![10, 20, 30]);
 /// ```
 pub struct SeqVecReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
@@ -109,100 +99,12 @@ where
         }
     }
 
-    /// Retrieves an iterator over the sequence at `index`, or `None` if out of
-    /// bounds.
-    ///
-    /// This method performs a bounds check and then creates a [`SeqIter`] that
-    /// will decode the sequence lazily. The iterator owns its own bitstream
-    /// reader, so multiple iterators can exist simultaneously.
-    ///
-    /// # Note on Reader Reuse
-    ///
-    /// This method does **not** reuse the internal reader of `SeqVecReader`. The
-    /// returned [`SeqIter`] owns its own independent `SeqVecBitReader` and
-    /// `CodecReader`. For reader reuse in buffer-filling patterns, use
-    /// [`get_into()`](Self::get_into) instead, which benefits from the internal
-    /// reader and codec dispatcher.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u64]] = &[&[1, 2, 3], &[10, 20]];
-    /// let vec: LESeqVec<u64> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let mut reader = vec.reader();
-    /// assert_eq!(reader.get(1).unwrap().sum::<u64>(), 30);
-    /// assert!(reader.get(2).is_none()); // Out of bounds
-    /// ```
-    #[inline]
-    pub fn get(&self, index: usize) -> Option<SeqIter<'a, T, E>> {
-        if index >= self.seqvec.num_sequences() {
-            return None;
-        }
-        // SAFETY: The bounds check has been performed.
-        Some(unsafe { self.get_unchecked(index) })
-    }
-
-    /// Retrieves an iterator over the sequence at `index` without bounds
-    /// checking.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with an out-of-bounds `index` is undefined behavior.
-    /// The caller must ensure that `index < self.seqvec.num_sequences()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[5, 10, 15], &[20, 25]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let mut reader = vec.reader();
-    /// let seq: Vec<u32> = unsafe { reader.get_unchecked(0) }.collect();
-    /// assert_eq!(seq, vec![5, 10, 15]);
-    /// ```
-    #[inline]
-    pub unsafe fn get_unchecked(&self, index: usize) -> SeqIter<'a, T, E> {
-        debug_assert!(
-            index < self.seqvec.num_sequences(),
-            "Index out of bounds: index was {} but length was {}",
-            index,
-            self.seqvec.num_sequences()
-        );
-
-        // Retrieve bit boundaries for this sequence. SAFETY: Caller guarantees
-        // that `index` is in bounds, which implies that `index` and `index + 1`
-        // are valid indices into the bit_offsets vector (which has N+1 elements).
-        let start_bit = self.seqvec.sequence_start_bit_unchecked(index);
-        let end_bit = self.seqvec.sequence_end_bit_unchecked(index);
-
-        // Create a fresh iterator for this sequence. The iterator owns its own
-        // bitstream reader, so it can outlive this function call.
-        let len = self
-            .seqvec
-            .seq_lengths
-            .as_ref()
-            .map(|lengths| unsafe { lengths.get_unchecked(index) });
-
-        SeqIter::new_with_len(
-            self.seqvec.data.as_ref(),
-            start_bit,
-            end_bit,
-            self.seqvec.encoding,
-            len,
-        )
-    }
-
     /// Retrieves the sequence at `index` as a `Vec<T>`, or `None` if out of
     /// bounds.
     ///
     /// This method reuses the internal bitstream reader and codec dispatcher,
-    /// providing better performance than calling [`get()`](Self::get) and
-    /// collecting into a vector. For optimal memory allocation, ensure
+    /// providing better performance than collecting a [`SeqVec::get`]
+    /// iterator into a vector. For optimal memory allocation, ensure
     /// [`SeqVec::store_lengths(true)`](super::SeqVec::store_lengths) was used
     /// during construction.
     ///
@@ -215,13 +117,13 @@ where
     /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
     ///
     /// let mut reader = vec.reader();
-    /// assert_eq!(reader.get_vec(0), Some(vec![1, 2, 3]));
-    /// assert_eq!(reader.get_vec(2), None);
+    /// assert_eq!(reader.decode_vec(0), Some(vec![1, 2, 3]));
+    /// assert_eq!(reader.decode_vec(2), None);
     /// ```
     #[inline]
-    pub fn get_vec(&mut self, index: usize) -> Option<Vec<T>> {
+    pub fn decode_vec(&mut self, index: usize) -> Option<Vec<T>> {
         let mut buf = Vec::new();
-        self.get_into(index, &mut buf).map(|_| buf)
+        self.decode_into(index, &mut buf).map(|_| buf)
     }
 
     /// Retrieves the sequence at `index` into the provided buffer, returning the
@@ -233,7 +135,7 @@ where
     /// Returns `None` if `index` is out of bounds.
     ///
     /// This implementation reuses the internal bitstream reader and codec
-    /// dispatcher, avoiding the overhead of creating a temporary [`SeqIter`].
+    /// dispatcher, avoiding the overhead of creating a temporary iterator.
     ///
     /// # Examples
     ///
@@ -247,23 +149,34 @@ where
     /// let mut buffer = Vec::new();
     ///
     /// // Decode first sequence
-    /// let count = reader.get_into(0, &mut buffer).unwrap();
+    /// let count = reader.decode_into(0, &mut buffer).unwrap();
     /// assert_eq!(count, 3);
     /// assert_eq!(buffer, vec![1, 2, 3]);
     ///
     /// // Reuse buffer for second sequence
-    /// let count = reader.get_into(1, &mut buffer).unwrap();
+    /// let count = reader.decode_into(1, &mut buffer).unwrap();
     /// assert_eq!(count, 4);
     /// assert_eq!(buffer, vec![10, 20, 30, 40]);
     /// ```
     #[inline]
-    pub fn get_into(&mut self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
+    pub fn decode_into(&mut self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
         if index >= self.seqvec.num_sequences() {
             return None;
         }
 
         // SAFETY: Bounds check has been performed.
-        let start_bit = unsafe { self.seqvec.sequence_start_bit_unchecked(index) };
+        Some(unsafe { self.decode_into_unchecked(index, buf) })
+    }
+
+    /// Retrieves the sequence at `index` into the provided buffer without
+    /// bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline]
+    pub unsafe fn decode_into_unchecked(&mut self, index: usize, buf: &mut Vec<T>) -> usize {
+        let start_bit = self.seqvec.sequence_start_bit_unchecked(index);
 
         buf.clear();
 
@@ -288,6 +201,107 @@ where
             }
         }
 
-        Some(buf.len())
+        buf.len()
+    }
+
+    /// Applies a function to each element of sequence `index` without allocation.
+    ///
+    /// This method reuses the internal reader and codec dispatcher. Returns
+    /// `None` if `index` is out of bounds.
+    #[inline]
+    pub fn for_each<F>(&mut self, index: usize, f: F) -> Option<()>
+    where
+        F: FnMut(T),
+    {
+        if index >= self.seqvec.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        unsafe { self.for_each_unchecked(index, f) };
+        Some(())
+    }
+
+    /// Applies a function to each element of sequence `index` without bounds
+    /// checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline]
+    pub unsafe fn for_each_unchecked<F>(&mut self, index: usize, mut f: F)
+    where
+        F: FnMut(T),
+    {
+        let start_bit = self.seqvec.sequence_start_bit_unchecked(index);
+
+        let _ = self.reader.set_bit_pos(start_bit);
+
+        if let Some(lengths) = &self.seqvec.seq_lengths {
+            let count = lengths.get_unchecked(index);
+            for _ in 0..count {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                f(T::from_word(word));
+            }
+        } else {
+            let end_bit = self.seqvec.sequence_end_bit_unchecked(index);
+
+            while self.reader.bit_pos().unwrap() < end_bit {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                f(T::from_word(word));
+            }
+        }
+    }
+
+    /// Folds the elements of sequence `index` into an accumulator.
+    ///
+    /// This method reuses the internal reader and codec dispatcher. Returns
+    /// `None` if `index` is out of bounds.
+    #[inline]
+    pub fn fold<F, R>(&mut self, index: usize, init: R, f: F) -> Option<R>
+    where
+        F: FnMut(R, T) -> R,
+    {
+        if index >= self.seqvec.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        Some(unsafe { self.fold_unchecked(index, init, f) })
+    }
+
+    /// Folds the elements of sequence `index` into an accumulator without
+    /// bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    #[inline]
+    pub unsafe fn fold_unchecked<F, R>(&mut self, index: usize, init: R, mut f: F) -> R
+    where
+        F: FnMut(R, T) -> R,
+    {
+        let start_bit = self.seqvec.sequence_start_bit_unchecked(index);
+
+        let _ = self.reader.set_bit_pos(start_bit);
+
+        let mut acc = init;
+
+        if let Some(lengths) = &self.seqvec.seq_lengths {
+            let count = lengths.get_unchecked(index);
+            for _ in 0..count {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                acc = f(acc, T::from_word(word));
+            }
+        } else {
+            let end_bit = self.seqvec.sequence_end_bit_unchecked(index);
+
+            while self.reader.bit_pos().unwrap() < end_bit {
+                let word = self.code_reader.read(&mut self.reader).unwrap();
+                acc = f(acc, T::from_word(word));
+            }
+        }
+
+        acc
     }
 }

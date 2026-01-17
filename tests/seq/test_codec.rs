@@ -20,7 +20,7 @@ fn test_codec_gamma() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -33,7 +33,7 @@ fn test_codec_delta() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -46,7 +46,7 @@ fn test_codec_zeta_no_param() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -62,7 +62,7 @@ fn test_codec_zeta_with_k() {
 
         for (i, expected) in sequences.iter().enumerate() {
             assert_eq!(
-                vec.get_vec(i),
+                vec.decode_vec(i),
                 Some(expected.clone()),
                 "Zeta codec with k={:?} failed",
                 k
@@ -80,7 +80,7 @@ fn test_codec_vbyte_le() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -93,7 +93,7 @@ fn test_codec_vbyte_be() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -106,7 +106,7 @@ fn test_codec_unary() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -119,7 +119,7 @@ fn test_codec_binary() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -132,7 +132,7 @@ fn test_codec_golomb_le() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -145,7 +145,7 @@ fn test_codec_golomb_rice() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -158,7 +158,7 @@ fn test_codec_exp_golomb() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -173,7 +173,7 @@ fn test_codec_auto() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -192,7 +192,7 @@ fn test_codec_auto_with_varied_data() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -205,7 +205,7 @@ fn test_codec_auto_with_small_values() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -228,7 +228,7 @@ fn test_codec_with_empty_sequences() {
 
         for (i, expected) in sequences.iter().enumerate() {
             assert_eq!(
-                vec.get_vec(i),
+                vec.decode_vec(i),
                 Some(expected.clone()),
                 "Failed with codec {:?}", codec
             );
@@ -251,7 +251,7 @@ fn test_codec_with_all_zeros() {
             .unwrap();
 
         for (i, expected) in sequences.iter().enumerate() {
-            assert_eq!(vec.get_vec(i), Some(expected.clone()));
+            assert_eq!(vec.decode_vec(i), Some(expected.clone()));
         }
     }
 }
@@ -275,7 +275,7 @@ fn test_codec_with_large_values() {
             .unwrap();
 
         for (i, expected) in sequences.iter().enumerate() {
-            assert_eq!(vec.get_vec(i), Some(expected.clone()));
+            assert_eq!(vec.decode_vec(i), Some(expected.clone()));
         }
     }
 }
@@ -296,7 +296,7 @@ fn test_codec_with_single_element_sequences() {
             .unwrap();
 
         for (i, expected) in sequences.iter().enumerate() {
-            assert_eq!(vec.get_vec(i), Some(expected.clone()));
+            assert_eq!(vec.decode_vec(i), Some(expected.clone()));
         }
     }
 }
@@ -312,7 +312,7 @@ fn test_codec_gamma_signed() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -325,7 +325,7 @@ fn test_codec_delta_signed() {
         .unwrap();
 
     for (i, expected) in sequences.iter().enumerate() {
-        assert_eq!(vec.get_vec(i), Some(expected.clone()));
+        assert_eq!(vec.decode_vec(i), Some(expected.clone()));
     }
 }
 
@@ -347,7 +347,7 @@ fn test_same_codec_produces_same_data() {
 
     // Should produce identical data
     for i in 0..sequences.len() {
-        assert_eq!(vec1.get_vec(i), vec2.get_vec(i));
+        assert_eq!(vec1.decode_vec(i), vec2.decode_vec(i));
     }
 }
 
@@ -373,8 +373,8 @@ fn test_different_codecs_produce_different_encodings() {
     // Different codecs should produce different bit counts (usually)
     // but still decode to the same data
     for i in 0..sequences.len() {
-        assert_eq!(vec_gamma.get_vec(i), vec_delta.get_vec(i));
-        assert_eq!(vec_gamma.get_vec(i), vec_vbyte.get_vec(i));
+        assert_eq!(vec_gamma.decode_vec(i), vec_delta.decode_vec(i));
+        assert_eq!(vec_gamma.decode_vec(i), vec_vbyte.decode_vec(i));
     }
 }
 
@@ -398,7 +398,7 @@ fn test_codec_iteration_consistency() {
 
         // Test individual access
         for (i, expected) in sequences.iter().enumerate() {
-            assert_eq!(vec.get_vec(i), Some(expected.clone()));
+            assert_eq!(vec.decode_vec(i), Some(expected.clone()));
         }
     }
 }

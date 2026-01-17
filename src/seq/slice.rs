@@ -136,18 +136,39 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
     /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
     ///
     /// let slice = vec.slice(1, 2).unwrap();
-    /// assert_eq!(slice.get_vec(0), Some(vec![3, 4, 5]));
-    /// assert_eq!(slice.get_vec(1), Some(vec![6]));
-    /// assert_eq!(slice.get_vec(2), None); // Out of bounds
+    /// assert_eq!(slice.decode_vec(0), Some(vec![3, 4, 5]));
+    /// assert_eq!(slice.decode_vec(1), Some(vec![6]));
+    /// assert_eq!(slice.decode_vec(2), None); // Out of bounds
     /// ```
     #[inline]
-    pub fn get_vec(&self, index: usize) -> Option<Vec<T>>
+    pub fn decode_vec(&self, index: usize) -> Option<Vec<T>>
     where
         for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
             + BitSeek<Error = core::convert::Infallible>,
     {
-        Some(self.get(index)?.collect())
+        let parent_index = self.start.checked_add(index)?;
+        if index >= self.len {
+            return None;
+        }
+        self.vec.decode_vec(parent_index)
+    }
+
+    /// Returns the sequence at `index` as a materialized `Vec<T>` without bounds
+    /// checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    #[inline]
+    pub unsafe fn decode_vec_unchecked(&self, index: usize) -> Vec<T>
+    where
+        for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        let parent_index = self.start + index;
+        self.vec.decode_vec_unchecked(parent_index)
     }
 
     /// Decodes the sequence at `index` into a reusable buffer.
@@ -167,24 +188,107 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
     /// let slice = vec.slice(1, 2).unwrap();
     ///
     /// let mut buf = Vec::new();
-    /// assert_eq!(slice.get_into(0, &mut buf), Some(3));
+    /// assert_eq!(slice.decode_into(0, &mut buf), Some(3));
     /// assert_eq!(buf, vec![3, 4, 5]);
     ///
     /// // Buffer is reused (cleared internally).
-    /// assert_eq!(slice.get_into(1, &mut buf), Some(1));
+    /// assert_eq!(slice.decode_into(1, &mut buf), Some(1));
     /// assert_eq!(buf, vec![6]);
     /// ```
     #[inline]
-    pub fn get_into(&self, index: usize, buf: &mut Vec<T>) -> Option<usize>
+    pub fn decode_into(&self, index: usize, buf: &mut Vec<T>) -> Option<usize>
     where
         for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
             + BitSeek<Error = core::convert::Infallible>,
     {
-        let iter = self.get(index)?;
-        buf.clear();
-        buf.extend(iter);
-        Some(buf.len())
+        let parent_index = self.start.checked_add(index)?;
+        if index >= self.len {
+            return None;
+        }
+        self.vec.decode_into(parent_index, buf)
+    }
+
+    /// Decodes sequence `index` into the provided buffer without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    #[inline]
+    pub unsafe fn decode_into_unchecked(&self, index: usize, buf: &mut Vec<T>) -> usize
+    where
+        for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        let parent_index = self.start + index;
+        self.vec.decode_into_unchecked(parent_index, buf)
+    }
+
+    /// Applies a function to each element of sequence `index` without allocation.
+    #[inline]
+    pub fn for_each<F>(&self, index: usize, f: F) -> Option<()>
+    where
+        F: FnMut(T),
+        for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        if index >= self.len {
+            return None;
+        }
+        let parent_index = self.start + index;
+        self.vec.for_each(parent_index, f)
+    }
+
+    /// Applies a function to each element of sequence `index` without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    #[inline]
+    pub unsafe fn for_each_unchecked<F>(&self, index: usize, f: F)
+    where
+        F: FnMut(T),
+        for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        let parent_index = self.start + index;
+        self.vec.for_each_unchecked(parent_index, f);
+    }
+
+    /// Folds the elements of sequence `index` into an accumulator.
+    #[inline]
+    pub fn fold<F, R>(&self, index: usize, init: R, f: F) -> Option<R>
+    where
+        F: FnMut(R, T) -> R,
+        for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        if index >= self.len {
+            return None;
+        }
+        let parent_index = self.start + index;
+        self.vec.fold(parent_index, init, f)
+    }
+
+    /// Folds the elements of sequence `index` into an accumulator without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds index is undefined behavior.
+    #[inline]
+    pub unsafe fn fold_unchecked<F, R>(&self, index: usize, init: R, f: F) -> R
+    where
+        F: FnMut(R, T) -> R,
+        for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        let parent_index = self.start + index;
+        self.vec.fold_unchecked(parent_index, init, f)
     }
 
     /// Returns an iterator over the sequences in the slice.

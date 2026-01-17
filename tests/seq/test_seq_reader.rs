@@ -1,11 +1,11 @@
 //! Comprehensive integration tests for [`SeqVecSeqReader`] functionality.
 //!
 //! This test suite validates:
-//! - Basic sequential access via [`SeqVecSeqReader::get_into`]
-//! - API uniformity: `get()`, `get_vec()`, `get_into()` return consistent results
+//! - Basic sequential access via [`SeqVecSeqReader::decode_into`]
+//! - API uniformity: `decode_vec()` and `decode_into()` return consistent results
 //! - Bounds checking and out-of-bounds behavior
 //! - Empty sequence handling
-//! - Buffer reuse in `get_into()`
+//! - Buffer reuse in `decode_into()`
 //! - State tracking for sequential access patterns
 //! - Correctness compared to [`SeqVecReader`]
 //! - Different codec configurations
@@ -53,20 +53,20 @@ where
     let mut seq_reader = vec.seq_reader();
     let mut buffer = Vec::new();
 
-    // Test sequential access with get_into - primary use case
+    // Test sequential access with decode_into - primary use case
     for (i, expected_seq) in sequences.iter().enumerate() {
-        let count = seq_reader.get_into(i, &mut buffer).unwrap_or_else(|| {
+        let count = seq_reader.decode_into(i, &mut buffer).unwrap_or_else(|| {
             panic!(
-                "seq_reader.get_into({}) returned None {}",
+                "seq_reader.decode_into({}) returned None {}",
                 i,
-                context("get_into")
+                context("decode_into")
             )
         });
 
         assert_eq!(
             count,
             expected_seq.len(),
-            "seq_reader.get_into({}) count mismatch {}",
+            "seq_reader.decode_into({}) count mismatch {}",
             i,
             context("count")
         );
@@ -74,46 +74,45 @@ where
         assert_eq!(
             &buffer,
             expected_seq,
-            "seq_reader.get_into({}) content mismatch {}",
+            "seq_reader.decode_into({}) content mismatch {}",
             i,
             context("content")
         );
     }
 
-    // Test that get() returns consistent results with get_into()
-    let mut seq_reader2 = vec.seq_reader();
+    // Test that SeqVec::get() returns consistent results with decode_into()
     for (i, expected_seq) in sequences.iter().enumerate() {
-        let retrieved: Vec<T> = seq_reader2
+        let retrieved: Vec<T> = vec
             .get(i)
-            .unwrap_or_else(|| panic!("seq_reader.get({}) returned None {}", i, context("get")))
+            .unwrap_or_else(|| panic!("vec.get({}) returned None {}", i, context("get")))
             .collect();
 
         assert_eq!(
             &retrieved,
             expected_seq,
-            "seq_reader.get({}) mismatch {}",
+            "vec.get({}) mismatch {}",
             i,
             context("get consistency")
         );
     }
 
-    // Test that get_vec() returns consistent results
+    // Test that decode_vec() returns consistent results
     let mut seq_reader3 = vec.seq_reader();
     for (i, expected_seq) in sequences.iter().enumerate() {
-        let retrieved = seq_reader3.get_vec(i).unwrap_or_else(|| {
+        let retrieved = seq_reader3.decode_vec(i).unwrap_or_else(|| {
             panic!(
-                "seq_reader.get_vec({}) returned None {}",
+                "seq_reader.decode_vec({}) returned None {}",
                 i,
-                context("get_vec")
+                context("decode_vec")
             )
         });
 
         assert_eq!(
             &retrieved,
             expected_seq,
-            "seq_reader.get_vec({}) mismatch {}",
+            "seq_reader.decode_vec({}) mismatch {}",
             i,
-            context("get_vec consistency")
+            context("decode_vec consistency")
         );
     }
 }
@@ -152,7 +151,7 @@ fn test_seq_reader_empty_sequences() {
 
     // Test sequential access including empty sequences
     for (i, expected_seq) in sequences.iter().enumerate() {
-        let count = seq_reader.get_into(i, &mut buffer).unwrap();
+        let count = seq_reader.decode_into(i, &mut buffer).unwrap();
         assert_eq!(
             count,
             expected_seq.len(),
@@ -171,21 +170,21 @@ fn test_seq_reader_out_of_bounds() {
     let mut buffer = Vec::new();
 
     // Access within bounds
-    assert!(seq_reader.get_into(0, &mut buffer).is_some());
-    assert!(seq_reader.get_into(1, &mut buffer).is_some());
-    assert!(seq_reader.get_into(2, &mut buffer).is_some());
+    assert!(seq_reader.decode_into(0, &mut buffer).is_some());
+    assert!(seq_reader.decode_into(1, &mut buffer).is_some());
+    assert!(seq_reader.decode_into(2, &mut buffer).is_some());
 
     // Access out of bounds
-    assert!(seq_reader.get_into(3, &mut buffer).is_none());
-    assert!(seq_reader.get_into(100, &mut buffer).is_none());
+    assert!(seq_reader.decode_into(3, &mut buffer).is_none());
+    assert!(seq_reader.decode_into(100, &mut buffer).is_none());
 
-    // get() should also return None
-    assert!(seq_reader.get(3).is_none());
-    assert!(seq_reader.get(100).is_none());
+    // SeqVec::get() should also return None
+    assert!(vec.get(3).is_none());
+    assert!(vec.get(100).is_none());
 
-    // get_vec() should also return None
-    assert!(seq_reader.get_vec(3).is_none());
-    assert!(seq_reader.get_vec(100).is_none());
+    // decode_vec() should also return None
+    assert!(seq_reader.decode_vec(3).is_none());
+    assert!(seq_reader.decode_vec(100).is_none());
 }
 
 #[test]
@@ -196,18 +195,18 @@ fn test_seq_reader_buffer_reuse() {
     let mut buffer = Vec::new();
 
     // First access allocates buffer
-    seq_reader.get_into(0, &mut buffer).unwrap();
+    seq_reader.decode_into(0, &mut buffer).unwrap();
     assert_eq!(buffer, vec![1, 2, 3]);
     let capacity_after_first = buffer.capacity();
 
     // Second access clears and reuses buffer
-    seq_reader.get_into(1, &mut buffer).unwrap();
+    seq_reader.decode_into(1, &mut buffer).unwrap();
     assert_eq!(buffer, vec![10, 20, 30, 40, 50]);
     // Capacity should be >= previous capacity (may grow but not shrink)
     assert!(buffer.capacity() >= capacity_after_first);
 
     // Third access with smaller sequence
-    seq_reader.get_into(2, &mut buffer).unwrap();
+    seq_reader.decode_into(2, &mut buffer).unwrap();
     assert_eq!(buffer, vec![100]);
     // Buffer should have preserved its capacity
     assert!(buffer.capacity() >= capacity_after_first);
@@ -229,7 +228,7 @@ fn test_seq_reader_random_access_pattern() {
     // Access in non-sequential order
     let access_order = [2, 4, 0, 3, 1];
     for &index in &access_order {
-        seq_reader.get_into(index, &mut buffer).unwrap();
+        seq_reader.decode_into(index, &mut buffer).unwrap();
         assert_eq!(
             &buffer, &sequences[index],
             "Random access failed at index {}",
@@ -250,17 +249,17 @@ fn test_seq_reader_consistency_with_seqvec_reader() {
     ];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
 
-    let reader = vec.reader(); // Stateless reader
+    let mut reader = vec.reader(); // Stateless reader
     let mut seq_reader = vec.seq_reader(); // Stateful reader
     let mut buffer = Vec::new();
 
     // Compare all sequences
     for i in 0..sequences.len() {
         // Get from stateless reader
-        let from_reader: Vec<u32> = reader.get(i).unwrap().collect();
+        let from_reader: Vec<u32> = reader.decode_vec(i).unwrap();
 
-        // Get from stateful reader via get_into
-        seq_reader.get_into(i, &mut buffer).unwrap();
+        // Get from stateful reader via decode_into
+        seq_reader.decode_into(i, &mut buffer).unwrap();
 
         assert_eq!(
             &buffer, &from_reader,
@@ -293,7 +292,7 @@ fn test_seq_reader_with_delta_codec() {
     let mut buffer = Vec::new();
 
     for (i, expected_seq) in sequences.iter().enumerate() {
-        seq_reader.get_into(i, &mut buffer).unwrap();
+        seq_reader.decode_into(i, &mut buffer).unwrap();
         assert_eq!(
             &buffer, expected_seq,
             "Delta codec: content mismatch at index {}",
@@ -319,7 +318,7 @@ fn test_seq_reader_with_gamma_codec() {
     let mut buffer = Vec::new();
 
     for (i, expected_seq) in sequences.iter().enumerate() {
-        seq_reader.get_into(i, &mut buffer).unwrap();
+        seq_reader.decode_into(i, &mut buffer).unwrap();
         assert_eq!(
             &buffer, expected_seq,
             "Gamma codec: content mismatch at index {}",
@@ -335,11 +334,11 @@ fn test_seq_reader_single_sequence() {
     let mut seq_reader = vec.seq_reader();
     let mut buffer = Vec::new();
 
-    seq_reader.get_into(0, &mut buffer).unwrap();
+    seq_reader.decode_into(0, &mut buffer).unwrap();
     assert_eq!(buffer, vec![1, 2, 3, 4, 5]);
 
     // Out of bounds
-    assert!(seq_reader.get_into(1, &mut buffer).is_none());
+    assert!(seq_reader.decode_into(1, &mut buffer).is_none());
 }
 
 #[test]
@@ -350,7 +349,7 @@ fn test_seq_reader_all_empty_sequences() {
     let mut buffer = Vec::new();
 
     for i in 0..3 {
-        let count = seq_reader.get_into(i, &mut buffer).unwrap();
+        let count = seq_reader.decode_into(i, &mut buffer).unwrap();
         assert_eq!(count, 0, "Empty sequence should have count 0");
         assert!(buffer.is_empty(), "Buffer should be empty");
     }
@@ -364,22 +363,22 @@ fn test_seq_reader_forward_backward_access() {
     let mut buffer = Vec::new();
 
     // Forward access
-    seq_reader.get_into(0, &mut buffer).unwrap();
+    seq_reader.decode_into(0, &mut buffer).unwrap();
     assert_eq!(buffer, vec![1, 2]);
 
-    seq_reader.get_into(1, &mut buffer).unwrap();
+    seq_reader.decode_into(1, &mut buffer).unwrap();
     assert_eq!(buffer, vec![3, 4]);
 
     // Backward access (should still work correctly)
-    seq_reader.get_into(0, &mut buffer).unwrap();
+    seq_reader.decode_into(0, &mut buffer).unwrap();
     assert_eq!(buffer, vec![1, 2]);
 
     // Jump forward
-    seq_reader.get_into(3, &mut buffer).unwrap();
+    seq_reader.decode_into(3, &mut buffer).unwrap();
     assert_eq!(buffer, vec![7, 8]);
 
     // Jump backward
-    seq_reader.get_into(2, &mut buffer).unwrap();
+    seq_reader.decode_into(2, &mut buffer).unwrap();
     assert_eq!(buffer, vec![5, 6]);
 }
 
@@ -396,7 +395,7 @@ fn test_seq_reader_large_values() {
     let mut buffer = Vec::new();
 
     for (i, expected_seq) in sequences.iter().enumerate() {
-        seq_reader.get_into(i, &mut buffer).unwrap();
+        seq_reader.decode_into(i, &mut buffer).unwrap();
         assert_eq!(
             &buffer, expected_seq,
             "Large values: content mismatch at index {}",
@@ -416,42 +415,42 @@ fn test_seq_reader_many_sequences() {
 
     // Test every 100th sequence
     for i in (0..1000).step_by(100) {
-        seq_reader.get_into(i, &mut buffer).unwrap();
+        seq_reader.decode_into(i, &mut buffer).unwrap();
         assert_eq!(buffer, vec![i as u32, i as u32 + 1, i as u32 + 2]);
     }
 
     // Test last sequence
-    seq_reader.get_into(999, &mut buffer).unwrap();
+    seq_reader.decode_into(999, &mut buffer).unwrap();
     assert_eq!(buffer, vec![999, 1000, 1001]);
 }
 
 #[test]
 fn test_seq_reader_api_uniformity() {
-    // Verify that get(), get_vec(), and get_into() all return the same data
+    // Verify that SeqVec::get(), decode_vec(), and decode_into() return the same data
     let sequences = vec![vec![1u32, 2, 3], vec![], vec![10, 20, 30, 40]];
     let vec: LESeqVec<u32> = SeqVec::from_slices(&sequences).unwrap();
     let mut seq_reader = vec.seq_reader();
     let mut buffer = Vec::new();
 
     for i in 0..sequences.len() {
-        // get() returns iterator
-        let from_get: Vec<u32> = seq_reader.get(i).unwrap().collect();
+        // SeqVec::get() returns iterator
+        let from_get: Vec<u32> = vec.get(i).unwrap().collect();
 
-        // get_vec() returns Vec
-        let from_get_vec = seq_reader.get_vec(i).unwrap();
+        // decode_vec() returns Vec
+        let from_get_vec = seq_reader.decode_vec(i).unwrap();
 
-        // get_into() fills buffer
-        seq_reader.get_into(i, &mut buffer).unwrap();
+        // decode_into() fills buffer
+        seq_reader.decode_into(i, &mut buffer).unwrap();
 
         assert_eq!(
             from_get, from_get_vec,
-            "get() vs get_vec() mismatch at {}",
+            "get() vs decode_vec() mismatch at {}",
             i
         );
-        assert_eq!(from_get, buffer, "get() vs get_into() mismatch at {}", i);
+        assert_eq!(from_get, buffer, "get() vs decode_into() mismatch at {}", i);
         assert_eq!(
             from_get_vec, buffer,
-            "get_vec() vs get_into() mismatch at {}",
+            "decode_vec() vs decode_into() mismatch at {}",
             i
         );
         assert_eq!(
