@@ -232,55 +232,6 @@ where
         "decode_into(out_of_bounds) should be None {}",
         context("decode_into()")
     );
-
-    // Test for_each()
-    for i in 0..sequences.len() {
-        let mut collected = Vec::new();
-        let result = vec.for_each(i, |value| {
-            collected.push(value);
-        });
-        assert_eq!(
-            result,
-            Some(()),
-            "for_each({}) should return Some(()) {}",
-            i,
-            context("for_each()")
-        );
-        assert_eq!(
-            &collected,
-            &sequences[i],
-            "for_each({}) content mismatch {}",
-            i,
-            context("for_each()")
-        );
-    }
-
-    assert_eq!(
-        vec.for_each(sequences.len(), |_| {}),
-        None,
-        "for_each(out_of_bounds) should be None {}",
-        context("for_each()")
-    );
-
-    // Test fold()
-    for i in 0..sequences.len() {
-        let expected_sum: u64 = sequences[i].iter().map(|v| (*v).as_()).sum();
-        let folded_sum = vec.fold(i, 0u64, |acc, value| acc + value.as_());
-        assert_eq!(
-            folded_sum,
-            Some(expected_sum),
-            "fold({}) sum mismatch {}",
-            i,
-            context("fold()")
-        );
-    }
-
-    assert_eq!(
-        vec.fold(sequences.len(), 0u64, |acc, value| acc + value.as_()),
-        None,
-        "fold(out_of_bounds) should be None {}",
-        context("fold()")
-    );
 }
 
 // --- Macro for Type-Parameterized Testing ---

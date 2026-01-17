@@ -69,35 +69,6 @@ fn benchmark_streaming_apis(c: &mut Criterion) {
             })
         });
 
-        // for_each() streaming callback
-        group.bench_function("for_each", |b| {
-            b.iter(|| {
-                let mut sum = 0u64;
-                for &idx in black_box(&indices) {
-                    seqvec
-                        .for_each(idx, |value| {
-                            sum += value as u64;
-                        })
-                        .unwrap();
-                }
-                black_box(sum)
-            })
-        });
-
-        // fold() streaming fold
-        group.bench_function("fold", |b| {
-            b.iter(|| {
-                let mut sum = 0u64;
-                for &idx in black_box(&indices) {
-                    let local_sum = seqvec
-                        .fold(idx, 0u64, |acc, value| acc + value as u64)
-                        .unwrap();
-                    sum += local_sum;
-                }
-                black_box(sum)
-            })
-        });
-
         // decode_into() with buffer reuse
         group.bench_function("decode_into_reuse", |b| {
             b.iter(|| {
