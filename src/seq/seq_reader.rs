@@ -246,7 +246,7 @@ where
         }
 
         if let Some(lengths) = &self.seqvec.seq_lengths {
-            let count = lengths.get_unchecked(index) as usize;
+            let count = lengths.get_unchecked(index);
             buf.reserve(count);
             for _ in 0..count {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
@@ -327,7 +327,7 @@ where
         }
 
         if let Some(lengths) = &self.seqvec.seq_lengths {
-            let count = unsafe { lengths.get_unchecked(index) } as usize;
+            let count = unsafe { lengths.get_unchecked(index) };
             buf.reserve(count);
             for _ in 0..count {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
@@ -385,7 +385,7 @@ where
         }
 
         if let Some(lengths) = &self.seqvec.seq_lengths {
-            let count = lengths.get_unchecked(index) as usize;
+            let count = lengths.get_unchecked(index);
             for _ in 0..count {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
                 f(T::from_word(word));
@@ -442,7 +442,7 @@ where
         let mut acc = init;
 
         if let Some(lengths) = &self.seqvec.seq_lengths {
-            let count = lengths.get_unchecked(index) as usize;
+            let count = lengths.get_unchecked(index);
             for _ in 0..count {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
                 acc = f(acc, T::from_word(word));
