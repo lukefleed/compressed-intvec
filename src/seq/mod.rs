@@ -994,7 +994,11 @@ where
     /// // Perform multiple random accesses efficiently
     /// assert_eq!(reader.decode_vec(2), Some(vec![6]));
     /// assert_eq!(reader.decode_vec(0), Some(vec![1, 2]));
-    /// reader.for_each(1, |value| assert!(value <= 5));
+    /// if let Some(seq) = reader.decode_vec(1) {
+    ///     for value in seq {
+    ///         assert!(value <= 5);
+    ///     }
+    /// }
     /// ```
     #[inline]
     pub fn reader(&self) -> SeqVecReader<'_, T, E, B> {
@@ -1174,9 +1178,7 @@ where
             return Vec::new();
         }
 
-        let mut results = vec![Vec::new(); indices.len()];
-
-        // Create indexed pairs: (sequence_index, position_in_results)
+        // Build indexed pairs: (sequence_index, original_position_in_results)
         let mut indexed_indices: Vec<(usize, usize)> = indices
             .iter()
             .enumerate()
@@ -1186,11 +1188,24 @@ where
         // Sort by sequence index to enable more sequential bitstream access.
         indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
 
-        // Reuse a single reader and decode directly into the final output slot.
+        // Pre-allocate result vectors with estimated capacity based on bit ranges.
+        // Iterate in original order to populate capacities before decoding.
+        let mut results: Vec<Vec<T>> = indices
+            .iter()
+            .map(|&idx| {
+                let start = self.sequence_start_bit_unchecked(idx);
+                let end = self.sequence_end_bit_unchecked(idx);
+                // Estimate ~4 bits per element (reasonable for Delta with values 1-10k).
+                let cap = ((end - start) / 4).max(1) as usize;
+                Vec::with_capacity(cap)
+            })
+            .collect();
+
+        // Decode in sorted order for compressed data locality.
         let mut reader = self.reader();
 
-        for &(target_index, original_position) in &indexed_indices {
-            let output = &mut results[original_position];
+        for &(target_index, original_pos) in &indexed_indices {
+            let output = &mut results[original_pos];
             let _ = reader.decode_into(target_index, output);
         }
 
@@ -1243,18 +1258,31 @@ where
             return;
         }
 
+        // Build indexed pairs: (sequence_index, original_position_in_output)
         let mut indexed_indices: Vec<(usize, usize)> = indices
             .iter()
             .enumerate()
             .map(|(i, &idx)| (idx, i))
             .collect();
 
+        // Sort by sequence index to enable more sequential bitstream access.
         indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
 
+        // Pre-allocate capacities for output vectors based on bit ranges.
+        // Iterate in original order to populate capacities before decoding.
+        for (i, &idx) in indices.iter().enumerate() {
+            let start = self.sequence_start_bit_unchecked(idx);
+            let end = self.sequence_end_bit_unchecked(idx);
+            // Estimate ~4 bits per element (reasonable for Delta with values 1-10k).
+            let cap = ((end - start) / 4).max(1) as usize;
+            output[i].reserve(cap);
+        }
+
+        // Decode in sorted order for compressed data locality.
         let mut reader = self.reader();
 
-        for &(target_index, original_position) in &indexed_indices {
-            let output_slot = &mut output[original_position];
+        for &(target_index, original_pos) in &indexed_indices {
+            let output_slot = &mut output[original_pos];
             let _ = reader.decode_into(target_index, output_slot);
         }
     }
