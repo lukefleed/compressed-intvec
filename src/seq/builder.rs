@@ -94,16 +94,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 
     /// Sets the compression codec to use.
     ///
-    /// ## Codec Selection Guidelines
-    ///
-    /// - [`Auto`](VariableCodecSpec::Auto): Best compression ratio, but requires
-    ///   two-pass construction with O(N) temporary allocation.
-    /// - [`Gamma`](VariableCodecSpec::Gamma): Good general-purpose choice for
-    ///   data skewed towards small values. Single-pass.
-    /// - [`Delta`](VariableCodecSpec::Delta): Better than Gamma for larger values.
-    ///   Single-pass.
-    /// - [`Zeta { k: Some(k) }`](VariableCodecSpec::Zeta): Optimal for power-law
-    ///   distributions. Single-pass when `k` is specified.
+    /// For the available codecs, see [`VariableCodecSpec`].
     #[inline]
     pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
         self.codec_spec = codec_spec;
@@ -125,19 +116,26 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 
     /// Builds the [`SeqVec`] from a slice of sequences.
     ///
-    /// Each element of `sequences` is a sequence that will be compressed and
-    /// stored. Empty sequences are supported.
+    /// Each element represents a sequence to compress and store. Empty sequences
+    /// are supported.
     ///
     /// ## Type Requirements
     ///
-    /// The sequences can be any type that implements `AsRef<[T]>`, such as
+    /// The sequences can be any type that implements [`AsRef<[T]>`], such as
     /// `&[T]`, `Vec<T>`, or `Box<[T]>`.
     ///
-    /// ## Errors
+    /// # Arguments
+    ///
+    /// * `sequences` - A slice of sequences to compress. Each sequence is accessed
+    ///   via [`AsRef<[T]>`].
+    ///
+    /// # Errors
     ///
     /// Returns a [`SeqVecError`] if:
     /// - Codec resolution fails.
     /// - An I/O error occurs during encoding.
+    ///
+    /// [`AsRef<[T]>`]: core::convert::AsRef
     ///
     /// ## Examples
     ///
@@ -171,7 +169,10 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 
     /// Two-pass construction: analyze data first, then encode.
     ///
-    /// Used when the codec requires data analysis (Auto, or parameter estimation).
+    /// This method is used internally when the codec requires data analysis to
+    /// determine optimal parameters. It collects all elements in the first pass,
+    /// analyzes their distribution, then encodes them in a second pass using the
+    /// selected codec. This avoids unnecessary analysis for pre-specified codecs.
     fn build_two_pass<S: AsRef<[T]>>(
         self,
         sequences: &[S],
@@ -196,7 +197,9 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 
     /// Single-pass construction: encode directly without data analysis.
     ///
-    /// Used when the codec is fully specified (no Auto, no parameter estimation).
+    /// This method is used when the codec is fully specified and requires no
+    /// data analysis. It streams sequences directly to the encoder without
+    /// collecting them, making it more memory-efficient for large datasets.
     fn build_single_pass<S: AsRef<[T]>>(
         self,
         sequences: &[S],
@@ -214,6 +217,18 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     }
 
     /// Core encoding logic shared by both construction paths.
+    ///
+    /// This method handles the actual compression of sequences, including:
+    /// - Iterating over all sequences and their elements
+    /// - Writing compressed data to the bit writer
+    /// - Tracking bit offsets for each sequence boundary
+    /// - Optionally storing per-sequence lengths
+    /// - Building the final [`SeqVec`] structure
+    ///
+    /// # Arguments
+    ///
+    /// * `sequences` - The sequences to compress.
+    /// * `resolved_codec` - The codec to use for encoding.
     fn encode_sequences<S: AsRef<[T]>>(
         self,
         sequences: &[S],
@@ -345,7 +360,11 @@ where
     ///
     /// The codec must be fully specified (no `Auto`, no `None` parameters).
     ///
-    /// ## Errors
+    /// # Arguments
+    ///
+    /// * `codec_spec` - The fully-specified codec to use for encoding.
+    ///
+    /// # Errors
     ///
     /// The [`build`](Self::build) method will return an error if a codec
     /// requiring data analysis is provided.
@@ -370,7 +389,11 @@ where
 
     /// Builds the [`SeqVec`] by consuming the iterator.
     ///
-    /// ## Errors
+    /// This method streams sequences directly from the iterator without
+    /// materializing them all in memory. Single-pass construction avoids
+    /// temporary allocations but requires the codec to be fully specified.
+    ///
+    /// # Errors
     ///
     /// Returns a [`SeqVecError`] if:
     /// - An automatic or parameter-estimating codec spec is used.
@@ -397,7 +420,7 @@ where
         if self.codec_spec.requires_analysis() {
             return Err(SeqVecError::InvalidParameters(
                 "Automatic codec selection is not supported for iterator-based construction. \
-                 Please provide a fully-specified codec (e.g., Gamma, Delta, Zeta { k: Some(3) })."
+                 Please provide a fully-specified codec"
                     .to_string(),
             ));
         }
@@ -482,16 +505,38 @@ impl CodecSpecExt for VariableCodecSpec {
     }
 }
 
-/// Shared implementation for encoding sequences from an iterator.
+/// Type alias for the return value of `encode_sequences_impl`.
 ///
-/// This function encodes all sequences using a single resolved codec and
-/// pre-allocated offsets vector. It resolves the codec dispatch once at the
-/// beginning (via `CodecWriter`) rather than per-element, improving throughput.
-/// Return type for `encode_sequences_impl`: encoded data, bit offsets, and optional lengths.
+/// Contains the compressed word data, bit offset boundaries, and optional
+/// per-sequence lengths.
 type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<usize>>);
 
+/// Shared encoding implementation for sequences from an iterator.
 ///
-/// Returns the encoded data (word vector) and bit offset boundaries.
+/// This function encodes all sequences using a single resolved codec and
+/// pre-allocated offsets vector. The codec dispatch is resolved once at the
+/// beginning via [`CodecWriter`] rather than per-element, avoiding repeated
+/// dispatch overhead and improving throughput.
+///
+/// # Arguments
+///
+/// * `sequences` - Iterator of sequences to encode. Each sequence is accessed
+///   via [`AsRef<[T]>`].
+/// * `resolved_codec` - The codec specification to use for all elements.
+/// * `offsets` - Pre-allocated vector to store bit offset boundaries. This vector
+///   is populated with one offset per sequence plus a final sentinel offset.
+/// * `store_lengths` - Whether to compute and store per-sequence lengths.
+/// * `lengths_capacity_hint` - Capacity hint for the lengths vector when
+///   `store_lengths` is true.
+///
+/// # Returns
+///
+/// A tuple containing:
+/// - Encoded word data (`Vec<u64>`)
+/// - Bit offset boundaries (`Vec<u64>`), with length = num_sequences + 1
+/// - Optional per-sequence lengths (`Vec<usize>`), if `store_lengths` is true
+///
+/// [`AsRef<[T]>`]: core::convert::AsRef
 fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
     sequences: I,
     resolved_codec: Codes,
@@ -552,9 +597,9 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// Creates a builder for constructing a [`SeqVec`] with custom settings.
     ///
     /// This is the most flexible way to create a [`SeqVec`], allowing
-    /// customization of the compression codec.
+    /// customization of the compression codec and other parameters.
     ///
-    /// ## Examples
+    /// # Examples
     ///
     /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
@@ -577,7 +622,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// The codec must be specified explicitly since single-pass construction
     /// cannot perform data analysis.
     ///
-    /// ## Examples
+    /// # Examples
     ///
     /// ```
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
@@ -603,6 +648,14 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
 
     /// Creates a `SeqVec` from raw parts without validation.
     ///
+    /// # Arguments
+    ///
+    /// * `data` - The compressed data buffer containing encoded words.
+    /// * `bit_offsets` - Bit offset index where each offset points to the start
+    ///   of a sequence. Must contain at least 2 elements: the start offset and
+    ///   end sentinel.
+    /// * `encoding` - The codec specification used to encode the data.
+    ///
     /// # Safety
     ///
     /// This method is unsafe because it does not validate that the `data` and
@@ -610,12 +663,6 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// - The `bit_offsets` array has at least 2 elements (start and end sentinel).
     /// - All offsets are valid bit positions within the `data` buffer.
     /// - The last offset equals the total number of bits in the compressed data.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - The compressed data buffer.
-    /// * `bit_offsets` - The bit offset index for each sequence.
-    /// * `encoding` - The codec used to encode the data.
     #[inline]
     pub unsafe fn from_raw_parts(
         data: Vec<u64>,
@@ -631,7 +678,18 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
         }
     }
 
-    /// Creates a `SeqVec` from raw parts with optional stored lengths.
+    /// Creates a `SeqVec` from raw parts with optional stored sequence lengths.
+    ///
+    /// This method is identical to [`from_raw_parts`](Self::from_raw_parts) but
+    /// allows providing pre-computed per-sequence lengths for faster random access.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The compressed data buffer.
+    /// * `bit_offsets` - Bit offset boundaries for each sequence.
+    /// * `seq_lengths` - Optional per-sequence lengths. If provided, must have
+    ///   length equal to the number of sequences (offsets.len() - 1).
+    /// * `encoding` - The codec specification used to encode the data.
     ///
     /// # Safety
     ///
@@ -651,5 +709,98 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
             encoding,
             _markers: PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::prelude::{LESeqVec, SeqVec, VariableCodecSpec};
+
+    #[test]
+    fn test_build_with_auto_codec() {
+        let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
+        let vec: LESeqVec<u32> = SeqVec::builder()
+            .codec(VariableCodecSpec::Auto)
+            .build(sequences)
+            .expect("Failed to build SeqVec with Auto codec");
+
+        assert_eq!(vec.num_sequences(), 3);
+    }
+
+    #[test]
+    fn test_build_with_explicit_codec() {
+        let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
+        let vec: LESeqVec<u32> = SeqVec::builder()
+            .codec(VariableCodecSpec::Gamma)
+            .build(sequences)
+            .expect("Failed to build with Gamma codec");
+
+        assert_eq!(vec.num_sequences(), 3);
+    }
+
+    #[test]
+    fn test_build_with_stored_lengths() {
+        let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
+        let vec: LESeqVec<u32> = SeqVec::builder()
+            .codec(VariableCodecSpec::Delta)
+            .store_lengths(true)
+            .build(sequences)
+            .expect("Failed to build with stored lengths");
+
+        assert_eq!(vec.num_sequences(), 2);
+    }
+
+    #[test]
+    fn test_build_empty_sequences() {
+        let sequences: &[&[u32]] = &[];
+        let vec: LESeqVec<u32> = SeqVec::builder()
+            .codec(VariableCodecSpec::Gamma)
+            .build(sequences)
+            .expect("Failed to build empty SeqVec");
+
+        assert_eq!(vec.num_sequences(), 0);
+    }
+
+    #[test]
+    fn test_from_iter_builder_with_gamma() {
+        let sequences_iter = (0..5).map(|i| vec![i as u32; 3]);
+        let vec: LESeqVec<u32> = SeqVec::from_iter_builder(sequences_iter)
+            .codec(VariableCodecSpec::Gamma)
+            .build()
+            .expect("Failed to build from iterator");
+
+        assert_eq!(vec.num_sequences(), 5);
+    }
+
+    #[test]
+    fn test_from_iter_builder_rejects_auto_codec() {
+        let sequences_iter = (0..3).map(|i| vec![i as u32; 2]);
+        let result: Result<LESeqVec<u32>, _> = SeqVec::from_iter_builder(sequences_iter)
+            .codec(VariableCodecSpec::Auto)
+            .build();
+
+        assert!(
+            result.is_err(),
+            "Should reject Auto codec in iterator builder"
+        );
+    }
+
+    #[test]
+    fn test_multiple_codecs() {
+        let sequences: &[&[u32]] = &[&[5, 10, 15], &[20, 25]];
+
+        // Test Gamma codec
+        let vec_gamma: LESeqVec<u32> = SeqVec::builder()
+            .codec(VariableCodecSpec::Gamma)
+            .build(sequences)
+            .expect("Gamma codec failed");
+        assert_eq!(vec_gamma.num_sequences(), 2);
+
+        // Test Delta codec
+        let vec_delta: LESeqVec<u32> = SeqVec::builder()
+            .codec(VariableCodecSpec::Delta)
+            .build(sequences)
+            .expect("Delta codec failed");
+        assert_eq!(vec_delta.num_sequences(), 2);
     }
 }
