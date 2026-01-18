@@ -10,7 +10,7 @@
 
 use super::{traits::Storable, IntVec, IntVecBitReader, IntVecError};
 use dsi_bitstream::{
-    dispatch::{CodesRead, FuncCodeReader, StaticCodeRead},
+    dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 use rayon::prelude::{
@@ -68,13 +68,15 @@ where
         let num_chunks = num_samples.div_ceil(chunk_size);
 
         (0..num_chunks).into_par_iter().flat_map(move |chunk_idx| {
+            use crate::common::codec_reader::CodecReader;
+
             let start_sample_idx = chunk_idx * chunk_size;
             let end_sample_idx = (start_sample_idx + chunk_size).min(num_samples);
-            let mut bit_reader = IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
-                self.data.as_ref(),
-            ));
+            let mut bit_reader = IntVecBitReader::<E>::new(
+                dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()),
+            );
             let mut values = Vec::new();
-            let code_reader = FuncCodeReader::<E, _>::new(self.encoding).unwrap();
+            let code_reader = CodecReader::new(self.encoding);
 
             // Each thread decodes its assigned range of sample blocks.
             for sample_idx in start_sample_idx..end_sample_idx {
