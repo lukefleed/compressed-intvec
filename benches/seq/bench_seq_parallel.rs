@@ -4,13 +4,14 @@
 //
 // Measures:
 // 1. Sequential vs parallel iteration crossover point by dataset size
-// 2. par_decode_many throughput at varying batch sizes
-// 3. par_into_vecs vs sequential into_vecs
-// 4. Effect of sequence length on parallel efficiency
+// 2. par_for_each vs par_iter for consumptive operations
+// 3. par_decode_many throughput at varying batch sizes
+// 4. par_into_vecs vs sequential into_vecs
+// 5. Effect of sequence length on parallel efficiency
 //
 // These benchmarks help users determine when parallel APIs provide benefit
-// over sequential alternatives, accounting for thread spawn overhead and
-// cache locality trade-offs.
+// over sequential alternatives, accounting for thread spawn overhead,
+// allocation costs, and cache locality trade-offs.
 
 #![cfg(feature = "parallel")]
 
@@ -136,7 +137,7 @@ fn benchmark_iter_vs_par_iter(c: &mut Criterion) {
             },
         );
 
-        // SeqVec parallel iteration
+        // SeqVec parallel iteration (allocates Vec<T> per sequence)
         // par_iter() returns Vec<T> per sequence; inner iteration is sequential.
         group.bench_with_input(
             BenchmarkId::new("SeqVec_par_iter", num_sequences),
@@ -152,6 +153,151 @@ fn benchmark_iter_vs_par_iter(c: &mut Criterion) {
             },
         );
     }
+
+    group.finish();
+}
+
+/// Benchmark: par_for_each vs par_iter for consumptive operations.
+///
+/// This benchmark compares the zero-allocation par_for_each against par_iter
+/// for operations that don't need to retain the decoded data. par_for_each
+/// should be faster due to avoiding Vec allocation and double traversal.
+fn benchmark_par_for_each_vs_par_iter(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+
+    let sequence_counts = [1_000, 5_000, 10_000, 50_000, 100_000];
+
+    let mut group = c.benchmark_group("SeqParallel/par_for_each_vs_par_iter");
+
+    for &num_sequences in &sequence_counts {
+        let sequences = generate_power_law_sequences(&mut rng, num_sequences);
+        let total_elements = count_total_elements(&sequences);
+
+        let seqvec: LESeqVec<u32> = SeqVec::builder()
+            .codec(VariableCodecSpec::Delta)
+            .build(&sequences)
+            .expect("Failed to build SeqVec");
+
+        group.throughput(Throughput::Elements(total_elements));
+
+        // par_iter: allocates Vec<T> per sequence, then sums
+        group.bench_with_input(
+            BenchmarkId::new("par_iter_sum", num_sequences),
+            &seqvec,
+            |b, vec| {
+                b.iter(|| {
+                    let sum: u64 = vec
+                        .par_iter()
+                        .map(|s| s.iter().map(|&v| v as u64).sum::<u64>())
+                        .sum();
+                    black_box(sum)
+                })
+            },
+        );
+
+        // par_for_each: zero allocation, sums directly from iterator
+        group.bench_with_input(
+            BenchmarkId::new("par_for_each_sum", num_sequences),
+            &seqvec,
+            |b, vec| {
+                b.iter(|| {
+                    let sums: Vec<u64> = vec.par_for_each(|seq| seq.map(|v| v as u64).sum());
+                    let total: u64 = sums.iter().sum();
+                    black_box(total)
+                })
+            },
+        );
+
+        // par_for_each_reduce: zero allocation with parallel reduction
+        group.bench_with_input(
+            BenchmarkId::new("par_for_each_reduce_sum", num_sequences),
+            &seqvec,
+            |b, vec| {
+                b.iter(|| {
+                    let total: u64 = vec.par_for_each_reduce(
+                        |seq| seq.map(|v| v as u64).sum::<u64>(),
+                        || 0u64,
+                        |a, b| a + b,
+                    );
+                    black_box(total)
+                })
+            },
+        );
+
+        // Sequential iter for comparison
+        group.bench_with_input(
+            BenchmarkId::new("iter_sum", num_sequences),
+            &seqvec,
+            |b, vec| {
+                b.iter(|| {
+                    let sum: u64 = vec.iter().map(|s| s.map(|v| v as u64).sum::<u64>()).sum();
+                    black_box(sum)
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: par_for_each with different operations.
+///
+/// Tests how par_for_each performs with various consumptive operations:
+/// sum, count, max, and any() predicate.
+fn benchmark_par_for_each_operations(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+
+    const NUM_SEQUENCES: usize = 50_000;
+    let sequences = generate_power_law_sequences(&mut rng, NUM_SEQUENCES);
+    let total_elements = count_total_elements(&sequences);
+
+    let seqvec: LESeqVec<u32> = SeqVec::builder()
+        .codec(VariableCodecSpec::Delta)
+        .build(&sequences)
+        .expect("Failed to build SeqVec");
+
+    let mut group = c.benchmark_group("SeqParallel/par_for_each_operations");
+    group.throughput(Throughput::Elements(total_elements));
+
+    // Sum operation
+    group.bench_function("sum", |b| {
+        b.iter(|| {
+            let sums: Vec<u64> = seqvec.par_for_each(|seq| seq.map(|v| v as u64).sum());
+            black_box(sums)
+        })
+    });
+
+    // Count operation
+    group.bench_function("count", |b| {
+        b.iter(|| {
+            let counts: Vec<usize> = seqvec.par_for_each(|seq| seq.count());
+            black_box(counts)
+        })
+    });
+
+    // Max operation
+    group.bench_function("max", |b| {
+        b.iter(|| {
+            let maxes: Vec<Option<u32>> = seqvec.par_for_each(|seq| seq.max());
+            black_box(maxes)
+        })
+    });
+
+    // // Any predicate (early termination possible)
+    // group.bench_function("any_gt_5000", |b| {
+    //     b.iter(|| {
+    //         let results: Vec<bool> = seqvec.par_for_each(|seq| seq.any(|v| v > 5000));
+    //         black_box(results)
+    //     })
+    // });
+
+    // Collect first element only (minimal work per sequence)
+    group.bench_function("first_element", |b| {
+        b.iter(|| {
+            let firsts: Vec<Option<u32>> = seqvec.par_for_each(|seq| seq.into_iter().next());
+            black_box(firsts)
+        })
+    });
 
     group.finish();
 }
@@ -183,23 +329,18 @@ fn benchmark_par_decode_many_scaling(c: &mut Criterion) {
             .map(|_| rng.random_range(0..NUM_SEQUENCES))
             .collect();
 
+        // Calculate throughput based on actual elements in selected sequences.
         let total_elements: u64 = indices.iter().map(|&i| sequences[i].len() as u64).sum();
         group.throughput(Throughput::Elements(total_elements));
 
-        // Sequential decode_many (internally sorts for cache locality)
+        // Sequential decode_many (sorts indices for linear scan)
         group.bench_with_input(
             BenchmarkId::new("decode_many", batch_size),
             &indices,
             |b, idx| {
                 b.iter(|| {
-                    let results = seqvec
-                        .decode_many(black_box(idx))
-                        .expect("decode_many failed");
-                    let sum: u64 = results
-                        .iter()
-                        .map(|s| s.iter().map(|&v| v as u64).sum::<u64>())
-                        .sum();
-                    black_box(sum)
+                    let results = seqvec.decode_many(idx).unwrap();
+                    black_box(results)
                 })
             },
         );
@@ -210,14 +351,8 @@ fn benchmark_par_decode_many_scaling(c: &mut Criterion) {
             &indices,
             |b, idx| {
                 b.iter(|| {
-                    let results = seqvec
-                        .par_decode_many(black_box(idx))
-                        .expect("par_decode_many failed");
-                    let sum: u64 = results
-                        .iter()
-                        .map(|s| s.iter().map(|&v| v as u64).sum::<u64>())
-                        .sum();
-                    black_box(sum)
+                    let results = seqvec.par_decode_many(idx).unwrap();
+                    black_box(results)
                 })
             },
         );
@@ -226,10 +361,71 @@ fn benchmark_par_decode_many_scaling(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark: into_vecs vs par_into_vecs for full materialization.
+/// Benchmark: par_for_each_many for sparse consumptive operations.
 ///
-/// When a user needs all sequences materialized as Vec<Vec<T>>, this benchmark
-/// shows whether parallel materialization provides speedup.
+/// Compares par_for_each_many against par_decode_many for operations that
+/// don't need to retain the decoded data.
+fn benchmark_par_for_each_many_scaling(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+
+    const NUM_SEQUENCES: usize = 100_000;
+    let sequences = generate_power_law_sequences(&mut rng, NUM_SEQUENCES);
+
+    let seqvec: LESeqVec<u32> = SeqVec::builder()
+        .codec(VariableCodecSpec::Delta)
+        .build(&sequences)
+        .expect("Failed to build SeqVec");
+
+    let batch_sizes = [100, 1_000, 5_000, 10_000, 50_000];
+
+    let mut group = c.benchmark_group("SeqParallel/par_for_each_many_scaling");
+
+    for &batch_size in &batch_sizes {
+        let indices: Vec<usize> = (0..batch_size)
+            .map(|_| rng.random_range(0..NUM_SEQUENCES))
+            .collect();
+
+        let total_elements: u64 = indices.iter().map(|&i| sequences[i].len() as u64).sum();
+        group.throughput(Throughput::Elements(total_elements));
+
+        // par_decode_many then sum (allocates Vec<T> per sequence)
+        group.bench_with_input(
+            BenchmarkId::new("par_decode_many_sum", batch_size),
+            &indices,
+            |b, idx| {
+                b.iter(|| {
+                    let results = seqvec.par_decode_many(idx).unwrap();
+                    let sum: u64 = results
+                        .iter()
+                        .map(|s| s.iter().map(|&v| v as u64).sum::<u64>())
+                        .sum();
+                    black_box(sum)
+                })
+            },
+        );
+
+        // par_for_each_many (zero allocation)
+        group.bench_with_input(
+            BenchmarkId::new("par_for_each_many_sum", batch_size),
+            &indices,
+            |b, idx| {
+                b.iter(|| {
+                    let sums = seqvec
+                        .par_for_each_many(idx, |seq| seq.map(|v| v as u64).sum::<u64>())
+                        .unwrap();
+                    let total: u64 = sums.iter().sum();
+                    black_box(total)
+                })
+            },
+        );
+    }
+
+    group.finish();
+}
+
+/// Benchmark: into_vecs vs par_into_vecs.
+///
+/// Compares sequential and parallel bulk decoding of all sequences.
 fn benchmark_into_vecs(c: &mut Criterion) {
     let mut rng = SmallRng::seed_from_u64(42);
 
@@ -245,33 +441,35 @@ fn benchmark_into_vecs(c: &mut Criterion) {
 
         // Sequential into_vecs
         group.bench_function(BenchmarkId::new("into_vecs", num_sequences), |b| {
-            b.iter_with_setup(
+            b.iter_batched(
                 || {
                     SeqVec::builder()
                         .codec(VariableCodecSpec::Delta)
                         .build(&sequences)
                         .expect("Failed to build SeqVec")
                 },
-                |seqvec: LESeqVec<u32>| {
-                    let vecs = seqvec.into_vecs();
-                    black_box(vecs)
+                |vec: LESeqVec<u32>| {
+                    let results = vec.into_vecs();
+                    black_box(results)
                 },
+                criterion::BatchSize::SmallInput,
             )
         });
 
         // Parallel into_vecs
         group.bench_function(BenchmarkId::new("par_into_vecs", num_sequences), |b| {
-            b.iter_with_setup(
+            b.iter_batched(
                 || {
                     SeqVec::builder()
                         .codec(VariableCodecSpec::Delta)
                         .build(&sequences)
                         .expect("Failed to build SeqVec")
                 },
-                |seqvec: LESeqVec<u32>| {
-                    let vecs = seqvec.par_into_vecs();
-                    black_box(vecs)
+                |vec: LESeqVec<u32>| {
+                    let results = vec.par_into_vecs();
+                    black_box(results)
                 },
+                criterion::BatchSize::SmallInput,
             )
         });
     }
@@ -314,7 +512,7 @@ fn benchmark_sequence_length_effect(c: &mut Criterion) {
             })
         });
 
-        // Parallel
+        // Parallel (allocating)
         group.bench_function(BenchmarkId::new("par_iter", seq_len), |b| {
             b.iter(|| {
                 let sum: u64 = seqvec
@@ -324,7 +522,97 @@ fn benchmark_sequence_length_effect(c: &mut Criterion) {
                 black_box(sum)
             })
         });
+
+        // Parallel (zero allocation)
+        group.bench_function(BenchmarkId::new("par_for_each", seq_len), |b| {
+            b.iter(|| {
+                let total: u64 = seqvec.par_for_each_reduce(
+                    |seq| seq.map(|v| v as u64).sum::<u64>(),
+                    || 0u64,
+                    |a, b| a + b,
+                );
+                black_box(total)
+            })
+        });
     }
+
+    group.finish();
+}
+
+/// Benchmark: Effect of stored lengths on parallel performance.
+///
+/// When sequence lengths are stored, par_iter and par_for_each can pre-allocate
+/// buffers and avoid the bit_pos() check in the inner loop. This benchmark
+/// measures the impact of stored lengths on parallel performance.
+fn benchmark_stored_lengths_effect(c: &mut Criterion) {
+    let mut rng = SmallRng::seed_from_u64(42);
+
+    const NUM_SEQUENCES: usize = 50_000;
+    let sequences = generate_power_law_sequences(&mut rng, NUM_SEQUENCES);
+    let total_elements = count_total_elements(&sequences);
+
+    // Build SeqVec without stored lengths
+    let seqvec_no_lengths: LESeqVec<u32> = SeqVec::builder()
+        .codec(VariableCodecSpec::Delta)
+        .store_lengths(false)
+        .build(&sequences)
+        .expect("Failed to build SeqVec without lengths");
+
+    // Build SeqVec with stored lengths
+    let seqvec_with_lengths: LESeqVec<u32> = SeqVec::builder()
+        .codec(VariableCodecSpec::Delta)
+        .store_lengths(true)
+        .build(&sequences)
+        .expect("Failed to build SeqVec with lengths");
+
+    let mut group = c.benchmark_group("SeqParallel/stored_lengths_effect");
+    group.throughput(Throughput::Elements(total_elements));
+
+    // par_iter without stored lengths
+    group.bench_function("par_iter_no_lengths", |b| {
+        b.iter(|| {
+            let sum: u64 = seqvec_no_lengths
+                .par_iter()
+                .map(|s| s.iter().map(|&v| v as u64).sum::<u64>())
+                .sum();
+            black_box(sum)
+        })
+    });
+
+    // par_iter with stored lengths
+    group.bench_function("par_iter_with_lengths", |b| {
+        b.iter(|| {
+            let sum: u64 = seqvec_with_lengths
+                .par_iter()
+                .map(|s| s.iter().map(|&v| v as u64).sum::<u64>())
+                .sum();
+            black_box(sum)
+        })
+    });
+
+    // par_for_each without stored lengths
+    group.bench_function("par_for_each_no_lengths", |b| {
+        b.iter(|| {
+            let total: u64 = seqvec_no_lengths.par_for_each_reduce(
+                |seq| seq.map(|v| v as u64).sum::<u64>(),
+                || 0u64,
+                |a, b| a + b,
+            );
+            black_box(total)
+        })
+    });
+
+    // par_for_each with stored lengths
+    group.bench_function("par_for_each_with_lengths", |b| {
+        b.iter(|| {
+            let total: u64 = seqvec_with_lengths.par_for_each_reduce(
+                |seq| seq.map(|v| v as u64).sum::<u64>(),
+                || 0u64,
+                |a, b| a + b,
+            );
+            black_box(total)
+        })
+    });
 
     group.finish();
 }
@@ -337,9 +625,13 @@ criterion_group! {
         .measurement_time(Duration::from_secs(3));
     targets =
         benchmark_iter_vs_par_iter,
+        benchmark_par_for_each_vs_par_iter,
+        benchmark_par_for_each_operations,
         benchmark_par_decode_many_scaling,
+        benchmark_par_for_each_many_scaling,
         benchmark_into_vecs,
-        benchmark_sequence_length_effect
+        benchmark_sequence_length_effect,
+        benchmark_stored_lengths_effect
 }
 
 criterion_main!(benches);
