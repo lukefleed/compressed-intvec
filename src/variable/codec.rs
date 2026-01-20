@@ -8,7 +8,7 @@
 //! # Codec Selection Strategy
 //!
 //! Codec selection is performed by a statistical analysis of the entire
-//! input dataset at construction time. 
+//! input dataset at construction time.
 //!
 //! The [`VariableCodecSpec`] enum provides several ways to specify the compression method:
 //!
@@ -17,19 +17,19 @@
 //!     advance.
 //!     - Non-parametric examples: [`Gamma`](VariableCodecSpec::Gamma), [`Delta`](VariableCodecSpec::Delta).
 //!     - Parametric example: `Zeta { k: Some(3) }`.
-//! 
+//!
 //! ```
 //! use compressed_intvec::prelude::*;
-//! 
-//! let data: &[u32] = &(0..1000).collect::<Vec<_>>(); 
-//! 
+//!
+//! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
+//!
 //! // Explicitly specify a non-parametric codec
 //! let delta_vec: UIntVec<u32> = IntVec::builder()
 //!     .codec(VariableCodecSpec::Delta)
 //!     .k(16)
 //!     .build(&data)
 //!     .unwrap();
-//!  
+//!
 //! // Explicitly specify a parametric codec with a fixed parameter
 //! let zeta_vec: UIntVec<u32> = IntVec::builder()
 //!     .codec(VariableCodecSpec::Zeta { k: Some(3) })
@@ -42,7 +42,7 @@
 //!     analysis. This is achieved by providing `None` as the parameter value.
 //!     - Example: `Rice { log2_b: None }` will find the best `log2_b` for the
 //!       given data.
-//! 
+//!
 //! ```
 //! use compressed_intvec::prelude::*;
 //!
@@ -58,10 +58,10 @@
 //! 3.  **Fully Automatic Selection**: The builder analyzes the data against all
 //!     available codecs and their standard parameter ranges to find the single
 //!     best configuration. This is activated by using [`VariableCodecSpec::Auto`].
-//! 
+//!
 //! ```
 //! use compressed_intvec::prelude::*;
-//! 
+//!
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //! // Automatically select the best codec and parameters for the data
 //! let auto_vec: UIntVec<u32> = IntVec::builder()
@@ -69,14 +69,14 @@
 //!    .build(&data)
 //!    .unwrap();
 //! ```
-//! 
+//!
 //!
 //! ## Analysis Mechanism
 //!
 //! The selection logic uses the [`CodesStats`] utility from the [`dsi-bitstream`]
 //! crate. For a given sequence of integers, [`CodesStats`] calculates the exact
 //! total bit cost for encoding the sequence with a wide range of instantaneous
-//! codes and their common parameterizations. 
+//! codes and their common parameterizations.
 //!
 //! ## Construction Overhead
 //!
@@ -181,7 +181,7 @@ pub enum VariableCodecSpec {
     /// parameterization provides the best compression ratio.
     ///
     /// # Note
-    /// 
+    ///
     /// This option is **not** supported for the iterator-based builder,
     /// as it requires pre-analyzing the data.
     Auto,
@@ -249,7 +249,7 @@ where
         | VariableCodecSpec::Pi { k: None }
         | VariableCodecSpec::ExpGolomb { k: None } => {
             if input.is_empty() {
-                return Ok(Codes::Gamma);  // Safe default only for analysis codecs
+                return Ok(Codes::Gamma); // Safe default only for analysis codecs
             }
 
             // Define a type alias for the default [`CodesStats`] configuration for clarity.
