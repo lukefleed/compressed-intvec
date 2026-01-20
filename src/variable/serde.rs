@@ -36,67 +36,12 @@
 //!
 //! [`serde`]: https://serde.rs/
 //! [`IntVec`]: crate::variable::IntVec
-// A direct copy of the original file is provided below, as no changes
-// to the implementation code were necessary, only to the doc comments.
 
 use super::{traits::Storable, Endianness, IntVec};
+use crate::common::serde::CodesSerde;
 use crate::fixed::{FixedVec, LEFixedVec};
-use dsi_bitstream::prelude::{Codes, LE};
+use dsi_bitstream::prelude::LE;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-/// A serializable proxy for `dsi-bitstream::prelude::Codes`.
-/// This is an internal detail to bridge `Codes` with `serde`.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-enum CodesSerde {
-    Gamma,
-    Delta,
-    Zeta { k: usize },
-    Rice { log2_b: usize },
-    Unary,
-    Golomb { b: usize },
-    Omega,
-    Pi { k: usize },
-    ExpGolomb { k: usize },
-    VByteLe,
-    VByteBe,
-}
-
-impl From<Codes> for CodesSerde {
-    fn from(code: Codes) -> Self {
-        match code {
-            Codes::Gamma => CodesSerde::Gamma,
-            Codes::Delta => CodesSerde::Delta,
-            Codes::Zeta { k } => CodesSerde::Zeta { k },
-            Codes::Rice { log2_b } => CodesSerde::Rice { log2_b },
-            Codes::Unary => CodesSerde::Unary,
-            Codes::Golomb { b } => CodesSerde::Golomb { b },
-            Codes::Omega => CodesSerde::Omega,
-            Codes::Pi { k } => CodesSerde::Pi { k },
-            Codes::ExpGolomb { k } => CodesSerde::ExpGolomb { k },
-            Codes::VByteLe => CodesSerde::VByteLe,
-            Codes::VByteBe => CodesSerde::VByteBe,
-            _ => unimplemented!("Serialization for this code is not implemented"),
-        }
-    }
-}
-
-impl From<CodesSerde> for Codes {
-    fn from(proxy: CodesSerde) -> Self {
-        match proxy {
-            CodesSerde::Gamma => Codes::Gamma,
-            CodesSerde::Delta => Codes::Delta,
-            CodesSerde::Zeta { k } => Codes::Zeta { k },
-            CodesSerde::Rice { log2_b } => Codes::Rice { log2_b },
-            CodesSerde::Unary => Codes::Unary,
-            CodesSerde::Golomb { b } => Codes::Golomb { b },
-            CodesSerde::Omega => Codes::Omega,
-            CodesSerde::Pi { k } => Codes::Pi { k },
-            CodesSerde::ExpGolomb { k } => Codes::ExpGolomb { k },
-            CodesSerde::VByteLe => Codes::VByteLe,
-            CodesSerde::VByteBe => Codes::VByteBe,
-        }
-    }
-}
 
 impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for IntVec<T, E, B> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
