@@ -181,14 +181,14 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
         T: 'static,
         SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
-        // Pass 1: Collect all elements for codec analysis.
-        let all_words: Vec<u64> = sequences
-            .iter()
-            .flat_map(|seq| seq.as_ref().iter().map(|x| x.to_word()))
-            .collect();
-
-        // Resolve the codec based on data distribution.
-        let resolved_codec = codec::resolve_codec(&all_words, self.codec_spec)
+        // Resolve codec from iterator without intermediate allocation.
+        // This avoids materializing all elements to a vector when analyzing data.
+        let resolved_codec = codec::resolve_codec_from_iter(
+            sequences
+                .iter()
+                .flat_map(|seq| seq.as_ref().iter().map(|x| x.to_word())),
+            self.codec_spec,
+        )
             .map_err(|e| SeqVecError::CodecDispatch(e.to_string()))?;
 
         // Pass 2: Encode with the selected codec.
@@ -487,6 +487,7 @@ where
 }
 
 /// Extension trait for `VariableCodecSpec` to check if analysis is required.
+#[allow(dead_code)]
 trait CodecSpecExt {
     /// Returns `true` if this codec spec requires data analysis to resolve.
     fn requires_analysis(&self) -> bool;
@@ -501,6 +502,8 @@ impl CodecSpecExt for VariableCodecSpec {
                 | VariableCodecSpec::Rice { log2_b: None }
                 | VariableCodecSpec::Zeta { k: None }
                 | VariableCodecSpec::Golomb { b: None }
+                | VariableCodecSpec::Pi { k: None }
+                | VariableCodecSpec::ExpGolomb { k: None }
         )
     }
 }

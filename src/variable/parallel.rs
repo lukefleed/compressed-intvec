@@ -82,7 +82,10 @@ where
             for sample_idx in start_sample_idx..end_sample_idx {
                 let (start_elem_index, end_elem_index) = if k.is_power_of_two() {
                     let k_exp = k.trailing_zeros();
-                    (sample_idx << k_exp, ((sample_idx + 1) << k_exp).min(self.len))
+                    (
+                        sample_idx << k_exp,
+                        ((sample_idx + 1) << k_exp).min(self.len),
+                    )
                 } else {
                     (sample_idx * k, ((sample_idx + 1) * k).min(self.len))
                 };

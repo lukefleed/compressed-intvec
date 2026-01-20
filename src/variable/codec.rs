@@ -193,6 +193,25 @@ pub enum VariableCodecSpec {
     Explicit(Codes),
 }
 
+impl VariableCodecSpec {
+    /// Returns `true` if this codec specification requires data analysis to resolve.
+    ///
+    /// Analysis is needed when parameters are not explicitly specified and must
+    /// be determined by analyzing the data distribution.
+    #[inline]
+    pub(crate) fn requires_analysis(&self) -> bool {
+        matches!(
+            self,
+            VariableCodecSpec::Auto
+                | VariableCodecSpec::Rice { log2_b: None }
+                | VariableCodecSpec::Zeta { k: None }
+                | VariableCodecSpec::Golomb { b: None }
+                | VariableCodecSpec::Pi { k: None }
+                | VariableCodecSpec::ExpGolomb { k: None }
+        )
+    }
+}
+
 /// Resolves a user-provided [`VariableCodecSpec`] into a concrete [`Codes`] variant.
 ///
 /// This function translates the user's high-level request into a fully-parameterized,
@@ -205,13 +224,8 @@ pub(crate) fn resolve_codec<U>(input: &[U], spec: VariableCodecSpec) -> Result<C
 where
     U: Into<u64> + Copy,
 {
-    // For an empty input, there's nothing to analyze. Return a safe default.
-    if input.is_empty() {
-        return Ok(Codes::Gamma);
-    }
-
     match spec {
-        // Parameter-free codecs are a direct mapping.
+        // Parameter-free codecs: direct mapping, no data needed.
         VariableCodecSpec::Gamma => Ok(Codes::Gamma),
         VariableCodecSpec::Delta => Ok(Codes::Delta),
         VariableCodecSpec::Unary => Ok(Codes::Unary),
@@ -220,20 +234,24 @@ where
         VariableCodecSpec::VByteBe => Ok(Codes::VByteBe),
         VariableCodecSpec::Explicit(codes) => Ok(codes),
 
-        // Codecs with optional, user-provided parameters.
+        // Codecs with explicit parameters: direct mapping.
         VariableCodecSpec::Rice { log2_b: Some(p) } => Ok(Codes::Rice { log2_b: p as usize }),
         VariableCodecSpec::Zeta { k: Some(p) } => Ok(Codes::Zeta { k: p as usize }),
         VariableCodecSpec::Golomb { b: Some(p) } => Ok(Codes::Golomb { b: p as usize }),
         VariableCodecSpec::Pi { k: Some(p) } => Ok(Codes::Pi { k: p as usize }),
         VariableCodecSpec::ExpGolomb { k: Some(p) } => Ok(Codes::ExpGolomb { k: p as usize }),
 
-        // Codecs that require data analysis. We group them to compute stats only once.
+        // Codecs requiring analysis: return error if no data provided.
         VariableCodecSpec::Auto
         | VariableCodecSpec::Rice { log2_b: None }
         | VariableCodecSpec::Zeta { k: None }
         | VariableCodecSpec::Golomb { b: None }
         | VariableCodecSpec::Pi { k: None }
         | VariableCodecSpec::ExpGolomb { k: None } => {
+            if input.is_empty() {
+                return Ok(Codes::Gamma);  // Safe default only for analysis codecs
+            }
+
             // Define a type alias for the default [`CodesStats`] configuration for clarity.
             // These const generics define the range of parameters to test.
             type DefaultCodesStats = CodesStats<10, 20, 10, 10, 10>;
@@ -300,5 +318,96 @@ where
                 _ => unreachable!(),
             }
         }
+    }
+}
+
+/// Resolves a codec specification by analyzing data from an iterator.
+///
+/// This function avoids intermediate allocations by consuming the iterator
+/// directly. It should only be called when `spec.requires_analysis()` returns
+/// `true`.
+///
+/// # Arguments
+///
+/// * `iter` - An iterator of u64 values to analyze for codec parameter selection.
+///
+/// * `spec` - The codec specification requesting analysis (Auto or a codec with
+///   None parameters).
+pub(crate) fn resolve_codec_from_iter<I>(
+    iter: I,
+    spec: VariableCodecSpec,
+) -> Result<Codes, IntVecError>
+where
+    I: Iterator<Item = u64>,
+{
+    // Define the default CodesStats configuration for parameter analysis.
+    type DefaultCodesStats = CodesStats<10, 20, 10, 10, 10>;
+
+    let mut stats = DefaultCodesStats::default();
+    let mut count = 0usize;
+
+    // Analyze the data stream without materializing it to a vector.
+    for value in iter {
+        stats.update(value);
+        count += 1;
+    }
+
+    // If the stream is empty, return a safe default.
+    if count == 0 {
+        return Ok(Codes::Gamma);
+    }
+
+    // Use the accumulated statistics to determine the best codec.
+    match spec {
+        VariableCodecSpec::Auto => {
+            let (best_code, _) = stats.best_code();
+            Ok(best_code)
+        }
+        VariableCodecSpec::Rice { log2_b: None } => {
+            let (best_param, _) = stats
+                .rice
+                .iter()
+                .enumerate()
+                .min_by_key(|&(_, cost)| cost)
+                .unwrap_or((0, &0));
+            Ok(Codes::Rice { log2_b: best_param })
+        }
+        VariableCodecSpec::Zeta { k: None } => {
+            let (best_param, _) = stats
+                .zeta
+                .iter()
+                .enumerate()
+                .min_by_key(|&(_, cost)| cost)
+                .unwrap_or((0, &0));
+            Ok(Codes::Zeta { k: best_param + 1 })
+        }
+        VariableCodecSpec::Golomb { b: None } => {
+            let (best_param, _) = stats
+                .golomb
+                .iter()
+                .enumerate()
+                .min_by_key(|&(_, cost)| cost)
+                .unwrap_or((0, &0));
+            Ok(Codes::Golomb { b: best_param + 1 })
+        }
+        VariableCodecSpec::Pi { k: None } => {
+            let (best_param, _) = stats
+                .pi
+                .iter()
+                .enumerate()
+                .min_by_key(|&(_, cost)| cost)
+                .unwrap_or((0, &0));
+            Ok(Codes::Pi { k: best_param + 2 })
+        }
+        VariableCodecSpec::ExpGolomb { k: None } => {
+            let (best_param, _) = stats
+                .exp_golomb
+                .iter()
+                .enumerate()
+                .min_by_key(|&(_, cost)| cost)
+                .unwrap_or((0, &0));
+            Ok(Codes::ExpGolomb { k: best_param })
+        }
+        _ => unreachable!("resolve_codec_from_iter called with non-analysis codec"),
     }
 }

@@ -109,9 +109,17 @@ impl<T: Storable, E: Endianness> IntVecBuilder<T, E> {
             ));
         }
 
-        // Convert the input data to a vector of u64 words for analysis and compression.
-        let words: Vec<u64> = input.iter().map(|&x| x.to_word()).collect();
-        let resolved_code = codec::resolve_codec(&words, self.codec_spec)?;
+        // Resolve codec: only iterate for analysis when necessary.
+        let resolved_code = if self.codec_spec.requires_analysis() {
+            // Analysis needed: iterate input once, convert on-the-fly.
+            codec::resolve_codec_from_iter(
+                input.iter().map(|&x| x.to_word()),
+                self.codec_spec,
+            )?
+        } else {
+            // No analysis needed: resolve directly without data access.
+            codec::resolve_codec(&[] as &[u64], self.codec_spec)?
+        };
 
         if input.is_empty() {
             let empty_samples = FixedVec::<u64, u64, LE>::builder()
