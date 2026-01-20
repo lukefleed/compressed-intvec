@@ -17,13 +17,7 @@
 //! # Performance Considerations
 //!
 //! Parallel iteration introduces thread dispatch overhead and reduces cache
-//! locality compared to sequential iteration. Benchmarks show:
-//!
-//! - **Crossover point**: ~2,000-5,000 sequences for parallel to outperform sequential
-//! - **Sequence length**: Longer sequences amortize dispatch overhead better
-//! - **Zero-allocation**: [`par_for_each`] avoids materialization overhead
-//!
-//! For small datasets or very fast codecs, sequential [`iter`](super::SeqVec::iter)
+//! locality compared to sequential iteration. For small datasets or very fast codecs, sequential [`iter`](super::SeqVec::iter)
 //! is typically faster.
 //!
 //! # SeqVec-Specific Methods
@@ -76,10 +70,8 @@ where
     ///
     /// # Performance
     ///
-    /// Parallelization is beneficial when:
-    /// - The dataset contains more than ~2,000 sequences
-    /// - Sequences are reasonably sized (20+ elements on average)
-    /// - The caller needs to retain decoded data
+    /// Parallelization is beneficial when the dataset contains enough sequences and those
+    /// sequences are sufficiently large to amortize thread overhead.
     ///
     /// For consumptive operations (sum, count, fold) where the decoded data
     /// is not retained, prefer [`par_for_each`](Self::par_for_each) which
@@ -148,7 +140,7 @@ where
     /// # Type Parameters
     ///
     /// - `F`: Closure type that processes a [`SeqIter`] and produces a result
-    /// - `R`: Result type produced by the closure, must be `Send`
+    /// - `R`: Result type produced by the closure, must be [`Send`]
     ///
     /// # Examples
     ///
@@ -173,7 +165,7 @@ where
     /// # }
     /// ```
     ///
-    /// # Comparison with `par_iter`
+    /// # Comparison with [`par_iter`](Self::par_iter)
     ///
     /// ```
     /// # #[cfg(feature = "parallel")] {
