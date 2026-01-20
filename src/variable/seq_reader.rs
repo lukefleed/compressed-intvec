@@ -136,13 +136,27 @@ where
         );
 
         let k = self.intvec.k;
-        let target_sample_block = index / k;
-        let current_sample_block = if self.current_index == 0 {
-            // A special case for the very first access.
-            // We treat it as being in a "different" block to force a seek.
-            usize::MAX
+        let (target_sample_block, current_sample_block, block_start) = if k.is_power_of_two() {
+            let k_exp = k.trailing_zeros();
+            let tsb = index >> k_exp;
+            let csb = if self.current_index == 0 {
+                // A special case for the very first access.
+                // We treat it as being in a "different" block to force a seek.
+                usize::MAX
+            } else {
+                (self.current_index - 1) >> k_exp
+            };
+            (tsb, csb, tsb << k_exp)
         } else {
-            (self.current_index - 1) / k
+            let tsb = index / k;
+            let csb = if self.current_index == 0 {
+                // A special case for the very first access.
+                // We treat it as being in a "different" block to force a seek.
+                usize::MAX
+            } else {
+                (self.current_index - 1) / k
+            };
+            (tsb, csb, tsb * k)
         };
 
         // This is the core optimization: if the target index is ahead of the
@@ -155,7 +169,7 @@ where
             // internal callers are expected to uphold the same contract.
             let start_bit = self.intvec.samples.get_unchecked(target_sample_block);
             self.reader.set_bit_pos(start_bit).unwrap();
-            self.current_index = target_sample_block * k;
+            self.current_index = block_start;
         }
 
         // Decode and discard intermediate elements. The hybrid dispatcher

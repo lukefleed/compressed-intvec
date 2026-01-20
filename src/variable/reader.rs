@@ -115,11 +115,17 @@ where
         );
 
         let k = self.intvec.k;
-        let sample_index = index / k;
+        let (sample_index, start_index) = if k.is_power_of_two() {
+            let k_exp = k.trailing_zeros();
+            let si = index >> k_exp;
+            (si, si << k_exp)
+        } else {
+            let si = index / k;
+            (si, si * k)
+        };
         // SAFETY: The caller guarantees that `index` is in bounds, which implies
         // that `sample_index` is also a valid index into the samples vector.
         let start_bit = self.intvec.samples.get_unchecked(sample_index);
-        let start_index = sample_index * k;
 
         // The underlying bitstream operations are infallible, so unwrap is safe.
         self.reader.set_bit_pos(start_bit).unwrap();
