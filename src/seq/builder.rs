@@ -189,7 +189,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
                 .flat_map(|seq| seq.as_ref().iter().map(|x| x.to_word())),
             self.codec_spec,
         )
-            .map_err(|e| SeqVecError::CodecDispatch(e.to_string()))?;
+        .map_err(|e| SeqVecError::CodecDispatch(e.to_string()))?;
 
         // Pass 2: Encode with the selected codec.
         self.encode_sequences(sequences, resolved_codec)
@@ -714,4 +714,3 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
         }
     }
 }
-
