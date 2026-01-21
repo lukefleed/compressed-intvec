@@ -18,9 +18,9 @@
 //! A common application is representing **adjacency lists** in a compressed
 //! graph, where each node's neighbors form a sequence.
 //!
-//! ## Differences from [`IntVec`]
+//! ## Differences from [`VarVec`]
 //!
-//! | Aspect | [`IntVec`] | [`SeqVec`] |
+//! | Aspect | [`VarVec`] | [`SeqVec`] |
 //! |--------|-----------|------------|
 //! | Access unit | Single element | Entire sequence |
 //! | Index meaning | Element position | Sequence rank |
@@ -29,7 +29,7 @@
 //!
 //! ## Compression
 //!
-//! Like [`IntVec`], [`SeqVec`] uses instantaneous variable-length codes (Gamma,
+//! Like [`VarVec`], [`SeqVec`] uses instantaneous variable-length codes (Gamma,
 //! Delta, Zeta, etc.) from the [`dsi-bitstream`] crate. All sequences are
 //! concatenated into a single compressed bitstream, with a [`FixedVec`] index
 //! storing the bit offset of each sequence's start.
@@ -101,7 +101,7 @@
 //!     .unwrap();
 //! ```
 //!
-//! [`IntVec`]: crate::variable::IntVec
+//! [`VarVec`]: crate::variable::VarVec
 //! [`FixedVec`]: crate::fixed::FixedVec
 //! [`dsi-bitstream`]: https://crates.io/crates/dsi-bitstream
 
@@ -288,7 +288,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for SeqVec<T
 // --- MemDbgImpl Implementation ---
 
 // Wrapper for Codes to provide correct MemDbgImpl, following the pattern in
-// variable::IntVec. This is necessary because the derived implementation for
+// variable::VarVec. This is necessary because the derived implementation for
 // Codes is incorrect and cannot be fixed due to the orphan rule.
 struct CodeWrapper<'a>(&'a Codes);
 

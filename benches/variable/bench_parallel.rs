@@ -108,11 +108,11 @@ fn benchmark_access(c: &mut Criterion) {
                 continue;
             }
 
-            let intvec = LEIntVec::builder()
+            let intvec = LEVarVec::builder()
                 .k(K_VALUE)
                 .codec(codec_spec)
                 .build(&data)
-                .expect("Failed to build IntVec");
+                .expect("Failed to build VarVec");
 
             // 1. Benchmark 'get_unchecked' in a loop.
             group.bench_function(format!("{}/get_unchecked_loop", spec_name), |b| {

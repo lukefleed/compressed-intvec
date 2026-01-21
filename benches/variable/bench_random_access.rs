@@ -6,7 +6,7 @@ use dsi_bitstream::{
 };
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::time::Duration;
-use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector};
+use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector as SuccinctIntVector};
 use sux::prelude::{BitFieldSlice, BitFieldVec};
 
 /// Enum to define the data distributions for testing.
@@ -72,7 +72,7 @@ fn benchmark_random_access(c: &mut Criterion) {
         Distribution::ZetaImplied,
     ];
 
-    // Codecs for IntVec (k-dependent).
+    // Codecs for VarVec (k-dependent).
     let variable_codecs = [
         ("Gamma", VariableCodecSpec::Gamma),
         ("Delta", VariableCodecSpec::Delta),
@@ -132,7 +132,7 @@ fn benchmark_random_access(c: &mut Criterion) {
         // --- Benchmark succinct::IntVector (k-independent) ---
         if !data.is_empty() {
             let mut succinct_iv =
-                IntVector::<u64>::with_capacity(fixed_vec.bit_width(), VECTOR_SIZE as u64);
+                SuccinctIntVector::<u64>::with_capacity(fixed_vec.bit_width(), VECTOR_SIZE as u64);
             for &val in &data {
                 succinct_iv.push(val);
             }
@@ -140,14 +140,14 @@ fn benchmark_random_access(c: &mut Criterion) {
                 b.iter(|| {
                     for &index in black_box(&access_indices) {
                         // The `get` method in succinct performs bounds checking.
-                        // We use UFCS here to avoid ambiguity with compressed_intvec's IntVec struct.
+                        // We use UFCS here to avoid ambiguity with compressed_intvec's VarVec struct.
                         black_box(SuccinctIntVec::get(&succinct_iv, index as u64));
                     }
                 })
             });
         }
 
-        // --- Benchmark IntVec (k-dependent codecs) ---
+        // --- Benchmark VarVec (k-dependent codecs) ---
         for (spec_name, codec_spec) in variable_codecs {
             if matches!(
                 distribution,
@@ -160,11 +160,11 @@ fn benchmark_random_access(c: &mut Criterion) {
             }
 
             for &k_value in &K_VALUES {
-                let intvec = LEIntVec::builder()
+                let intvec = LEVarVec::builder()
                     .k(k_value)
                     .codec(codec_spec)
                     .build(&data)
-                    .expect("Failed to build IntVec");
+                    .expect("Failed to build VarVec");
 
                 let mut reader = intvec.reader();
 

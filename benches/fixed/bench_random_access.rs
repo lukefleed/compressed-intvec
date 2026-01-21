@@ -4,7 +4,7 @@ use std::time::Duration;
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
-use simple_sds_sbwt::{int_vector::IntVector as SdsIntVector, ops::Access}; // Alias per evitare conflitti
+use simple_sds_sbwt::{int_vector::IntVector as SdsIntVector, ops::Access};
 use succinct::int_vec::{IntVec, IntVector as SuccinctIntVector};
 use sux::prelude::{BitFieldSlice, BitFieldVec};
 
@@ -135,9 +135,9 @@ fn benchmark_random_access(c: &mut Criterion) {
                 }
             })
         });
-        
-        // --- 5. Benchmark succinct::IntVector ---
-        group.bench_function("succinct::IntVector/get", |b| {
+
+        // --- 5. Benchmark succinct::VarVector ---
+        group.bench_function("succinct::VarVector/get", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
                     black_box(succinct_iv.get(index as u64));
@@ -145,8 +145,8 @@ fn benchmark_random_access(c: &mut Criterion) {
             })
         });
 
-        // --- 6. Benchmark simple-sds-sbwt::IntVector ---
-        group.bench_function("simple-sds-sbwt::IntVector/get", |b| {
+        // --- 6. Benchmark simple-sds-sbwt::VarVector ---
+        group.bench_function("simple-sds-sbwt::VarVector/get", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
                     // `get` performs bounds checking.

@@ -1,14 +1,14 @@
-//! Parallel operations for [`IntVec`].
+//! Parallel operations for [`VarVec`].
 //!
-//! This module provides parallel implementations for [`IntVec`] operations,
+//! This module provides parallel implementations for [`VarVec`] operations,
 //! enabled by the `parallel` feature flag. These methods are built on the
 //! [Rayon] library and are designed to leverage multi-core architectures to
 //! accelerate data decompression and access.
 //!
 //! [Rayon]: https://github.com/rayon-rs/rayon
-//! [`IntVec`]: crate::variable::IntVec
+//! [`VarVec`]: crate::variable::VarVec
 
-use super::{traits::Storable, IntVec, IntVecBitReader, IntVecError};
+use super::{traits::Storable, VarVec, VarVecBitReader, VarVecError};
 use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
@@ -18,12 +18,12 @@ use rayon::prelude::{
 };
 
 #[cfg(feature = "parallel")]
-impl<T, E, B> IntVec<T, E, B>
+impl<T, E, B> VarVec<T, E, B>
 where
     T: Storable + Send + Sync,
     E: Endianness + Send + Sync,
     B: AsRef<[u64]> + Send + Sync,
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>
         + Send,
@@ -37,7 +37,7 @@ where
     /// # Performance
     ///
     /// For the specific task of full decompression, this parallel version is not
-    /// always faster than the sequential [`iter`](super::IntVec::iter). If the
+    /// always faster than the sequential [`iter`](super::VarVec::iter). If the
     /// decoding operation is very fast (e.g., with `VByte` encoding), the
     /// operation can be limited by memory bandwidth. In such cases, the
     /// sequential iterator's better use of CPU caches may outperform this
@@ -47,11 +47,11 @@ where
     ///
     /// ```
     /// # #[cfg(feature = "parallel")] {
-    /// use compressed_intvec::variable::{IntVec, UIntVec};
+    /// use compressed_intvec::variable::{VarVec, UVarVec};
     /// use rayon::prelude::*;
     ///
     /// let data: Vec<u32> = (0..1000).collect();
-    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
     ///
     /// // Use the parallel iterator to compute the sum in parallel
     /// let sum: u32 = vec.par_iter().sum();
@@ -72,7 +72,7 @@ where
 
             let start_sample_idx = chunk_idx * chunk_size;
             let end_sample_idx = (start_sample_idx + chunk_size).min(num_samples);
-            let mut bit_reader = IntVecBitReader::<E>::new(
+            let mut bit_reader = VarVecBitReader::<E>::new(
                 dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()),
             );
             let mut values = Vec::new();
@@ -108,21 +108,21 @@ where
     /// Retrieves multiple elements from a slice of indices in parallel.
     ///
     /// This method uses Rayon to parallelize random access. It works by creating
-    /// a separate [`IntVecReader`](super::IntVecReader) for each thread and
+    /// a separate [`VarVecReader`](super::VarVecReader) for each thread and
     /// distributing the lookup work among them.
     ///
     /// # Errors
     ///
-    /// Returns [`IntVecError::IndexOutOfBounds`] if any index is out of bounds.
+    /// Returns [`VarVecError::IndexOutOfBounds`] if any index is out of bounds.
     ///
     /// # Examples
     ///
     /// ```
     /// # #[cfg(feature = "parallel")] {
-    /// use compressed_intvec::variable::{IntVec, SIntVec};
+    /// use compressed_intvec::variable::{VarVec, SVarVec};
     ///
     /// let data: Vec<i64> = (0..1000).map(|x| x * -1).collect();
-    /// let vec: SIntVec<i64> = IntVec::from_slice(&data).unwrap();
+    /// let vec: SVarVec<i64> = VarVec::from_slice(&data).unwrap();
     ///
     /// let indices = [500, 10, 999, 0, 250];
     /// let values = vec.par_get_many(&indices).unwrap();
@@ -130,14 +130,14 @@ where
     /// assert_eq!(values, vec![-500, -10, -999, 0, -250]);
     /// # }
     /// ```
-    pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<T>, IntVecError> {
+    pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<T>, VarVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
         }
 
         for &index in indices {
             if index >= self.len {
-                return Err(IntVecError::IndexOutOfBounds(index));
+                return Err(VarVecError::IndexOutOfBounds(index));
             }
         }
 

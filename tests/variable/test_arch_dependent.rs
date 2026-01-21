@@ -12,8 +12,8 @@ use dsi_bitstream::prelude::LE;
 #[test]
 fn test_storable_for_usize() {
     let data: Vec<usize> = (0..100).collect();
-    // Explicitly type the IntVec to use the new Storable impl.
-    let vec = IntVec::<usize, LE>::from_slice(&data).unwrap();
+    // Explicitly type the VarVec to use the new Storable impl.
+    let vec = VarVec::<usize, LE>::from_slice(&data).unwrap();
     assert_eq!(vec.len(), 100);
     assert_eq!(vec.get(50), Some(50));
     assert_eq!(vec.iter().collect::<Vec<_>>(), data);
@@ -22,7 +22,7 @@ fn test_storable_for_usize() {
 #[test]
 fn test_storable_for_isize() {
     let data: Vec<isize> = (-50..50).collect();
-    let vec = IntVec::<isize, LE>::from_slice(&data).unwrap();
+    let vec = VarVec::<isize, LE>::from_slice(&data).unwrap();
     assert_eq!(vec.len(), 100);
     assert_eq!(vec.get(0), Some(-50));
     assert_eq!(vec.get(50), Some(0));
@@ -35,7 +35,7 @@ fn test_large_usize_on_64bit() {
     // This value will not fit in a 32-bit usize.
     let large_value = u32::MAX as usize + 1;
     let data: Vec<usize> = vec![1, 2, large_value];
-    let vec = IntVec::<usize, LE>::from_slice(&data).unwrap();
+    let vec = VarVec::<usize, LE>::from_slice(&data).unwrap();
     assert_eq!(vec.get(2), Some(large_value));
 }
 

@@ -1,6 +1,6 @@
 //! A compressed integer vector using variable-length encoding with fast random access.
 //!
-//! This module provides [`IntVec`], a data structure for storing sequences of
+//! This module provides [`VarVec`], a data structure for storing sequences of
 //! integers in a compressed format while retaining efficient random access. It is
 //! well-suited for datasets where integer values are non-uniformly distributed,
 //! as it uses instantaneous variable-length codes to represent smaller numbers with fewer bits.
@@ -10,7 +10,7 @@
 //! ## Variable-Length Encoding
 //!
 //! Unlike [`FixedVec`], which uses a fixed number of
-//! bits for every integer, [`IntVec`] employs **instantaneous codes** (such as
+//! bits for every integer, [`VarVec`] employs **instantaneous codes** (such as
 //! Gamma, Delta, or Rice codes) provided by the [`dsi-bitstream`] crate. This
 //! approach allows each integer to be encoded with a variable number of bits,
 //! typically using shorter codes for smaller or more frequent values. This can
@@ -23,11 +23,11 @@
 //! ## Random Access and Sampling
 //!
 //! A key challenge with variable-length codes is that the location of the *i*-th
-//! element cannot be calculated directly. To solve this, [`IntVec`] implements a
+//! element cannot be calculated directly. To solve this, [`VarVec`] implements a
 //! **sampling mechanism**. It stores the bit position of every *k*-th element in
 //! a separate, auxiliary [`FixedVec`]. This parameter, `k`, is the **sampling rate**.
 //!
-//! To access an element at `index`, [`IntVec`]:
+//! To access an element at `index`, [`VarVec`]:
 //! 1.  Finds the nearest sample by calculating `index / k`.
 //! 2.  Retrieves the bit offset of the start of that sampled block.
 //! 3.  Jumps to that offset in the compressed data stream.
@@ -48,7 +48,7 @@
 //!
 //! # Design and Immutability
 //!
-//! [`IntVec`] is **immutable** after creation.
+//! [`VarVec`] is **immutable** after creation.
 //! Unlike [`FixedVec`], it does not provide methods for
 //! in-place modification (e.g., `set`, `push`).
 //!
@@ -58,31 +58,31 @@
 //! subsequent data, invalidating every sample point that follows. The cost of
 //! such an operation would be prohibitive, scaling with the length of the vector.
 //!
-//! For this reason, [`IntVec`] is designed as a write-once, read-many data structure.
+//! For this reason, [`VarVec`] is designed as a write-once, read-many data structure.
 //!
 //! # Access Strategies and Readers
 //!
-//! [`IntVec`] provides multiple interfaces for accessing data, each optimized for a
+//! [`VarVec`] provides multiple interfaces for accessing data, each optimized for a
 //! different pattern of use.
 //!
-//! - **[`get()`](IntVec::get)**: For single, infrequent lookups. Each call creates and discards
+//! - **[`get()`](VarVec::get)**: For single, infrequent lookups. Each call creates and discards
 //!   an internal reader, which incurs overhead if used in a loop.
 //!
-//! - **[`get_many()`](IntVec::get_many)**: The most efficient method for retrieving a batch of elements
+//! - **[`get_many()`](VarVec::get_many)**: The most efficient method for retrieving a batch of elements
 //!   when all indices are known beforehand. It sorts the indices to perform a
 //!   single, monotonic scan over the data, minimizing redundant decoding and seek
 //!   operations.
 //!
-//! - **[`IntVecReader`] (Reusable Stateless Reader)**: This reader is created via
-//!   [`IntVec::reader()`]. It maintains an internal, reusable bitstream reader,
-//!   amortizing its setup cost over multiple calls. Each [`get()`](IntVec::get) call is
+//! - **[`VarVecReader`] (Reusable Stateless Reader)**: This reader is created via
+//!   [`VarVec::reader()`]. It maintains an internal, reusable bitstream reader,
+//!   amortizing its setup cost over multiple calls. Each [`get()`](VarVec::get) call is
 //!   **stateless** with respect to position: it performs a full seek to the nearest
 //!   sample and decodes forward from there, independently of previous calls. It is
 //!   best suited for true random access patterns where indices are sparse and
 //!   unpredictable.
 //!
-//! - **[`IntVecSeqReader`] (Stateful Sequential Reader)**: This reader, created via
-//!   [`IntVec::seq_reader()`], is a stateful object optimized for access patterns with
+//! - **[`VarVecSeqReader`] (Stateful Sequential Reader)**: This reader, created via
+//!   [`VarVec::seq_reader()`], is a stateful object optimized for access patterns with
 //!   high locality. It maintains an internal cursor of the current decoding position.
 //!   - **Fast Path**: If a requested `index` is at or after the cursor's current
 //!     position and within the same sample block, the reader simply decodes
@@ -92,28 +92,57 @@
 //!     seeking to the nearest sample and decoding from there. This makes it very
 //!     efficient for iterating through sorted or clustered indices.
 //!
+//! # Migration Notice
+//!
+//! As of version 0.3.0, all `IntVec*` types have been renamed to `VarVec*` for
+//! consistency with the module naming convention (`fixed` → `FixedVec`, `seq` → `SeqVec`,
+//! `variable` → `VarVec`). The old names remain available as deprecated type aliases
+//! and will continue to work, but using the new names is recommended.
+//!
+//! ## Quick Migration Guide
+//!
+//! | Old Name | New Name |
+//! |----------|----------|
+//! | `IntVec` | `VarVec` |
+//! | `IntVecBuilder` | `VarVecBuilder` |
+//! | `IntVecError` | `VarVecError` |
+//! | `IntVecReader` | `VarVecReader` |
+//! | `IntVecSeqReader` | `VarVecSeqReader` |
+//! | `IntVecSlice` | `VarVecSlice` |
+//! | `IntVecIter` | `VarVecIter` |
+//! | `IntVecIntoIter` | `VarVecIntoIter` |
+//! | `UIntVec` | `UVarVec` |
+//! | `SIntVec` | `SVarVec` |
+//! | `LEIntVec` | `LEVarVec` |
+//! | `BEIntVec` | `BEVarVec` |
+//! | `LESIntVec` | `LESVarVec` |
+//! | `BESIntVec` | `BESVarVec` |
+//!
+//! Code using the old names will continue to compile but will emit deprecation
+//! warnings during compilation. The deprecated aliases will be removed in version 1.0.0.
+//!
 //! # Main Components
 //!
-//! - [`IntVec`]: The core compressed vector.
-//! - [`IntVecBuilder`]: The primary tool for constructing an [`IntVec`] with
+//! - [`VarVec`]: The core compressed vector.
+//! - [`VarVecBuilder`]: The primary tool for constructing an [`VarVec`] with
 //!   custom compression codecs and sampling rates.
 //! - [`VariableCodecSpec`]: An enum to specify the compression codec.
-//! - [`IntVecReader`]: A reusable, stateless reader for efficient random access.
-//! - [`IntVecSeqReader`]: A stateful reader optimized for sequential or localized access patterns.
-//! - [`IntVecSlice`]: An immutable, zero-copy view over a portion of the vector.
+//! - [`VarVecReader`]: A reusable, stateless reader for efficient random access.
+//! - [`VarVecSeqReader`]: A stateful reader optimized for sequential or localized access patterns.
+//! - [`VarVecSlice`]: An immutable, zero-copy view over a portion of the vector.
 //!
 //! # Examples
 //!
 //! ## Basic Usage with Unsigned Integers
 //!
-//! Create a [`UIntVec`] (an alias for `IntVec<u32, LE>`) from a slice of `u32`. The builder will automatically
+//! Create a [`UVarVec`] (an alias for `VarVec<u32, LE>`) from a slice of `u32`. The builder will automatically
 //! select a suitable codec and use a default sampling rate.
 //!
 //! ```
-//! use compressed_intvec::variable::{IntVec, UIntVec};
+//! use compressed_intvec::variable::{VarVec, UVarVec};
 //!
 //! let data: Vec<u32> = vec![100, 200, 300, 1024];
-//! let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+//! let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
 //!
 //! assert_eq!(vec.len(), 4);
 //! // Accessing an element
@@ -122,14 +151,14 @@
 //!
 //! ## Storing Signed Integers
 //!
-//! [`IntVec`] handles signed integers, such as [`i16`], by mapping them to unsigned
+//! [`VarVec`] handles signed integers, such as [`i16`], by mapping them to unsigned
 //! values using zig-zag encoding.
 //!
 //! ```
-//! use compressed_intvec::variable::{IntVec, SIntVec};
+//! use compressed_intvec::variable::{VarVec, SVarVec};
 //!
 //! let data: &[i16] = &[-5, 20, -100, 0, 8];
-//! let vec: SIntVec<i16> = IntVec::from_slice(data).unwrap();
+//! let vec: SVarVec<i16> = VarVec::from_slice(data).unwrap();
 //!
 //! assert_eq!(vec.len(), 5);
 //! assert_eq!(vec.get(0), Some(-5));
@@ -138,15 +167,15 @@
 //!
 //! ## Manual Codec and Sampling Rate
 //!
-//! For fine-grained control, use the [`IntVecBuilder`]. Here, we specify a
+//! For fine-grained control, use the [`VarVecBuilder`]. Here, we specify a
 //! sampling rate of `k=8` and use the `Zeta` code with `k=3`.
 //!
 //! ```
-//! use compressed_intvec::variable::{IntVec, UIntVec, VariableCodecSpec};
+//! use compressed_intvec::variable::{VarVec, UVarVec, VariableCodecSpec};
 //!
 //! let data: Vec<u64> = (0..100).map(|i| i * i).collect();
 //!
-//! let vec: UIntVec<u64> = IntVec::builder()
+//! let vec: UVarVec<u64> = VarVec::builder()
 //!     .k(8) // Set sampling rate
 //!     .codec(VariableCodecSpec::Zeta { k: Some(3) }) // Set compression codec
 //!     .build(&data)
@@ -157,39 +186,67 @@
 //! ```
 //!
 //! Best performance is achieved when the sampling rate `k` is a power of two. Usually a value of `32` or `16` is a good trade-off between speed and compression ratio.
-//! 
+//!
 //! ## Codec Selection and Performance
 //!
 //! The choice of compression codec is critical for performance and space efficiency.
-//! [`IntVecBuilder`] offers automatic codec selection via 
+//! [`VarVecBuilder`] offers automatic codec selection via
 //! [`VariableCodecSpec::Auto`]. When enabled, the builder analyzes the entire input
 //! dataset to find the codec that offers the best compression ratio.
 //!
 //! This analysis involves calculating the compressed size for the data with
 //! approximately 70 different codec configurations. This process introduces a
 //! significant, one-time **construction overhead**.
-//! 
-//! Use [`Auto`](VariableCodecSpec::Auto) for read-heavy workloads where the [`IntVec`] 
+//!
+//! Use [`Auto`](VariableCodecSpec::Auto) for read-heavy workloads where the [`VarVec`]
 //! is built once and then accessed many times. The initial cost is easily amortized by
 //! the long-term space savings.
-//! 
-//! If your application creates many small [`IntVec`]s or accesses them frequently,
+//!
+//! If your application creates many small [`VarVec`]s or accesses them frequently,
 //! the repeated cost of analysis can become a performance
 //! bottleneck. In such scenarios, it is better to explicitly specify a codec
 //! (e.g., [`VariableCodecSpec::Gamma`] or [`VariableCodecSpec::Delta`]) that is known
 //! to be a good general-purpose choice for your data.
-//! 
+//!
 //! ```
 //! use compressed_intvec::prelude::*;
-//! 
+//!
 //! let data: Vec<u32> = (0..100).collect();
-//! 
-//! // Create an IntVec with automatic codec selection
-//! let vec: UIntVec<u32> = IntVec::builder()
+//!
+//! // Create an VarVec with automatic codec selection
+//! let vec: UVarVec<u32> = VarVec::builder()
 //!     .build(&data)
 //!     .unwrap();
 //!```
-//!  
+//!
+//! # Migration from IntVec to VarVec
+//!
+//! As of version 0.6.0, all `IntVec*` types have been renamed to `VarVec*` for
+//! consistency with the module naming convention. The old names are still
+//! available as deprecated type aliases, but will be removed in a future major
+//! version.
+//!
+//! | Old Name (deprecated)         | New Name (use this)           |
+//! |-------------------------------|-------------------------------|
+//! | `IntVec`                      | `VarVec`                      |
+//! | `IntVecBuilder`               | `VarVecBuilder`               |
+//! | `IntVecFromIterBuilder`       | `VarVecFromIterBuilder`       |
+//! | `IntVecReader`                | `VarVecReader`                |
+//! | `IntVecSeqReader`             | `VarVecSeqReader`             |
+//! | `IntVecSlice`                 | `VarVecSlice`                 |
+//! | `IntVecIter`                  | `VarVecIter`                  |
+//! | `IntVecIntoIter`              | `VarVecIntoIter`              |
+//! | `IntVecError`                 | `VarVecError`                 |
+//! | `UIntVec`                     | `UVarVec`                     |
+//! | `SIntVec`                     | `SVarVec`                     |
+//! | `BEIntVec`                    | `BEVarVec`                    |
+//! | `LEIntVec`                    | `LEVarVec`                    |
+//! | `BESIntVec`                   | `BESVarVec`                   |
+//! | `LESIntVec`                   | `LESVarVec`                   |
+//!
+//! To migrate your code, simply replace all occurrences of the old names with
+//! the new ones. No changes to functionality or behavior are required.
+//!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
 #[macro_use]
@@ -225,15 +282,15 @@ use std::{
     marker::PhantomData,
 };
 
-pub use builder::{IntVecBuilder, IntVecFromIterBuilder};
-use iter::{IntVecIntoIter, IntVecIter};
-pub use reader::IntVecReader;
-pub use seq_reader::IntVecSeqReader;
-pub use slice::IntVecSlice;
+pub use builder::{VarVecBuilder, VarVecFromIterBuilder};
+use iter::{VarVecIntoIter, VarVecIter};
+pub use reader::VarVecReader;
+pub use seq_reader::VarVecSeqReader;
+pub use slice::{VarVecSlice, VarVecSliceIter};
 
-/// Defines the set of errors that can occur in `IntVec` operations.
+/// Defines the set of errors that can occur in `VarVec` operations.
 #[derive(Debug)]
-pub enum IntVecError {
+pub enum VarVecError {
     /// An error occurred during an I/O operation, typically from the underlying
     /// bitstream reader or writer.
     Io(std::io::Error),
@@ -249,49 +306,49 @@ pub enum IntVecError {
     IndexOutOfBounds(usize),
 }
 
-impl fmt::Display for IntVecError {
+impl fmt::Display for VarVecError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            IntVecError::Io(e) => write!(f, "I/O error: {}", e),
-            IntVecError::Bitstream(e) => write!(f, "Bitstream error: {}", e),
-            IntVecError::InvalidParameters(s) => write!(f, "Invalid parameters: {}", s),
-            IntVecError::CodecDispatch(s) => write!(f, "Codec dispatch error: {}", s),
-            IntVecError::IndexOutOfBounds(index) => write!(f, "Index out of bounds: {}", index),
+            VarVecError::Io(e) => write!(f, "I/O error: {}", e),
+            VarVecError::Bitstream(e) => write!(f, "Bitstream error: {}", e),
+            VarVecError::InvalidParameters(s) => write!(f, "Invalid parameters: {}", s),
+            VarVecError::CodecDispatch(s) => write!(f, "Codec dispatch error: {}", s),
+            VarVecError::IndexOutOfBounds(index) => write!(f, "Index out of bounds: {}", index),
         }
     }
 }
 
-impl Error for IntVecError {
+impl Error for VarVecError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            IntVecError::Io(e) => Some(e),
-            IntVecError::Bitstream(e) => Some(e.as_ref()),
+            VarVecError::Io(e) => Some(e),
+            VarVecError::Bitstream(e) => Some(e.as_ref()),
             _ => None,
         }
     }
 }
 
-impl From<std::io::Error> for IntVecError {
+impl From<std::io::Error> for VarVecError {
     fn from(e: std::io::Error) -> Self {
-        IntVecError::Io(e)
+        VarVecError::Io(e)
     }
 }
 
-impl From<core::convert::Infallible> for IntVecError {
+impl From<core::convert::Infallible> for VarVecError {
     fn from(_: core::convert::Infallible) -> Self {
         unreachable!()
     }
 }
 
-impl From<FixedVecError> for IntVecError {
+impl From<FixedVecError> for VarVecError {
     fn from(e: FixedVecError) -> Self {
-        IntVecError::InvalidParameters(e.to_string())
+        VarVecError::InvalidParameters(e.to_string())
     }
 }
 
 /// A compressed, randomly accessible vector of integers using variable-length encoding.
 ///
-/// `IntVec` achieves compression by using instantaneous codes and enables fast,
+/// `VarVec` achieves compression by using instantaneous codes and enables fast,
 /// amortized O(1) random access via a sampling mechanism. See the
 /// [module-level documentation](crate::variable) for a detailed explanation.
 ///
@@ -303,7 +360,7 @@ impl From<FixedVecError> for IntVecError {
 /// - `B`: The backend storage buffer, such as `Vec<u64>` for an owned vector or
 ///   `&[u64]` for a borrowed, zero-copy view.
 #[derive(Debug, Clone)]
-pub struct IntVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
+pub struct VarVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// The raw, bit-packed compressed data.
     pub(super) data: B,
     /// A `FixedVec` containing the bit offsets of sampled elements.
@@ -318,7 +375,7 @@ pub struct IntVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     pub(super) _markers: PhantomData<(T, E)>,
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for IntVec<T, E, B> {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for VarVec<T, E, B> {
     fn mem_size(&self, flags: SizeFlags) -> usize {
         // Start with the stack size of the struct itself.
         let mut total_size = core::mem::size_of::<Self>();
@@ -446,7 +503,7 @@ impl mem_dbg::MemDbgImpl for CodeWrapper<'_> {
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for IntVec<T, E, B> {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for VarVec<T, E, B> {
     fn _mem_dbg_rec_on(
         &self,
         writer: &mut impl core::fmt::Write,
@@ -525,25 +582,25 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for In
     }
 }
 
-/// Type alias for the bit writer used internally by `IntVec` builders.
-pub(crate) type IntVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
-/// Type alias for the bit reader used internally by `IntVec` accessors.
-pub(crate) type IntVecBitReader<'a, E> =
+/// Type alias for the bit writer used internally by `VarVec` builders.
+pub(crate) type VarVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
+/// Type alias for the bit reader used internally by `VarVec` accessors.
+pub(crate) type VarVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
 
-impl<T: Storable + 'static, E: Endianness> IntVec<T, E, Vec<u64>> {
-    /// Creates a builder for constructing an owned [`IntVec`] from a slice of data.
+impl<T: Storable + 'static, E: Endianness> VarVec<T, E, Vec<u64>> {
+    /// Creates a builder for constructing an owned [`VarVec`] from a slice of data.
     ///
-    /// This is the most flexible way to create an [`IntVec`], allowing customization
+    /// This is the most flexible way to create an [`VarVec`], allowing customization
     /// of the compression codec and sampling rate.
     ///
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{IntVec, UIntVec, VariableCodecSpec};
+    /// use compressed_intvec::variable::{VarVec, UVarVec, VariableCodecSpec};
     ///
     /// let data: &[u32] = &[5, 8, 13, 21, 34];
-    /// let vec: UIntVec<u32> = IntVec::builder()
+    /// let vec: UVarVec<u32> = VarVec::builder()
     ///     .k(2) // Sample every 2nd element
     ///     .codec(VariableCodecSpec::Delta)
     ///     .build(data)
@@ -551,49 +608,49 @@ impl<T: Storable + 'static, E: Endianness> IntVec<T, E, Vec<u64>> {
     ///
     /// assert_eq!(vec.get(3), Some(21));
     /// ```
-    pub fn builder() -> IntVecBuilder<T, E> {
-        IntVecBuilder::new()
+    pub fn builder() -> VarVecBuilder<T, E> {
+        VarVecBuilder::new()
     }
 
-    /// Creates a builder for constructing an owned [`IntVec`] from an iterator.
+    /// Creates a builder for constructing an owned [`VarVec`] from an iterator.
     ///
     /// This is useful for large datasets that are generated on the fly.
-    pub fn from_iter_builder<I>(iter: I) -> IntVecFromIterBuilder<T, E, I>
+    pub fn from_iter_builder<I>(iter: I) -> VarVecFromIterBuilder<T, E, I>
     where
         I: IntoIterator<Item = T> + Clone,
     {
-        IntVecFromIterBuilder::new(iter)
+        VarVecFromIterBuilder::new(iter)
     }
 
-    /// Consumes the [`IntVec`] and returns its decoded values as a standard `Vec<T>`.
+    /// Consumes the [`VarVec`] and returns its decoded values as a standard `Vec<T>`.
     ///
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{IntVec, SIntVec};
+    /// use compressed_intvec::variable::{VarVec, SVarVec};
     ///
     /// let data: &[i32] = &[-10, 0, 10];
-    /// let vec: SIntVec<i32> = IntVec::from_slice(data).unwrap();
+    /// let vec: SVarVec<i32> = VarVec::from_slice(data).unwrap();
     /// let decoded_data = vec.into_vec();
     ///
     /// assert_eq!(decoded_data, &[-10, 0, 10]);
     /// ```
     pub fn into_vec(self) -> Vec<T>
     where
-        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
             + BitSeek<Error = core::convert::Infallible>,
     {
         self.into_iter().collect()
     }
 
-    /// Creates an owned [`IntVec`] from a slice of data using default settings.
+    /// Creates an owned [`VarVec`] from a slice of data using default settings.
     ///
     /// This method uses [`VariableCodecSpec::Auto`] to select a codec and a
     /// default sampling rate of `k=16`.
-    pub fn from_slice(slice: &[T]) -> Result<Self, IntVecError>
+    pub fn from_slice(slice: &[T]) -> Result<Self, VarVecError>
     where
-        for<'a> crate::variable::IntVecBitWriter<E>:
+        for<'a> crate::variable::VarVecBitWriter<E>:
             BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
         Self::builder()
@@ -603,15 +660,15 @@ impl<T: Storable + 'static, E: Endianness> IntVec<T, E, Vec<u64>> {
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
-    /// Creates a new [`IntVec`] from its raw components, enabling zero-copy views.
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B> {
+    /// Creates a new [`VarVec`] from its raw components, enabling zero-copy views.
     ///
     /// This constructor is intended for advanced use cases, such as memory-mapping
-    /// a pre-built [`IntVec`] from disk without copying the data.
+    /// a pre-built [`VarVec`] from disk without copying the data.
     ///
     /// # Errors
     ///
-    /// Returns an [`IntVecError::InvalidParameters`] if `k` is zero or if the
+    /// Returns an [`VarVecError::InvalidParameters`] if `k` is zero or if the
     /// number of samples is inconsistent with `len` and `k`.
     pub fn from_parts(
         data: B,
@@ -621,18 +678,18 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         k: usize,
         len: usize,
         encoding: Codes,
-    ) -> Result<Self, IntVecError> {
+    ) -> Result<Self, VarVecError> {
         let samples =
             FixedVec::<u64, u64, LE, B>::from_parts(samples_data, samples_len, samples_num_bits)?;
 
         if k == 0 {
-            return Err(IntVecError::InvalidParameters(
+            return Err(VarVecError::InvalidParameters(
                 "Sampling rate k cannot be zero".to_string(),
             ));
         }
         let expected_samples = if len == 0 { 0 } else { len.div_ceil(k) };
         if samples.len() != expected_samples {
-            return Err(IntVecError::InvalidParameters(format!(
+            return Err(VarVecError::InvalidParameters(format!(
                 "Inconsistent number of samples. Expected {}, found {}",
                 expected_samples,
                 samples.len()
@@ -642,7 +699,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
         Ok(unsafe { Self::new_unchecked(data, samples, k, len, encoding) })
     }
 
-    /// Creates a new [`IntVec`] from its raw parts without performing safety checks.
+    /// Creates a new [`VarVec`] from its raw parts without performing safety checks.
     ///
     /// # Safety
     ///
@@ -674,20 +731,20 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{IntVec, UIntVec};
+    /// use compressed_intvec::variable::{VarVec, UVarVec};
     ///
     /// let data: Vec<u32> = (0..20).collect();
-    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
     /// let slice = vec.slice(5, 10).unwrap();
     ///
     /// assert_eq!(slice.len(), 10);
     /// assert_eq!(slice.get(0), Some(5)); // Corresponds to index 5 of the original vec
     /// ```
-    pub fn slice(&'_ self, start: usize, len: usize) -> Option<IntVecSlice<'_, T, E, B>> {
+    pub fn slice(&'_ self, start: usize, len: usize) -> Option<VarVecSlice<'_, T, E, B>> {
         if start.saturating_add(len) > self.len {
             return None;
         }
-        Some(IntVecSlice::new(self, start..start + len))
+        Some(VarVecSlice::new(self, start..start + len))
     }
 
     /// Splits the vector into two immutable slices at a given index.
@@ -697,12 +754,12 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
     pub fn split_at(
         &'_ self,
         mid: usize,
-    ) -> Option<(IntVecSlice<'_, T, E, B>, IntVecSlice<'_, T, E, B>)> {
+    ) -> Option<(VarVecSlice<'_, T, E, B>, VarVecSlice<'_, T, E, B>)> {
         if mid > self.len {
             return None;
         }
-        let left = IntVecSlice::new(self, 0..mid);
-        let right = IntVecSlice::new(self, mid..self.len);
+        let left = VarVecSlice::new(self, 0..mid);
+        let right = VarVecSlice::new(self, mid..self.len);
         Some((left, right))
     }
 
@@ -756,33 +813,33 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B> {
     /// Returns an iterator over the decompressed values.
     pub fn iter(&'_ self) -> impl Iterator<Item = T> + '_
     where
-        for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
             + BitSeek<Error = core::convert::Infallible>,
     {
-        IntVecIter::new(self)
+        VarVecIter::new(self)
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B>
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B>
 where
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// Creates a reusable, stateless reader for efficient random access.
     ///
-    /// This method returns an [`IntVecReader`], a struct that maintains a persistent,
+    /// This method returns an [`VarVecReader`], a struct that maintains a persistent,
     /// reusable bitstream reader. This amortizes the setup cost across multiple `get`
-    /// operations, making it more efficient than calling [`get`](IntVec::get) repeatedly in a loop.
+    /// operations, making it more efficient than calling [`get`](VarVec::get) repeatedly in a loop.
     ///
     /// This reader is **stateless**: it performs a full seek from the nearest sample point for each call,
     /// independently of any previous access.
     ///
     /// # When to use it
-    /// Use [`IntVecReader`] for true random access patterns where lookup indices are sparse,
+    /// Use [`VarVecReader`] for true random access patterns where lookup indices are sparse,
     /// unordered, or not known in advance (e.g., graph traversals, pointer chasing).
-    /// For accessing a known set of indices, [`get_many`](IntVec::get_many) is generally superior.
+    /// For accessing a known set of indices, [`get_many`](VarVec::get_many) is generally superior.
     ///
     /// # Examples
     ///
@@ -790,7 +847,7 @@ where
     /// use compressed_intvec::prelude::*;
     ///
     /// let data: Vec<u32> = (0..100).rev().collect(); // Data is not sequential
-    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
     ///
     /// // Create a reusable reader for multiple random lookups
     /// let mut reader = vec.reader();
@@ -799,13 +856,13 @@ where
     /// assert_eq!(reader.get(0).unwrap(), Some(99));
     /// assert_eq!(reader.get(50).unwrap(), Some(49));
     /// ```
-    pub fn reader(&'_ self) -> IntVecReader<'_, T, E, B> {
-        IntVecReader::new(self)
+    pub fn reader(&'_ self) -> VarVecReader<'_, T, E, B> {
+        VarVecReader::new(self)
     }
 
     /// Creates a stateful, reusable reader optimized for sequential access.
     ///
-    /// This method returns an [`IntVecSeqReader`], which is specifically designed
+    /// This method returns an [`VarVecSeqReader`], which is specifically designed
     /// to take advantage of the vector's internal state, tracking the current decoding position (cursor).
     ///
     /// This statefulness enables a key optimization:
@@ -817,7 +874,7 @@ where
     ///   the standard behavior of seeking to the nearest sample point.
     ///
     /// # When to use it
-    /// Use [`IntVecSeqReader`] when your access pattern has high locality, meaning
+    /// Use [`VarVecSeqReader`] when your access pattern has high locality, meaning
     /// indices are primarily increasing and often clustered together. It is ideal
     /// for iterating through a sorted list of indices or for stream-like processing.
     ///
@@ -827,7 +884,7 @@ where
     /// use compressed_intvec::prelude::*;
     ///
     /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
     ///
     /// // Create a reader optimized for sequential access
     /// let mut seq_reader = vec.seq_reader();
@@ -843,8 +900,8 @@ where
     /// // A backward jump will also trigger a seek
     /// assert_eq!(seq_reader.get(5).unwrap(), Some(5));
     /// ```
-    pub fn seq_reader(&'_ self) -> IntVecSeqReader<'_, T, E, B> {
-        IntVecSeqReader::new(self)
+    pub fn seq_reader(&'_ self) -> VarVecSeqReader<'_, T, E, B> {
+        VarVecSeqReader::new(self)
     }
 
     /// Returns the element at the specified index, or `None` if the index is
@@ -855,10 +912,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{IntVec, UIntVec};
+    /// use compressed_intvec::variable::{VarVec, UVarVec};
     ///
     /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
     ///
     /// assert_eq!(vec.get(50), Some(50));
     /// assert_eq!(vec.get(100), None);
@@ -890,28 +947,28 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`IntVecError::IndexOutOfBounds`] if any index is out of bounds.
+    /// Returns [`VarVecError::IndexOutOfBounds`] if any index is out of bounds.
     ///
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{IntVec, UIntVec};
+    /// use compressed_intvec::variable::{VarVec, UVarVec};
     ///
     /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
     ///
     /// let indices = [99, 0, 50];
     /// let values = vec.get_many(&indices).unwrap();
     /// assert_eq!(values, vec![99, 0, 50]);
     /// ```
-    pub fn get_many(&self, indices: &[usize]) -> Result<Vec<T>, IntVecError> {
+    pub fn get_many(&self, indices: &[usize]) -> Result<Vec<T>, VarVecError> {
         if indices.is_empty() {
             return Ok(Vec::new());
         }
 
         for &index in indices {
             if index >= self.len {
-                return Err(IntVecError::IndexOutOfBounds(index));
+                return Err(VarVecError::IndexOutOfBounds(index));
             }
         }
         // SAFETY: We have just performed the bounds checks.
@@ -973,7 +1030,7 @@ where
         results: &mut [T],
         block_of: F1,
         start_of_block: F2,
-    ) -> Result<(), IntVecError>
+    ) -> Result<(), VarVecError>
     where
         F1: Fn(usize) -> usize,
         F2: Fn(usize) -> usize,
@@ -1012,7 +1069,7 @@ where
     /// This is a convenient alternative to [`get_many`](Self::get_many) when the indices are not
     /// already in a slice. It may be less performant as it cannot pre-sort the
     /// indices for optimal access.
-    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<T>, IntVecError>
+    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<T>, VarVecError>
     where
         I: IntoIterator<Item = usize>,
     {
@@ -1024,7 +1081,7 @@ where
         for index in indices_iter {
             let value = seq_reader
                 .get(index)?
-                .ok_or(IntVecError::IndexOutOfBounds(index))?;
+                .ok_or(VarVecError::IndexOutOfBounds(index))?;
             results.push(value);
         }
 
@@ -1032,9 +1089,9 @@ where
     }
 }
 
-impl<T: Storable + Ord, E: Endianness, B: AsRef<[u64]>> IntVec<T, E, B>
+impl<T: Storable + Ord, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B>
 where
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -1054,10 +1111,10 @@ where
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{IntVec, SIntVec};
+    /// use compressed_intvec::variable::{VarVec, SVarVec};
     ///
     /// let data: &[i32] = &[-10, 0, 10, 20, 30];
-    /// let vec: SIntVec<i32> = IntVec::from_slice(data).unwrap();
+    /// let vec: SVarVec<i32> = VarVec::from_slice(data).unwrap();
     ///
     /// assert_eq!(vec.binary_search(&10), Ok(2));
     /// assert_eq!(vec.binary_search(&15), Err(3));
@@ -1110,44 +1167,178 @@ where
     }
 }
 
-impl<T: Storable + 'static, E: Endianness + 'static> IntoIterator for IntVec<T, E, Vec<u64>>
+impl<T: Storable + 'static, E: Endianness + 'static> IntoIterator for VarVec<T, E, Vec<u64>>
 where
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     type Item = T;
-    type IntoIter = IntVecIntoIter<T, E>;
+    type IntoIter = VarVecIntoIter<T, E>;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntVecIntoIter::new(self)
+        VarVecIntoIter::new(self)
     }
 }
 
-/// An [`IntVec`] for unsigned integers with Little-Endian bit layout.
-pub type UIntVec<T> = IntVec<T, LE>;
-/// An [`IntVec`] for signed integers with Little-Endian bit layout.
-pub type SIntVec<T> = IntVec<T, LE>;
-/// An [`IntVec`] for [`u64`] elements with Big-Endian bit layout.
-pub type BEIntVec = IntVec<u64, BE>;
-/// An [`IntVec`] for [`u64`] elements with Little-Endian bit layout.
-pub type LEIntVec = IntVec<u64, LE>;
-/// An [`IntVec`] for [`i64`] elements with Big-Endian bit layout.
-pub type BESIntVec = IntVec<i64, BE>;
-/// An [`IntVec`] for [`i64`] elements with Little-Endian bit layout.
-pub type LESIntVec = IntVec<i64, LE>;
+/// An [`VarVec`] for unsigned integers with Little-Endian bit layout.
+pub type UVarVec<T> = VarVec<T, LE>;
+/// An [`VarVec`] for signed integers with Little-Endian bit layout.
+pub type SVarVec<T> = VarVec<T, LE>;
+/// An [`VarVec`] for [`u64`] elements with Big-Endian bit layout.
+pub type BEVarVec = VarVec<u64, BE>;
+/// An [`VarVec`] for [`u64`] elements with Little-Endian bit layout.
+pub type LEVarVec = VarVec<u64, LE>;
+/// An [`VarVec`] for [`i64`] elements with Big-Endian bit layout.
+pub type BESVarVec = VarVec<i64, BE>;
+/// An [`VarVec`] for [`i64`] elements with Little-Endian bit layout.
+pub type LESVarVec = VarVec<i64, LE>;
 
-impl<T, E, B, O> PartialEq<O> for IntVec<T, E, B>
+// ============================================================================
+// Deprecated Type Aliases for Backward Compatibility
+// ============================================================================
+// As of version 0.3.0, all `IntVec*` types have been renamed to `VarVec*`
+// for consistency with the module naming convention. These deprecated aliases
+// maintain backward compatibility and will be removed in a future major version.
+
+/// Deprecated alias for [`VarVec`]. Use [`VarVec`] instead.
+///
+/// # Deprecation Notice
+///
+/// This type has been renamed to [`VarVec`] for consistency with the module
+/// naming convention (`variable` → `VarVec`). This alias will be removed in
+/// a future major release.
+#[deprecated(since = "0.6.0", note = "renamed to `VarVec`; use `VarVec` instead")]
+pub type IntVec<T, E, B = Vec<u64>> = VarVec<T, E, B>;
+
+/// Deprecated alias for [`VarVecBuilder`]. Use [`VarVecBuilder`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecBuilder`; use `VarVecBuilder` instead"
+)]
+pub type IntVecBuilder<T, E> = VarVecBuilder<T, E>;
+
+/// Deprecated alias for [`VarVecFromIterBuilder`]. Use [`VarVecFromIterBuilder`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecFromIterBuilder`; use `VarVecFromIterBuilder` instead"
+)]
+pub type IntVecFromIterBuilder<T, E, I> = VarVecFromIterBuilder<T, E, I>;
+
+/// Deprecated alias for [`VarVecReader`]. Use [`VarVecReader`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecReader`; use `VarVecReader` instead"
+)]
+pub type IntVecReader<'a, T, E, B> = VarVecReader<'a, T, E, B>;
+
+/// Deprecated alias for [`VarVecSeqReader`]. Use [`VarVecSeqReader`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecSeqReader`; use `VarVecSeqReader` instead"
+)]
+pub type IntVecSeqReader<'a, T, E, B> = VarVecSeqReader<'a, T, E, B>;
+
+/// Deprecated alias for [`VarVecSlice`]. Use [`VarVecSlice`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecSlice`; use `VarVecSlice` instead"
+)]
+pub type IntVecSlice<'a, T, E, B> = VarVecSlice<'a, T, E, B>;
+
+/// Deprecated alias for [`VarVecIter`]. Use [`VarVecIter`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecIter`; use `VarVecIter` instead"
+)]
+pub type IntVecIter<'a, T, E, B> = VarVecIter<'a, T, E, B>;
+
+/// Deprecated alias for [`VarVecIntoIter`]. Use [`VarVecIntoIter`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecIntoIter`; use `VarVecIntoIter` instead"
+)]
+pub type IntVecIntoIter<T, E> = VarVecIntoIter<T, E>;
+
+/// Deprecated alias for [`VarVecError`]. Use [`VarVecError`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecError`; use `VarVecError` instead"
+)]
+pub type IntVecError = VarVecError;
+
+/// Deprecated alias for [`VarVecSliceIter`]. Use [`VarVecSliceIter`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecSliceIter`; use `VarVecSliceIter` instead"
+)]
+pub type IntVecSliceIter<'a, T, E, B> = VarVecSliceIter<'a, T, E, B>;
+
+// Deprecated convenience aliases
+/// Deprecated alias for [`UVarVec`]. Use [`UVarVec`] instead.
+#[deprecated(since = "0.6.0", note = "renamed to `UVarVec`; use `UVarVec` instead")]
+pub type UIntVec<T> = UVarVec<T>;
+
+/// Deprecated alias for [`SVarVec`]. Use [`SVarVec`] instead.
+#[deprecated(since = "0.6.0", note = "renamed to `SVarVec`; use `SVarVec` instead")]
+pub type SIntVec<T> = SVarVec<T>;
+
+/// Deprecated alias for [`BEVarVec`]. Use [`BEVarVec`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `BEVarVec`; use `BEVarVec` instead"
+)]
+pub type BEIntVec = BEVarVec;
+
+/// Deprecated alias for [`LEVarVec`]. Use [`LEVarVec`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `LEVarVec`; use `LEVarVec` instead"
+)]
+pub type LEIntVec = LEVarVec;
+
+/// Deprecated alias for [`BESVarVec`]. Use [`BESVarVec`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `BESVarVec`; use `BESVarVec` instead"
+)]
+pub type BESIntVec = BESVarVec;
+
+/// Deprecated alias for [`LESVarVec`]. Use [`LESVarVec`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `LESVarVec`; use `LESVarVec` instead"
+)]
+pub type LESIntVec = LESVarVec;
+
+// Deprecated internal type aliases
+/// Deprecated alias for [`VarVecBitReader`]. Use [`VarVecBitReader`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecBitReader`; use `VarVecBitReader` instead"
+)]
+#[allow(dead_code)]
+pub(crate) type IntVecBitReader<'a, E> = VarVecBitReader<'a, E>;
+
+/// Deprecated alias for [`VarVecBitWriter`]. Use [`VarVecBitWriter`] instead.
+#[deprecated(
+    since = "0.6.0",
+    note = "renamed to `VarVecBitWriter`; use `VarVecBitWriter` instead"
+)]
+#[allow(dead_code)]
+pub(crate) type IntVecBitWriter<E> = VarVecBitWriter<E>;
+
+impl<T, E, B, O> PartialEq<O> for VarVec<T, E, B>
 where
     T: Storable + PartialEq,
     E: Endianness,
     B: AsRef<[u64]>,
     O: AsRef<[T]>,
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Checks for equality between an [`IntVec`] and a standard slice.
+    /// Checks for equality between an [`VarVec`] and a standard slice.
     ///
     /// The comparison is done by iterating over both and comparing elements
     /// one by one. The overall comparison is not a single atomic operation.

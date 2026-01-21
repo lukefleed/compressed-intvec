@@ -1,35 +1,32 @@
-//! Iterators for [`IntVec`].
+//! Iterators for [`VarVec`].
 //!
-//! This module provides the iterators for [`IntVec`]. Due to the nature of
-//! variable-length encoding, an [`IntVec`] is immutable once created, as
+//! This module provides the iterators for [`VarVec`]. Due to the nature of
+//! variable-length encoding, an [`VarVec`] is immutable once created, as
 //! modifying an element would require re-encoding the rest of the data stream.
 //!
-//! [`IntVec`]: crate::variable::IntVec
+//! [`VarVec`]: crate::variable::VarVec
 
-use super::{
-    traits::Storable,
-    IntVec,
-};
-use crate::common::codec_reader::{CodecReader, IntVecBitReader};
+use super::{traits::Storable, VarVec};
+use crate::common::codec_reader::{CodecReader, VarVecBitReader};
 use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 use std::marker::PhantomData;
 
-/// A borrowing iterator over the values of an [`IntVec`].
+/// A borrowing iterator over the values of an [`VarVec`].
 ///
-/// This struct is created by the [`iter`](IntVec::iter) method on [`IntVec`].
+/// This struct is created by the [`iter`](VarVec::iter) method on [`VarVec`].
 /// It provides a sequential, forward-only scan over the compressed data,
 /// decompressing values on the fly.
 ///
 /// # Examples
 ///
 /// ```
-/// use compressed_intvec::variable::{IntVec, UIntVec};
+/// use compressed_intvec::variable::{VarVec, UVarVec};
 ///
 /// let data: &[u32] = &[10, 20, 30, 40, 50];
-/// let vec: UIntVec<u32> = IntVec::from_slice(data).unwrap();
+/// let vec: UVarVec<u32> = VarVec::from_slice(data).unwrap();
 ///
 /// let mut sum = 0;
 /// for value in vec.iter() {
@@ -38,29 +35,29 @@ use std::marker::PhantomData;
 ///
 /// assert_eq!(sum, 150);
 /// ```
-pub struct IntVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
+pub struct VarVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     len: usize,
-    reader: IntVecBitReader<'a, E>,
+    reader: VarVecBitReader<'a, E>,
     /// The hybrid dispatcher that handles codec reading robustly.
     code_reader: CodecReader<'a, E>,
     current_index: usize,
     _markers: PhantomData<(&'a B, T)>,
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecIter<'a, T, E, B>
+impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> VarVecIter<'a, T, E, B>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// Creates a new iterator.
-    pub(super) fn new(intvec: &'a IntVec<T, E, B>) -> Self {
-        let reader = IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
+    pub(super) fn new(intvec: &'a VarVec<T, E, B>) -> Self {
+        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
             intvec.data.as_ref(),
         ));
         // Instantiate the robust hybrid dispatcher. This will not panic.
@@ -76,9 +73,9 @@ where
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Iterator for IntVecIter<'_, T, E, B>
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Iterator for VarVecIter<'_, T, E, B>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -101,9 +98,9 @@ where
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for IntVecIter<'_, T, E, B>
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for VarVecIter<'_, T, E, B>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -112,19 +109,19 @@ where
     }
 }
 
-/// An owning iterator over the values of an [`IntVec`].
+/// An owning iterator over the values of an [`VarVec`].
 ///
-/// This struct is created by the [`into_iter`](IntVec::into_iter) method on
-/// [`IntVec`] (or by using a `for` loop on an owned [`IntVec`]). It takes ownership
+/// This struct is created by the [`into_iter`](VarVec::into_iter) method on
+/// [`VarVec`] (or by using a `for` loop on an owned [`VarVec`]). It takes ownership
 /// of the vector and decodes its values on the fly.
 ///
 /// # Examples
 ///
 /// ```
-/// use compressed_intvec::variable::{IntVec, SIntVec};
+/// use compressed_intvec::variable::{VarVec, SVarVec};
 ///
 /// let data: &[i16] = &[-1, -2, -3, -4];
-/// let vec: SIntVec<i16> = IntVec::from_slice(data).unwrap();
+/// let vec: SVarVec<i16> = VarVec::from_slice(data).unwrap();
 ///
 /// // The `into_iter` call is implicit in the for loop.
 /// // This loop consumes `vec`.
@@ -132,11 +129,11 @@ where
 ///
 /// assert_eq!(collected, &[-2, -4, -6, -8]);
 /// ```
-pub struct IntVecIntoIter<T, E>
+pub struct VarVecIntoIter<T, E>
 where
     T: Storable + 'static,
     E: Endianness + 'static,
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -145,7 +142,7 @@ where
     /// The current position in the sequence.
     current_index: usize,
     /// A stateful reader that borrows from `_data_owner`.
-    reader: IntVecBitReader<'static, E>,
+    reader: VarVecBitReader<'static, E>,
     /// The hybrid dispatcher for decoding.
     code_reader: CodecReader<'static, E>,
     /// This field owns the data buffer, ensuring it lives as long as the iterator.
@@ -154,23 +151,23 @@ where
     _markers: PhantomData<T>,
 }
 
-impl<T, E> IntVecIntoIter<T, E>
+impl<T, E> VarVecIntoIter<T, E>
 where
     T: Storable + 'static,
     E: Endianness + 'static,
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Creates a new, efficient owning iterator from an `IntVec`.
-    pub(super) fn new(vec: IntVec<T, E, Vec<u64>>) -> Self {
+    /// Creates a new, efficient owning iterator from an `VarVec`.
+    pub(super) fn new(vec: VarVec<T, E, Vec<u64>>) -> Self {
         // This is a self-referential struct. We move the owned data buffer into `_data_owner`.
         // Then, we create a 'static reference to that data to initialize the reader.
         // This is safe because `_data_owner` is part of the same struct as `reader`,
         // guaranteeing that the data outlives the reference.
         let data_ref: &'static [u64] = unsafe { std::mem::transmute(vec.data.as_slice()) };
 
-        let reader = IntVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(data_ref));
+        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(data_ref));
         let code_reader = CodecReader::new(vec.encoding);
 
         Self {
@@ -184,11 +181,11 @@ where
     }
 }
 
-impl<T, E> Iterator for IntVecIntoIter<T, E>
+impl<T, E> Iterator for VarVecIntoIter<T, E>
 where
     T: Storable + 'static,
     E: Endianness + 'static,
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -210,11 +207,11 @@ where
     }
 }
 
-impl<T, E> ExactSizeIterator for IntVecIntoIter<T, E>
+impl<T, E> ExactSizeIterator for VarVecIntoIter<T, E>
 where
     T: Storable + 'static,
     E: Endianness + 'static,
-    for<'a> IntVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {

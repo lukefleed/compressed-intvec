@@ -79,7 +79,7 @@ fn benchmark_construction(c: &mut Criterion) {
             group.bench_function(format!("from_slice/{}", spec_name), |b| {
                 b.iter(|| {
                     black_box(
-                        LEIntVec::builder()
+                        LEVarVec::builder()
                             .k(K_VALUE)
                             .codec(codec_spec)
                             .build(black_box(&data))

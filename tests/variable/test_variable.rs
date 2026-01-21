@@ -1,15 +1,15 @@
 // tests/variable/test_variable.rs
 
-//! # Comprehensive integration tests for the generic `IntVec`.
+//! # Comprehensive integration tests for the generic `VarVec`.
 //!
 //! This test suite is designed to validate the functionality of the new generic
-//! `IntVec` across a wide range of types, configurations, and edge cases.
+//! `VarVec` across a wide range of types, configurations, and edge cases.
 //! It is modeled after the test suite for `FixedVec` and uses a macro-based
 //! approach to test multiple combinations of integer types and endianness.
 
 use compressed_intvec::variable::codec::VariableCodecSpec;
 use compressed_intvec::variable::traits::Storable;
-use compressed_intvec::variable::{IntVec, IntVecError, LEIntVec, SIntVec, UIntVec};
+use compressed_intvec::variable::{LEVarVec, SVarVec, UVarVec, VarVec, VarVecError};
 
 use dsi_bitstream::prelude::{
     BitRead, BitSeek, BitWrite, BufBitReader, BufBitWriter, CodesRead, CodesWrite, Endianness,
@@ -28,7 +28,7 @@ use rayon::iter::ParallelIterator;
 fn run_test_for_type<T, E>(data: &[T], type_name: &str)
 where
     T: Storable + Debug + PartialEq + PrimInt + AsPrimitive<u64> + Send + Sync + Ord + 'static,
-    for<'a> IntVec<T, E, &'a [u64]>: PartialEq<&'a [T]>,
+    for<'a> VarVec<T, E, &'a [u64]>: PartialEq<&'a [T]>,
     E: Endianness + Send + Sync,
     for<'a> BufBitReader<E, MemWordReader<u64, &'a [u64]>>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
@@ -57,8 +57,8 @@ where
             )
         };
 
-        // Build the IntVec
-        let intvec = IntVec::<T, E>::builder()
+        // Build the VarVec
+        let intvec = VarVec::<T, E>::builder()
             .k(32) // A reasonable default for testing
             .codec(codec_spec)
             .build(data)
@@ -190,7 +190,7 @@ test_all_types!(generic_tests_be, BE);
 fn test_from_iter_builder_generic() {
     // Unsigned
     let data_u32: Vec<u32> = (0..100).collect();
-    let intvec_u32 = UIntVec::<u32>::from_iter_builder(data_u32.clone())
+    let intvec_u32 = UVarVec::<u32>::from_iter_builder(data_u32.clone())
         .codec(VariableCodecSpec::Gamma)
         .build()
         .unwrap();
@@ -199,7 +199,7 @@ fn test_from_iter_builder_generic() {
 
     // Signed
     let data_i16: Vec<i16> = (-50..50).collect();
-    let intvec_i16 = SIntVec::<i16>::from_iter_builder(data_i16.clone())
+    let intvec_i16 = SVarVec::<i16>::from_iter_builder(data_i16.clone())
         .codec(VariableCodecSpec::Delta)
         .build()
         .unwrap();
@@ -211,17 +211,17 @@ fn test_from_iter_builder_generic() {
 #[test]
 fn test_builder_rejects_auto_on_iter() {
     let data: Vec<i32> = vec![-10, 20, 100];
-    let result = SIntVec::<i32>::from_iter_builder(data)
+    let result = SVarVec::<i32>::from_iter_builder(data)
         .codec(VariableCodecSpec::Auto)
         .build();
-    assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
+    assert!(matches!(result, Err(VarVecError::InvalidParameters(_))));
 }
 
 // A simple test for binary search on a sorted vector.
 #[test]
 fn test_binary_search() {
     let data: Vec<u64> = (0..100).map(|x| x * 2).collect();
-    let intvec = LEIntVec::builder().build(&data).unwrap();
+    let intvec = LEVarVec::builder().build(&data).unwrap();
     assert_eq!(intvec.binary_search(&10), Ok(5));
     assert_eq!(intvec.binary_search(&11), Err(6));
     assert_eq!(intvec.binary_search(&0), Ok(0));
@@ -243,23 +243,23 @@ macro_rules! test_roundtrip_with_codec {
             );
 
             // Build the vector. This should always succeed.
-            let vec = IntVec::<u32, $E>::builder()
+            let vec = VarVec::<u32, $E>::builder()
                 .codec($codec_spec)
                 .build(&data)
                 .expect("Build failed");
 
-            // 1. Test full iteration using .iter() -> IntVecIter
+            // 1. Test full iteration using .iter() -> VarVecIter
             assert_eq!(
                 vec.iter().collect::<Vec<_>>(),
                 data,
                 "Mismatch during full iteration"
             );
 
-            // 2. Test random access using .get() -> IntVecReader
+            // 2. Test random access using .get() -> VarVecReader
             assert_eq!(vec.get(10), Some(data[10]), "Mismatch on .get(10)");
             assert_eq!(vec.get(99), Some(data[99]), "Mismatch on .get(99)");
 
-            // 3. Test sequential access using .seq_reader() -> IntVecSeqReader
+            // 3. Test sequential access using .seq_reader() -> VarVecSeqReader
             let mut seq_reader = vec.seq_reader();
             assert_eq!(
                 seq_reader.get(15).unwrap(),

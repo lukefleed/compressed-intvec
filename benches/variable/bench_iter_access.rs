@@ -98,11 +98,11 @@ fn benchmark_iter_access(c: &mut Criterion) {
     const K_VALUE: usize = 32;
 
     let data = generate_random_vec(VECTOR_SIZE, 1 << 20);
-    let intvec = LEIntVec::builder()
+    let intvec = LEVarVec::builder()
         .k(K_VALUE)
         .codec(VariableCodecSpec::Delta)
         .build(&data)
-        .expect("Failed to build IntVec");
+        .expect("Failed to build VarVec");
 
     let patterns = [
         AccessPattern::Sorted,
@@ -128,7 +128,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
             })
         });
 
-        // 2. Benchmark the loop with a reusable and STATEFUL `IntVecSeqReader`.
+        // 2. Benchmark the loop with a reusable and STATEFUL `VarVecSeqReader`.
         group.bench_function("loop_seq_reader_get", |b| {
             b.iter(|| {
                 let mut results = Vec::with_capacity(access_indices.len());
@@ -140,7 +140,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
             })
         });
 
-        // 3. Benchmark the loop with a reusable but STATELESS `IntVecReader`.
+        // 3. Benchmark the loop with a reusable but STATELESS `VarVecReader`.
         group.bench_function("loop_reader_get", |b| {
             b.iter(|| {
                 let mut results = Vec::with_capacity(access_indices.len());

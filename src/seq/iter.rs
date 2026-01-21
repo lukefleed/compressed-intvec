@@ -462,7 +462,7 @@ where
 ///
 /// ## Design
 ///
-/// This is a self-referential struct similar to [`IntVecIntoIter`](crate::variable::iter::IntVecIntoIter).
+/// This is a self-referential struct similar to [`VarVecIntoIter`](crate::variable::iter::VarVecIntoIter).
 /// The data buffer is stored in `_data_owner`, and a transmuted `'static` reference
 /// is used to create the reader. This is safe because `_data_owner` is part of
 /// the same struct, guaranteeing the data outlives the reader.

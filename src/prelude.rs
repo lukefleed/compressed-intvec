@@ -17,13 +17,22 @@ pub use crate::fixed::{
 
 // --- Variable-Width Vector Prelude ---
 pub use crate::variable::{
-    builder::{IntVecBuilder, IntVecFromIterBuilder},
+    builder::{VarVecBuilder, VarVecFromIterBuilder},
     codec::VariableCodecSpec,
-    reader::IntVecReader,
-    seq_reader::IntVecSeqReader,
-    slice::IntVecSlice,
+    iter::{VarVecIntoIter, VarVecIter},
+    reader::VarVecReader,
+    seq_reader::VarVecSeqReader,
+    slice::{VarVecSlice, VarVecSliceIter},
     traits::Storable as VariableStorable,
-    BEIntVec, BESIntVec, IntVec, IntVecError, LEIntVec, LESIntVec, SIntVec, UIntVec,
+    BESVarVec, BEVarVec, LESVarVec, LEVarVec, SVarVec, UVarVec, VarVec, VarVecError,
+};
+
+// Deprecated Variable-Width Vector Aliases (backward compatibility)
+#[allow(deprecated)]
+pub use crate::variable::{
+    BEIntVec, BESIntVec, IntVec, IntVecBuilder, IntVecError, IntVecFromIterBuilder, IntVecIntoIter,
+    IntVecIter, IntVecReader, IntVecSeqReader, IntVecSlice, IntVecSliceIter, LEIntVec, LESIntVec,
+    SIntVec, UIntVec,
 };
 
 // --- Sequence Vector Prelude ---

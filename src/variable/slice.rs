@@ -1,33 +1,33 @@
-//! An immutable, zero-copy slice of an [`IntVec`].
+//! An immutable, zero-copy slice of an [`VarVec`].
 //!
-//! This module provides [`IntVecSlice`], a view into a contiguous portion of an
-//! [`IntVec`]. Slices are immutable and do not own their data; they borrow it
-//! from the parent `IntVec`.
+//! This module provides [`VarVecSlice`], a view into a contiguous portion of an
+//! [`VarVec`]. Slices are immutable and do not own their data; they borrow it
+//! from the parent `VarVec`.
 //!
-//! [`IntVec`]: crate::variable::IntVec
+//! [`VarVec`]: crate::variable::VarVec
 
-use super::{traits::Storable, IntVec, IntVecBitReader};
+use super::{traits::Storable, VarVec, VarVecBitReader};
 use dsi_bitstream::prelude::{BitRead, BitSeek, CodesRead, Endianness};
 use std::cmp::Ordering;
 use std::ops::Range;
 
-/// An immutable, zero-copy slice of an [`IntVec`].
+/// An immutable, zero-copy slice of an [`VarVec`].
 ///
-/// This struct provides a view into a contiguous portion of an [`IntVec`]
+/// This struct provides a view into a contiguous portion of an [`VarVec`]
 /// without copying the underlying compressed data. It is created by the
-/// [`slice`](super::IntVec::slice) or [`split_at`](super::IntVec::split_at)
-/// methods on an [`IntVec`].
+/// [`slice`](super::VarVec::slice) or [`split_at`](super::VarVec::split_at)
+/// methods on an [`VarVec`].
 ///
-/// All operations on an [`IntVecSlice`] are relative to the start of the slice,
+/// All operations on an [`VarVecSlice`] are relative to the start of the slice,
 /// not the parent vector.
 ///
 /// # Examples
 ///
 /// ```
-/// use compressed_intvec::variable::{IntVec, UIntVec};
+/// use compressed_intvec::variable::{VarVec, UVarVec};
 ///
 /// let data: Vec<u32> = (0..100).collect();
-/// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+/// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
 ///
 /// // Create a slice of the elements from index 20 to 49
 /// let slice = vec.slice(20, 30).unwrap();
@@ -46,18 +46,18 @@ use std::ops::Range;
 /// assert_eq!(slice_sum, (20..50).sum());
 /// ```
 #[derive(Debug, Clone)]
-pub struct IntVecSlice<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
+pub struct VarVecSlice<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
     /// A reference to the parent vector.
-    vec: &'a IntVec<T, E, B>,
+    vec: &'a VarVec<T, E, B>,
     /// The starting index of the slice within the parent vector.
     start: usize,
     /// The number of elements in the slice.
     len: usize,
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSlice<'a, T, E, B> {
-    /// Creates a new `IntVecSlice`.
-    pub(super) fn new(vec: &'a IntVec<T, E, B>, range: Range<usize>) -> Self {
+impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> VarVecSlice<'a, T, E, B> {
+    /// Creates a new `VarVecSlice`.
+    pub(super) fn new(vec: &'a VarVec<T, E, B>, range: Range<usize>) -> Self {
         Self {
             vec,
             start: range.start,
@@ -84,7 +84,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSlice<'a, T, E, B> {
     #[inline]
     pub fn get(&self, index: usize) -> Option<T>
     where
-        for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
             + BitSeek<Error = core::convert::Infallible>,
     {
@@ -106,7 +106,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSlice<'a, T, E, B> {
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> T
     where
-        for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
             + BitSeek<Error = core::convert::Infallible>,
     {
@@ -115,22 +115,22 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSlice<'a, T, E, B> {
     }
 
     /// Returns an iterator over the values in the slice.
-    pub fn iter(&self) -> IntVecSliceIter<'_, T, E, B>
+    pub fn iter(&self) -> VarVecSliceIter<'_, T, E, B>
     where
-        for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
             + CodesRead<E>
             + BitSeek<Error = core::convert::Infallible>,
     {
-        IntVecSliceIter::new(self)
+        VarVecSliceIter::new(self)
     }
 }
 
-impl<T, E, B> IntVecSlice<'_, T, E, B>
+impl<T, E, B> VarVecSlice<'_, T, E, B>
 where
     T: Storable + Ord,
     E: Endianness,
     B: AsRef<[u64]>,
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -178,17 +178,17 @@ where
     }
 }
 
-/// An iterator over the decompressed values of an [`IntVecSlice`].
+/// An iterator over the decompressed values of an [`VarVecSlice`].
 ///
-/// This struct is created by the [`iter`](IntVecSlice::iter) method.
-pub struct IntVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
-    slice: &'a IntVecSlice<'a, T, E, B>,
+/// This struct is created by the [`iter`](VarVecSlice::iter) method.
+pub struct VarVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
+    slice: &'a VarVecSlice<'a, T, E, B>,
     current_index: usize,
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSliceIter<'a, T, E, B> {
-    /// Creates a new iterator for a given `IntVecSlice`.
-    fn new(slice: &'a IntVecSlice<'a, T, E, B>) -> Self {
+impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> VarVecSliceIter<'a, T, E, B> {
+    /// Creates a new iterator for a given `VarVecSlice`.
+    fn new(slice: &'a VarVecSlice<'a, T, E, B>) -> Self {
         Self {
             slice,
             current_index: 0,
@@ -196,12 +196,12 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecSliceIter<'a, T, E, 
     }
 }
 
-impl<T, E, B> Iterator for IntVecSliceIter<'_, T, E, B>
+impl<T, E, B> Iterator for VarVecSliceIter<'_, T, E, B>
 where
     T: Storable,
     E: Endianness,
     B: AsRef<[u64]>,
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -224,12 +224,12 @@ where
     }
 }
 
-impl<T, E, B> ExactSizeIterator for IntVecSliceIter<'_, T, E, B>
+impl<T, E, B> ExactSizeIterator for VarVecSliceIter<'_, T, E, B>
 where
     T: Storable,
     E: Endianness,
     B: AsRef<[u64]>,
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {

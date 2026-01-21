@@ -1,11 +1,11 @@
 //! Core traits for the [`variable`] module.
 //!
 //! This module defines the [`Storable`] trait, a generic abstraction that allows
-//! different integer types to be stored in an [`IntVec`]. It handles the necessary
+//! different integer types to be stored in an [`VarVec`]. It handles the necessary
 //! conversions to the [`u64`] word representation required by the underlying
 //! variable-length compression codecs.
 //!
-//! [`IntVec`]: crate::variable::IntVec
+//! [`VarVec`]: crate::variable::VarVec
 //! [`variable`]: crate::variable
 
 use dsi_bitstream::prelude::{ToInt, ToNat};
@@ -14,7 +14,7 @@ use dsi_bitstream::prelude::{ToInt, ToNat};
 ///
 /// This trait provides a bidirectional, lossless conversion between a user-facing
 /// element type (e.g., [`i32`], [`u16`]) and a [`u64`] representation. This abstraction
-/// is essential for [`IntVec`] to support a variety of integer types while using
+/// is essential for [`VarVec`] to support a variety of integer types while using
 /// a common set of compression algorithms that operate on [`u64`].
 ///
 /// # Portability and [`usize`]/[`isize`]
@@ -30,7 +30,7 @@ use dsi_bitstream::prelude::{ToInt, ToNat};
 /// ## Feature Flag: `arch-dependent-storable`
 ///
 /// Activating this feature provides [`Storable`] implementations for [`usize`] and
-/// [`isize`]. However, this breaks the portability guarantee. An `IntVec<usize>`
+/// [`isize`]. However, this breaks the portability guarantee. An `VarVec<usize>`
 /// created on a 64-bit system with values greater than [`u32::MAX`] will cause a
 /// panic if it is read on a 32-bit system.
 ///
@@ -55,7 +55,7 @@ use dsi_bitstream::prelude::{ToInt, ToNat};
 /// | 2               | 4                |
 /// | ...             | ...              |
 ///
-/// [`IntVec`]: crate::variable::IntVec
+/// [`VarVec`]: crate::variable::VarVec
 pub trait Storable: Sized + Copy {
     /// Converts the element into its [`u64`] storage representation.
     ///

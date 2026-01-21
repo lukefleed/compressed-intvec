@@ -1,7 +1,7 @@
 use compressed_intvec::{
     // FIX: Rimosso l'import non utilizzato di FixedVecError
     prelude::*,
-    variable::{codec::VariableCodecSpec, BEIntVec, IntVec, LEIntVec},
+    variable::{codec::VariableCodecSpec, BEVarVec, LEVarVec, VarVec},
 };
 use dsi_bitstream::prelude::{BE, LE};
 
@@ -12,7 +12,7 @@ fn test_intvec_owned_to_borrowed_conversion() {
     let data = generate_random_vec(1000, 10000);
 
     // 1. Create an owned vector, which will be our source of truth.
-    let owned_vec = LEIntVec::builder()
+    let owned_vec = LEVarVec::builder()
         .k(16)
         .codec(VariableCodecSpec::Delta)
         .build(&data)
@@ -28,8 +28,8 @@ fn test_intvec_owned_to_borrowed_conversion() {
     let len = owned_vec.len();
     let encoding = owned_vec.encoding();
 
-    // 3. Create a borrowed IntVec from the extracted parts.
-    let borrowed_vec = IntVec::<u64, LE, &[u64]>::from_parts(
+    // 3. Create a borrowed VarVec from the extracted parts.
+    let borrowed_vec = VarVec::<u64, LE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
         samples_len,
@@ -59,7 +59,7 @@ fn test_intvec_owned_to_borrowed_conversion() {
 #[test]
 fn test_from_parts_validation() {
     let data = generate_random_vec(100, 1000);
-    let owned_vec = BEIntVec::builder().k(8).build(&data).unwrap();
+    let owned_vec = BEVarVec::builder().k(8).build(&data).unwrap();
 
     let data_limbs = owned_vec.as_limbs();
     let samples_vec = owned_vec.samples_ref();
@@ -70,7 +70,7 @@ fn test_from_parts_validation() {
     let encoding = owned_vec.encoding();
 
     // Fail: k = 0
-    let result = IntVec::<u64, BE, &[u64]>::from_parts(
+    let result = VarVec::<u64, BE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
         samples_len,
@@ -79,11 +79,11 @@ fn test_from_parts_validation() {
         len,
         encoding,
     );
-    // FIX: L'errore restituito è IntVecError, non FixedVecError.
-    assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
+    // FIX: L'errore restituito è VarVecError, non FixedVecError.
+    assert!(matches!(result, Err(VarVecError::InvalidParameters(_))));
 
     // Fail: Inconsistent number of samples
-    let result = IntVec::<u64, BE, &[u64]>::from_parts(
+    let result = VarVec::<u64, BE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
         samples_len + 1, // Mismatch
@@ -92,13 +92,13 @@ fn test_from_parts_validation() {
         len,
         encoding,
     );
-    assert!(matches!(result, Err(IntVecError::InvalidParameters(_))));
+    assert!(matches!(result, Err(VarVecError::InvalidParameters(_))));
 }
 
 #[test]
 fn test_sintvec_owned_to_borrowed_conversion() {
     let data = generate_random_signed_vec(1000, 10000);
-    let owned_svec: IntVec<i64, LE> = IntVec::builder()
+    let owned_svec: VarVec<i64, LE> = VarVec::builder()
         .k(16)
         .codec(VariableCodecSpec::Auto)
         .build(&data)
@@ -113,7 +113,7 @@ fn test_sintvec_owned_to_borrowed_conversion() {
     let len = owned_svec.len();
     let encoding = owned_svec.encoding();
 
-    let borrowed_svec = IntVec::<i64, LE, &[u64]>::from_parts(
+    let borrowed_svec = VarVec::<i64, LE, &[u64]>::from_parts(
         data_limbs,
         samples_limbs,
         samples_len,

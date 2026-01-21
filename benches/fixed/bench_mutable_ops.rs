@@ -1,7 +1,7 @@
-use std::time::Duration;
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
+use std::time::Duration;
 use succinct::int_vec::{IntVecMut, IntVector};
 use sux::prelude::{BitFieldSliceMut, BitFieldVec};
 
@@ -136,7 +136,7 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
         );
     });
 
-    group.bench_function("succinct::IntVector/resize", |b| {
+    group.bench_function("succinct::VarVector/resize", |b| {
         b.iter_with_setup(
             || {
                 let mut vec =
@@ -196,12 +196,12 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
         );
     });
 
-    group.bench_function("succinct::IntVector/set_random", |b| {
+    group.bench_function("succinct::VarVector/set_random", |b| {
         b.iter_with_setup(
             || base_succinct_iv.clone(),
             |mut vec| {
                 for i in 0..NUM_SETS {
-                    // succinct::IntVector::set performs bounds checks
+                    // succinct::VarVector::set performs bounds checks
                     vec.set(set_indices[i] as u64, set_values[i]);
                 }
                 black_box(vec);

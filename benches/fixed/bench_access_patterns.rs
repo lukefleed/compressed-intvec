@@ -5,7 +5,7 @@ use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
-use succinct::int_vec::{IntVec};
+use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector};
 use sux::prelude::{BitFieldSlice, BitFieldVec};
 
 /// Generates a vector with uniformly random values up to a given maximum.
@@ -126,7 +126,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
         .expect("Failed to build LEFixedVec");
     let sux_bfv = BitFieldVec::<u64>::from_slice(&data).unwrap();
     // Create succinct::IntVector by pushing elements.
-    let mut succinct_iv = succinct::int_vec::IntVector::<u64>::new(BIT_WIDTH as usize);
+    let mut succinct_iv = IntVector::<u64>::new(BIT_WIDTH as usize);
     for &val in &data {
         succinct_iv.push(val);
     }
@@ -180,7 +180,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
                     // The `get` method in succinct performs bounds checking.
-                    black_box(succinct_iv.get(index as u64));
+                    black_box(SuccinctIntVec::get(&succinct_iv, index as u64));
                 }
             })
         });

@@ -22,7 +22,7 @@ use dsi_bitstream::{
 /// - Read from memory (`MemWordReader`)
 /// - Use buffered bit-level access (`BufBitReader`)
 /// - Have infallible read operations (memory reads cannot fail)
-pub(crate) type IntVecBitReader<'a, E> =
+pub(crate) type VarVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
 
 /// A hybrid dispatcher for reading compression codes.
@@ -57,19 +57,19 @@ pub(crate) type IntVecBitReader<'a, E> =
 /// - `E`: The endianness used for reading bits from the bitstream.
 pub(crate) enum CodecReader<'a, E: Endianness>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
     /// Fast-path reader using a pre-resolved function pointer.
-    Fast(FuncCodeReader<E, IntVecBitReader<'a, E>>),
+    Fast(FuncCodeReader<E, VarVecBitReader<'a, E>>),
     /// Fallback reader using dynamic dispatch on the `Codes` enum.
     Slow(Codes),
 }
 
 impl<E: Endianness> CodecReader<'_, E>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -93,9 +93,9 @@ where
     }
 }
 
-impl<'a, E: Endianness> StaticCodeRead<E, IntVecBitReader<'a, E>> for CodecReader<'a, E>
+impl<'a, E: Endianness> StaticCodeRead<E, VarVecBitReader<'a, E>> for CodecReader<'a, E>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
@@ -114,7 +114,7 @@ where
     /// The decoded value as a `u64`. This operation is infallible for in-memory
     /// readers.
     #[inline]
-    fn read(&self, reader: &mut IntVecBitReader<'a, E>) -> Result<u64, core::convert::Infallible> {
+    fn read(&self, reader: &mut VarVecBitReader<'a, E>) -> Result<u64, core::convert::Infallible> {
         match self {
             // If we have a function pointer, call it directly. This is the fast path.
             Self::Fast(func_reader) => func_reader.read(reader),

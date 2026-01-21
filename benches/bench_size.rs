@@ -1,6 +1,6 @@
 //! # Benchmark for Measuring Memory Space.
 //!
-//! This utility generates `IntVec` and `FixedVec` instances with various
+//! This utility generates `VarVec` and `FixedVec` instances with various
 //! configurations to measure their memory footprint. It is intended to be run
 //! as a benchmark: `cargo bench --bench bench_size`.
 //!
@@ -159,7 +159,7 @@ fn run_space_measurements() {
                 });
             }
 
-            // DSI Codecs (IntVec)
+            // DSI Codecs (VarVec)
             for &(spec_name, ref codec_spec) in &dsi_codecs_to_test {
                 if (matches!(
                     distribution,
@@ -175,7 +175,7 @@ fn run_space_measurements() {
                 }
 
                 for &k in &k_values {
-                    let intvec = LEIntVec::builder()
+                    let intvec = LEVarVec::builder()
                         .k(k)
                         .codec(*codec_spec)
                         .build(&data)

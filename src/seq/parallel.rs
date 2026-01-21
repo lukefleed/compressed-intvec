@@ -23,10 +23,10 @@
 //! # SeqVec-Specific Methods
 //!
 //! The [`par_for_each`] family of methods is unique to [`SeqVec`] and does not
-//! exist in [`FixedVec`](crate::fixed::FixedVec) or [`IntVec`](crate::variable::IntVec).
+//! exist in [`FixedVec`](crate::fixed::FixedVec) or [`VarVec`](crate::variable::VarVec).
 //! This is because:
 //!
-//! - `FixedVec::par_iter()` and `IntVec::par_iter()` yield `T` directly, so
+//! - `FixedVec::par_iter()` and `VarVec::par_iter()` yield `T` directly, so
 //!   standard Rayon combinators (`.map()`, `.for_each()`) provide zero-allocation
 //!   processing.
 //! - `SeqVec::par_iter()` must yield `Vec<T>` (materialized sequences) due to

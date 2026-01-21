@@ -101,7 +101,7 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
             })
         });
 
-        // --- Benchmarks for each IntVec codec ---
+        // --- Benchmarks for each VarVec codec ---
         for (spec_name, codec_spec) in codecs_to_test {
             // Skip combinations known to be extremely slow or impractical.
             if (matches!(
@@ -123,11 +123,11 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
                 continue;
             }
 
-            let intvec = LEIntVec::builder()
+            let intvec = LEVarVec::builder()
                 .k(K_VALUE)
                 .codec(codec_spec)
                 .build(&data)
-                .expect("Failed to build IntVec");
+                .expect("Failed to build VarVec");
 
             // 1. Sequential Iteration
             group.bench_function(format!("{}/iter_sum", spec_name), |b| {

@@ -1,35 +1,35 @@
-//! A reader for efficient, repeated random access into an [`IntVec`].
+//! A reader for efficient, repeated random access into an [`VarVec`].
 //!
-//! This module provides [`IntVecReader`], a reusable reader that is designed to
+//! This module provides [`VarVecReader`], a reusable reader that is designed to
 //! optimize random access performance.
 //!
 //! # Performance
 //!
-//! A standard call to [`get`](super::IntVec::get) is convenient, but it
+//! A standard call to [`get`](super::VarVec::get) is convenient, but it
 //! creates and discards an internal bitstream reader for each call. When
 //! performing many random lookups, this can introduce significant overhead.
 //!
-//! [`IntVecReader`] avoids this by maintaining a persistent, reusable
+//! [`VarVecReader`] avoids this by maintaining a persistent, reusable
 //! reader instance. This amortizes the setup cost across multiple `get` operations,
 //! making it ideal for access patterns where lookup indices are not known in
 //! advance (e.g., graph traversals, pointer chasing).
 //!
-//! For reading a predefined list of indices, [`get_many`](super::IntVec::get_many)
+//! For reading a predefined list of indices, [`get_many`](super::VarVec::get_many)
 //! is generally more efficient, as it can pre-sort the indices for a single
 //! sequential scan.
 //!
-//! [`IntVec`]: crate::variable::IntVec
+//! [`VarVec`]: crate::variable::VarVec
 
-use super::{traits::Storable, IntVec, IntVecError};
-use crate::common::codec_reader::{CodecReader, IntVecBitReader};
+use super::{traits::Storable, VarVec, VarVecError};
+use crate::common::codec_reader::{CodecReader, VarVecBitReader};
 use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
 
-/// A stateful reader for an `IntVec` that provides fast random access.
+/// A stateful reader for an `VarVec` that provides fast random access.
 ///
-/// This reader is created by the [`IntVec::reader`](super::IntVec::reader)
+/// This reader is created by the [`VarVec::reader`](super::VarVec::reader)
 /// method. It maintains an internal, reusable bitstream reader, making it highly
 /// efficient for performing multiple random lookups where the access pattern is
 /// not known ahead of time.
@@ -37,10 +37,10 @@ use dsi_bitstream::{
 /// # Examples
 ///
 /// ```
-/// use compressed_intvec::variable::{IntVec, UIntVec};
+/// use compressed_intvec::variable::{VarVec, UVarVec};
 ///
 /// let data: Vec<u32> = (0..100).rev().collect(); // Data is not sequential
-/// let vec: UIntVec<u32> = IntVec::from_slice(&data).unwrap();
+/// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
 ///
 /// // Create a reusable reader
 /// let mut reader = vec.reader();
@@ -50,29 +50,29 @@ use dsi_bitstream::{
 /// assert_eq!(reader.get(0).unwrap(), Some(99));
 /// assert_eq!(reader.get(50).unwrap(), Some(49));
 /// ```
-pub struct IntVecReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
+pub struct VarVecReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// A reference to the parent `IntVec`.
-    pub(super) intvec: &'a IntVec<T, E, B>,
+    /// A reference to the parent `VarVec`.
+    pub(super) intvec: &'a VarVec<T, E, B>,
     /// The stateful, reusable bitstream reader.
-    pub(super) reader: IntVecBitReader<'a, E>,
+    pub(super) reader: VarVecBitReader<'a, E>,
     /// The hybrid dispatcher that handles codec reading.
     pub(super) code_reader: CodecReader<'a, E>,
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> IntVecReader<'a, T, E, B>
+impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> VarVecReader<'a, T, E, B>
 where
-    for<'b> IntVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Creates a new `IntVecReader`.
-    pub(super) fn new(intvec: &'a IntVec<T, E, B>) -> Self {
-        let bit_reader = IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+    /// Creates a new `VarVecReader`.
+    pub(super) fn new(intvec: &'a VarVec<T, E, B>) -> Self {
+        let bit_reader = VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
             intvec.data.as_ref(),
         ));
         // This robustly selects the best available dispatch strategy.
@@ -90,7 +90,7 @@ where
     /// random access by seeking to the nearest preceding sample point and decoding
     /// sequentially from there.
     #[inline]
-    pub fn get(&mut self, index: usize) -> Result<Option<T>, IntVecError> {
+    pub fn get(&mut self, index: usize) -> Result<Option<T>, VarVecError> {
         if index >= self.intvec.len {
             return Ok(None);
         }

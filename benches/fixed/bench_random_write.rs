@@ -122,8 +122,7 @@ fn benchmark_random_write(c: &mut Criterion) {
             succinct_iv.push(val);
         }
 
-        let mut sds_iv =
-            SdsIntVector::with_len(initial_data.len(), bit_width as usize, 0).unwrap();
+        let mut sds_iv = SdsIntVector::with_len(initial_data.len(), bit_width as usize, 0).unwrap();
         for (i, &val) in initial_data.iter().enumerate() {
             sds_iv.set(i, val);
         }
@@ -154,8 +153,8 @@ fn benchmark_random_write(c: &mut Criterion) {
             );
         });
 
-        // --- 5. Benchmark succinct::IntVector ---
-        group.bench_function("succinct::IntVector/set", |b| {
+        // --- 5. Benchmark succinct::VarVector ---
+        group.bench_function("succinct::VarVector/set", |b| {
             b.iter_with_setup(
                 || succinct_iv.clone(),
                 |mut vec| {
@@ -168,8 +167,8 @@ fn benchmark_random_write(c: &mut Criterion) {
             );
         });
 
-        // --- 6. Benchmark simple-sds-sbwt::IntVector ---
-        group.bench_function("simple-sds-sbwt::IntVector/set", |b| {
+        // --- 6. Benchmark simple-sds-sbwt::VarVector ---
+        group.bench_function("simple-sds-sbwt::VarVector/set", |b| {
             b.iter_with_setup(
                 || sds_iv.clone(),
                 |mut vec| {

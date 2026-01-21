@@ -1,7 +1,7 @@
 //! Codec selection for variable-length integer compression.
 //!
 //! This module defines [`VariableCodecSpec`], an enum for controlling the
-//! compression strategy of an [`IntVec`]. The choice of codec is a critical
+//! compression strategy of an [`VarVec`]. The choice of codec is a critical
 //! performance parameter, as its effectiveness depends on the statistical
 //! properties of the data being compressed.
 //!
@@ -24,14 +24,14 @@
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //!
 //! // Explicitly specify a non-parametric codec
-//! let delta_vec: UIntVec<u32> = IntVec::builder()
+//! let delta_vec: UVarVec<u32> = VarVec::builder()
 //!     .codec(VariableCodecSpec::Delta)
 //!     .k(16)
 //!     .build(&data)
 //!     .unwrap();
 //!
 //! // Explicitly specify a parametric codec with a fixed parameter
-//! let zeta_vec: UIntVec<u32> = IntVec::builder()
+//! let zeta_vec: UVarVec<u32> = VarVec::builder()
 //!     .codec(VariableCodecSpec::Zeta { k: Some(3) })
 //!     .build(&data)
 //!     .unwrap();
@@ -49,7 +49,7 @@
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //!
 //! // Automatically select the best Rice parameter
-//! let rice_vec: UIntVec<u32> = IntVec::builder()
+//! let rice_vec: UVarVec<u32> = VarVec::builder()
 //!     .codec(VariableCodecSpec::Rice { log2_b: None })
 //!     .build(&data)
 //!     .unwrap();
@@ -64,7 +64,7 @@
 //!
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //! // Automatically select the best codec and parameters for the data
-//! let auto_vec: UIntVec<u32> = IntVec::builder()
+//! let auto_vec: UVarVec<u32> = VarVec::builder()
 //!    .codec(VariableCodecSpec::Auto)
 //!    .build(&data)
 //!    .unwrap();
@@ -97,17 +97,17 @@
 //!   range (e.g., Zeta with `k=20`), it must be specified explicitly in the
 //!   builder via `.codec(VariableCodecSpec::Zeta { k: Some(20) })`.
 //!
-//! [`IntVec`]: crate::variable::IntVec
-//! [`IntVecBuilder`]: crate::variable::builder::IntVecBuilder
+//! [`VarVec`]: crate::variable::VarVec
+//! [`VarVecBuilder`]: crate::variable::builder::VarVecBuilder
 //! [`dsi-bitstream`]: https://crates.io/crates/dsi-bitstream
 
-use super::IntVecError;
+use super::VarVecError;
 use dsi_bitstream::prelude::{Codes, CodesStats};
 
-/// Specifies the compression codec and its parameters for an [`IntVec`](super::IntVec).
+/// Specifies the compression codec and its parameters for an [`VarVec`](super::VarVec).
 ///
 /// This enum allows for either explicitly setting the parameters for codes
-/// like Rice and Zeta, or requesting that the [`IntVecBuilder`](super::builder::IntVecBuilder)
+/// like Rice and Zeta, or requesting that the [`VarVecBuilder`](super::builder::VarVecBuilder)
 /// automatically select suitable parameters by performing a full analysis of
 /// the data distribution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -220,7 +220,7 @@ impl VariableCodecSpec {
 /// If the `spec` includes requests for automatic parameter selection (e.g., `Auto`
 /// or `Zeta { k: None }`), this function analyzes the **entire** provided `input`
 /// data slice to determine the optimal settings.
-pub(crate) fn resolve_codec<U>(input: &[U], spec: VariableCodecSpec) -> Result<Codes, IntVecError>
+pub(crate) fn resolve_codec<U>(input: &[U], spec: VariableCodecSpec) -> Result<Codes, VarVecError>
 where
     U: Into<u64> + Copy,
 {
@@ -336,7 +336,7 @@ where
 pub(crate) fn resolve_codec_from_iter<I>(
     iter: I,
     spec: VariableCodecSpec,
-) -> Result<Codes, IntVecError>
+) -> Result<Codes, VarVecError>
 where
     I: Iterator<Item = u64>,
 {

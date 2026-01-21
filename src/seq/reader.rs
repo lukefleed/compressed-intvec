@@ -8,7 +8,7 @@
 //!
 //! [`SeqVecReader`] maintains an internal bitstream reader and codec dispatcher,
 //! enabling efficient reuse across multiple sequence accesses. This design mirrors
-//! [`IntVecReader`](crate::variable::IntVecReader) in the `variable` module.
+//! [`VarVecReader`](crate::variable::VarVecReader) in the `variable` module.
 //!
 //! - **`decode_into()`**: Decodes directly into a buffer using the internal reader,
 //!   avoiding iterator overhead.
@@ -16,7 +16,7 @@
 //! [`SeqVec`]: crate::seq::SeqVec
 
 use super::{iter::SeqVecBitReader, SeqVec};
-use crate::common::codec_reader::{CodecReader, IntVecBitReader};
+use crate::common::codec_reader::{CodecReader, VarVecBitReader};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
@@ -33,8 +33,8 @@ use dsi_bitstream::{
 /// ## Design Rationale
 ///
 /// Unlike the stateless [`crate::seq::SeqVec`] accessors, `SeqVecReader` maintains an
-/// internal `IntVecBitReader` and `CodecReader` that are reused across
-/// multiple accesses. This design mirrors [`IntVecReader`](crate::variable::IntVecReader)
+/// internal `VarVecBitReader` and `CodecReader` that are reused across
+/// multiple accesses. This design mirrors [`VarVecReader`](crate::variable::VarVecReader)
 /// in the `variable` module.
 ///
 /// The reader exposes only stateful, allocation-aware APIs that benefit from
@@ -74,7 +74,7 @@ where
     /// A reference to the parent `SeqVec`.
     seqvec: &'a SeqVec<T, E, B>,
     /// The reusable bitstream reader for decoding sequences.
-    reader: IntVecBitReader<'a, E>,
+    reader: VarVecBitReader<'a, E>,
     /// The hybrid codec reader for efficient element decoding.
     code_reader: CodecReader<'a, E>,
 }
@@ -88,7 +88,7 @@ where
     /// Creates a new `SeqVecReader`.
     #[inline]
     pub(super) fn new(seqvec: &'a SeqVec<T, E, B>) -> Self {
-        let reader = IntVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+        let reader = VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
             seqvec.data.as_ref(),
         ));
         let code_reader = CodecReader::new(seqvec.encoding);
@@ -194,7 +194,7 @@ where
             let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
 
             // Decode all elements in the sequence until we reach the end boundary.
-            // For IntVecBitReader backed by MemWordReader, bit_pos() is infallible.
+            // For VarVecBitReader backed by MemWordReader, bit_pos() is infallible.
             while self.reader.bit_pos().unwrap() < end_bit {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
                 buf.push(T::from_word(word));
