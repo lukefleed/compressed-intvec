@@ -26,8 +26,8 @@
 #![cfg(feature = "parallel")]
 
 use crate::fixed::{
-    traits::{Storable, Word},
     Error as FixedVecError, FixedVec,
+    traits::{Storable, Word},
 };
 use dsi_bitstream::prelude::Endianness;
 use rayon::prelude::*;

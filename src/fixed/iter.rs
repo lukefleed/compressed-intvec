@@ -81,9 +81,9 @@
 //! ```
 
 use crate::fixed::{
+    FixedVec,
     slice::FixedVecSlice,
     traits::{Storable, Word},
-    FixedVec,
 };
 use dsi_bitstream::prelude::Endianness;
 use std::{marker::PhantomData, ops::Deref};

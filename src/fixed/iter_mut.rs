@@ -36,10 +36,10 @@
 //! ```
 
 use crate::fixed::{
+    FixedVec,
     proxy::MutProxy,
     slice::FixedVecSlice,
     traits::{Storable, Word},
-    FixedVec,
 };
 use dsi_bitstream::prelude::Endianness;
 use std::{cmp::min, marker::PhantomData};
