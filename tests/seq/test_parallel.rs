@@ -583,3 +583,63 @@ fn test_par_into_vecs_consumes_seqvec() {
     // vec is now consumed and cannot be used
     // (This is a compile-time check, not a runtime test)
 }
+
+#[test]
+fn test_par_for_each_sum() {
+    let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
+    let vec: SeqVec<u32, LE, Vec<u64>> = SeqVec::from_slices(sequences).unwrap();
+
+    let sums: Vec<u64> = vec.par_for_each(|seq| seq.map(|v| v as u64).sum());
+    assert_eq!(sums, vec![6, 30, 100]);
+}
+
+#[test]
+fn test_par_for_each_count() {
+    let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
+    let vec: SeqVec<u32, LE, Vec<u64>> = SeqVec::from_slices(sequences).unwrap();
+
+    let counts: Vec<usize> = vec.par_for_each(|seq| seq.count());
+    assert_eq!(counts, vec![3, 2, 1]);
+}
+
+#[test]
+fn test_par_for_each_reduce_total_sum() {
+    let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
+    let vec: SeqVec<u32, LE, Vec<u64>> = SeqVec::from_slices(sequences).unwrap();
+
+    let total: u64 = vec.par_for_each_reduce(
+        |seq| seq.map(|v| v as u64).sum::<u64>(),
+        || 0u64,
+        |a, b| a + b,
+    );
+    assert_eq!(total, 136);
+}
+
+#[test]
+fn test_par_for_each_many() {
+    let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100], &[1000, 2000]];
+    let vec: SeqVec<u32, LE, Vec<u64>> = SeqVec::from_slices(sequences).unwrap();
+
+    let sums = vec
+        .par_for_each_many(&[0, 2], |seq| seq.map(|v| v as u64).sum::<u64>())
+        .unwrap();
+    assert_eq!(sums, vec![6, 100]);
+}
+
+#[test]
+fn test_par_for_each_empty() {
+    let sequences: &[&[u32]] = &[];
+    let vec: SeqVec<u32, LE, Vec<u64>> = SeqVec::from_slices(sequences).unwrap();
+
+    let sums: Vec<u64> = vec.par_for_each(|seq| seq.map(|v| v as u64).sum());
+    assert!(sums.is_empty());
+}
+
+#[test]
+fn test_par_for_each_with_empty_sequences() {
+    let sequences: &[&[u32]] = &[&[], &[1, 2], &[]];
+    let vec: SeqVec<u32, LE, Vec<u64>> = SeqVec::from_slices(sequences).unwrap();
+
+    let sums: Vec<u64> = vec.par_for_each(|seq| seq.map(|v| v as u64).sum());
+    assert_eq!(sums, vec![0, 3, 0]);
+}
