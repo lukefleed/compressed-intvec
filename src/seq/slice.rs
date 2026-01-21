@@ -119,7 +119,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
         debug_assert!(index < self.len, "Index out of bounds");
         // Translate slice-relative index to parent vector index.
         let parent_index = self.start + index;
-        self.vec.get_unchecked(parent_index)
+        unsafe { self.vec.get_unchecked(parent_index) }
     }
 
     /// Returns the sequence at `index` as a materialized `Vec<T>`, or `None`
@@ -168,7 +168,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
             + BitSeek<Error = core::convert::Infallible>,
     {
         let parent_index = self.start + index;
-        self.vec.decode_vec_unchecked(parent_index)
+        unsafe { self.vec.decode_vec_unchecked(parent_index) }
     }
 
     /// Decodes the sequence at `index` into a reusable buffer.
@@ -222,7 +222,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
             + BitSeek<Error = core::convert::Infallible>,
     {
         let parent_index = self.start + index;
-        self.vec.decode_into_unchecked(parent_index, buf)
+        unsafe { self.vec.decode_into_unchecked(parent_index, buf) }
     }
 
     /// Returns an iterator over the sequences in the slice.

@@ -121,7 +121,7 @@ where
         debug_assert!(index < self.len());
         // The index is relative to the slice, so we add the slice's start offset
         // to get the correct index in the parent vector.
-        self.parent.get_unchecked(self.range.start + index)
+        unsafe { self.parent.get_unchecked(self.range.start + index) }
     }
 
     /// Returns an iterator over the elements in the slice.

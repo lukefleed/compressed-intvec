@@ -176,7 +176,7 @@ where
     /// Calling this method with an out-of-bounds `index` is undefined behavior.
     #[inline]
     pub unsafe fn decode_into_unchecked(&mut self, index: usize, buf: &mut Vec<T>) -> usize {
-        let start_bit = self.seqvec.sequence_start_bit_unchecked(index);
+        let start_bit = unsafe { self.seqvec.sequence_start_bit_unchecked(index) };
 
         buf.clear();
 

@@ -219,6 +219,6 @@ where
     /// Calling this method when the iterator is exhausted is undefined behavior.
     #[inline]
     pub unsafe fn next_unchecked(&mut self) -> MutProxy<'a, T, W, E, B> {
-        self.iter.next().unwrap_unchecked()
+        unsafe { self.iter.next().unwrap_unchecked() }
     }
 }

@@ -10,10 +10,10 @@
 
 use compressed_intvec::variable::{
     BEIntVec, BESIntVec, IntVec, IntVecBuilder, IntVecError, IntVecFromIterBuilder, IntVecIntoIter,
-    IntVecIter, IntVecReader, IntVecSeqReader, IntVecSlice, IntVecSliceIter, LEIntVec, LESIntVec,
-    SIntVec, UIntVec, VarVec, VariableCodecSpec,
+    IntVecReader, IntVecSeqReader, IntVecSlice, IntVecSliceIter, LEIntVec, LESIntVec, SIntVec,
+    UIntVec, VarVec, VariableCodecSpec,
 };
-use dsi_bitstream::prelude::{BE, LE};
+use dsi_bitstream::prelude::LE;
 
 /// Tests the deprecated `IntVec` type alias for basic functionality.
 #[test]
@@ -104,8 +104,8 @@ fn test_deprecated_intvec_builder() {
 fn test_deprecated_intvec_from_iter_builder() {
     let data: Vec<u64> = vec![5, 10, 15, 20, 25];
 
-    let builder: IntVecFromIterBuilder<u64, LE, _> = VarVec::builder().k(8).from_iter(data.clone());
-    let vec = builder.unwrap();
+    let builder: IntVecFromIterBuilder<u64, LE, _> = VarVec::from_iter_builder(data.clone()).k(8);
+    let vec = builder.build().unwrap();
 
     assert_eq!(vec.len(), 5);
     assert_eq!(vec.get(2), Some(15));
@@ -117,10 +117,10 @@ fn test_deprecated_intvec_reader() {
     let data: Vec<u32> = vec![1, 2, 3, 4, 5];
     let vec: IntVec<u32, LE> = VarVec::from_slice(&data).unwrap();
 
-    let reader: IntVecReader<u32, LE, Vec<u64>> = vec.reader();
-    assert_eq!(reader.get(0), Some(1));
-    assert_eq!(reader.get(4), Some(5));
-    assert_eq!(reader.get(5), None);
+    let mut reader: IntVecReader<u32, LE, Vec<u64>> = vec.reader();
+    assert_eq!(reader.get(0).unwrap(), Some(1));
+    assert_eq!(reader.get(4).unwrap(), Some(5));
+    assert_eq!(reader.get(5).unwrap(), None);
 }
 
 /// Tests the deprecated `IntVecSeqReader` type alias.
@@ -132,15 +132,15 @@ fn test_deprecated_intvec_seq_reader() {
     let mut seq_reader: IntVecSeqReader<u32, LE, Vec<u64>> = vec.seq_reader();
 
     // Sequential access pattern
-    assert_eq!(seq_reader.get(0), Some(0));
-    assert_eq!(seq_reader.get(1), Some(1));
-    assert_eq!(seq_reader.get(2), Some(2));
+    assert_eq!(seq_reader.get(0).unwrap(), Some(0));
+    assert_eq!(seq_reader.get(1).unwrap(), Some(1));
+    assert_eq!(seq_reader.get(2).unwrap(), Some(2));
 
     // Jump backward
-    assert_eq!(seq_reader.get(0), Some(0));
+    assert_eq!(seq_reader.get(0).unwrap(), Some(0));
 
     // Jump forward
-    assert_eq!(seq_reader.get(49), Some(49));
+    assert_eq!(seq_reader.get(49).unwrap(), Some(49));
 }
 
 /// Tests the deprecated `IntVecSlice` type alias.
@@ -163,7 +163,7 @@ fn test_deprecated_intvec_iter() {
     let data: Vec<u32> = vec![1, 2, 3, 4, 5];
     let vec: UIntVec<u32> = VarVec::from_slice(&data).unwrap();
 
-    let iter: IntVecIter<u32, LE, Vec<u64>> = vec.iter();
+    let iter = vec.iter();
     let collected: Vec<u32> = iter.collect();
 
     assert_eq!(collected, data);
@@ -204,10 +204,12 @@ fn test_deprecated_intvec_error() {
     let vec: UIntVec<u32> = VarVec::from_slice(&data).unwrap();
 
     let result = vec.slice(0, 10);
-    assert!(result.is_err());
+    assert!(result.is_none());
 
-    if let Err(e) = result {
-        // Verify we can match the error type
+    // Test an actual VarVecError by using get_many with invalid indices
+    let err_result = vec.get_many(&[10, 20]);
+    assert!(err_result.is_err());
+    if let Err(e) = err_result {
         let _error: IntVecError = e;
     }
 }
@@ -222,8 +224,8 @@ fn test_deprecated_interoperability() {
     let vec = builder.build(&data).unwrap();
 
     // Use with new types
-    let reader = vec.reader();
-    assert_eq!(reader.get(2), Some(3));
+    let mut reader = vec.reader();
+    assert_eq!(reader.get(2).unwrap(), Some(3));
 
     let slice = vec.slice(1, 3).unwrap();
     assert_eq!(slice.len(), 3);
@@ -238,7 +240,7 @@ fn test_deprecated_type_equivalence() {
     let vec_old: IntVec<u32, LE> = VarVec::from_slice(&data).unwrap();
 
     // Create using new name
-    let vec_new = VarVec::from_slice(&data).unwrap();
+    let vec_new: IntVec<u32, LE> = VarVec::from_slice(&data).unwrap();
 
     // They should be identical
     assert_eq!(vec_old.len(), vec_new.len());

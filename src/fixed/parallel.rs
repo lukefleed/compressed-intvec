@@ -124,12 +124,12 @@ where
             .for_each(|(res_val, &index)| {
                 // Each thread performs a scalar lookup for its assigned indices.
                 // The `get_unchecked` call is thread-safe as it is read-only.
-                res_val.write(self.get_unchecked(index));
+                unsafe { res_val.write(self.get_unchecked(index)) };
             });
 
         // SAFETY: The parallel iteration guarantees that all elements in the
         // `results` vector have been initialized. We can therefore safely
         // transmute the `Vec<MaybeUninit<T>>` to a `Vec<T>`.
-        std::mem::transmute(results)
+        unsafe { std::mem::transmute(results) }
     }
 }

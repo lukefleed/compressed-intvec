@@ -111,7 +111,7 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> VarVecSlice<'a, T, E, B> {
             + BitSeek<Error = core::convert::Infallible>,
     {
         debug_assert!(index < self.len, "Index out of bounds");
-        self.vec.get_unchecked(self.start + index)
+        unsafe { self.vec.get_unchecked(self.start + index) }
     }
 
     /// Returns an iterator over the values in the slice.

@@ -167,7 +167,7 @@ where
             // jumping to a different sample block.
             // SAFETY: The public-facing get() performs bounds checks, and
             // internal callers are expected to uphold the same contract.
-            let start_bit = self.intvec.samples.get_unchecked(target_sample_block);
+            let start_bit = unsafe { self.intvec.samples.get_unchecked(target_sample_block) };
             self.reader.set_bit_pos(start_bit).unwrap();
             self.current_index = block_start;
         }

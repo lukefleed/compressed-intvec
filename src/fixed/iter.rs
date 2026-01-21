@@ -790,7 +790,7 @@ where
     pub unsafe fn next_unchecked(&mut self) -> T {
         // The underlying FixedVecIter is already highly optimized.
         // The primary gain here is removing the check in `next()`.
-        self.iter.next().unwrap_unchecked()
+        unsafe { self.iter.next().unwrap_unchecked() }
     }
 
     /// Returns the next element from the back without bounds checking.
@@ -800,6 +800,6 @@ where
     /// Calling this method when the iterator is exhausted is undefined behavior.
     #[inline]
     pub unsafe fn next_back_unchecked(&mut self) -> T {
-        self.iter.next_back().unwrap_unchecked()
+        unsafe { self.iter.next_back().unwrap_unchecked() }
     }
 }

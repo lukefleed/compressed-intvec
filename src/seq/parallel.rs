@@ -416,7 +416,7 @@ where
 
                 // Pre-allocate when sequence length is known.
                 if let Some(lengths) = &self.seq_lengths {
-                    let capacity = lengths.get_unchecked(target_index);
+                    let capacity = unsafe { lengths.get_unchecked(target_index) };
                     result.reserve(capacity);
                 }
 

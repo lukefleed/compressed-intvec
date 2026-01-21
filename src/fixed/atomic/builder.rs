@@ -226,16 +226,16 @@ unsafe fn set_unchecked_non_atomic(
     // Use `get_mut()` to get a mutable reference to the underlying `u64`.
     // This is safe because we have exclusive access to the vector during building.
     if bit_offset + bit_width <= bits_per_word {
-        let word = limbs.get_unchecked_mut(word_index).get_mut();
+        let word = unsafe { limbs.get_unchecked_mut(word_index).get_mut() };
         *word &= !(mask << bit_offset);
         *word |= value << bit_offset;
     } else {
         // The value spans two words.
-        let low_word_ptr = limbs.as_mut_ptr().add(word_index);
-        let high_word_ptr = limbs.as_mut_ptr().add(word_index + 1);
+        let low_word_ptr = unsafe { limbs.as_mut_ptr().add(word_index) };
+        let high_word_ptr = unsafe { limbs.as_mut_ptr().add(word_index + 1) };
 
-        let low_word = (*low_word_ptr).get_mut();
-        let high_word = (*high_word_ptr).get_mut();
+        let low_word = unsafe { (*low_word_ptr).get_mut() };
+        let high_word = unsafe { (*high_word_ptr).get_mut() };
 
         *low_word &= !(u64::MAX << bit_offset);
         *low_word |= value << bit_offset;

@@ -498,7 +498,7 @@ where
     /// Calling this method with an out-of-bounds `index` is undefined behavior.
     #[inline(always)]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
-        self.load_unchecked(index, Ordering::SeqCst)
+        unsafe { self.load_unchecked(index, Ordering::SeqCst) }
     }
 
     /// Returns an iterator over the elements of the vector.

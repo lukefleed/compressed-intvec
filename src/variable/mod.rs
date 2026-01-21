@@ -937,7 +937,7 @@ where
     #[inline]
     pub unsafe fn get_unchecked(&self, index: usize) -> T {
         let mut reader = self.reader();
-        reader.get_unchecked(index)
+        unsafe { reader.get_unchecked(index) }
     }
 
     /// Retrieves multiple elements from the vector at the specified indices.
@@ -987,7 +987,7 @@ where
         }
         let mut results = Vec::with_capacity(indices.len());
         // SAFETY: The vector is immediately populated by the sorted access logic below.
-        results.set_len(indices.len());
+        unsafe { results.set_len(indices.len()) };
 
         let mut indexed_indices: Vec<(usize, usize)> = indices
             .iter()

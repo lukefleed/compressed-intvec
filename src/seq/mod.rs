@@ -816,7 +816,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
             index,
             self.num_sequences()
         );
-        self.bit_offsets.get_unchecked(index)
+        unsafe { self.bit_offsets.get_unchecked(index) }
     }
 
     /// Returns the bit offset immediately after sequence `index` ends.
@@ -849,7 +849,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
             index,
             self.num_sequences()
         );
-        self.bit_offsets.get_unchecked(index + 1)
+        unsafe { self.bit_offsets.get_unchecked(index + 1) }
     }
 }
 
@@ -900,8 +900,8 @@ where
             self.num_sequences()
         );
 
-        let start_bit = self.sequence_start_bit_unchecked(index);
-        let end_bit = self.sequence_end_bit_unchecked(index);
+        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
+        let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
         let len = self
             .seq_lengths
             .as_ref()
@@ -943,7 +943,7 @@ where
     /// Calling this method with `index >= num_sequences()` is undefined behavior.
     #[inline(always)]
     pub unsafe fn decode_vec_unchecked(&self, index: usize) -> Vec<T> {
-        self.get_unchecked(index).collect()
+        unsafe { self.get_unchecked(index).collect() }
     }
 
     /// Decodes sequence `index` into the provided buffer.
@@ -987,7 +987,7 @@ where
     /// Calling this method with `index >= num_sequences()` is undefined behavior.
     #[inline(always)]
     pub unsafe fn decode_into_unchecked(&self, index: usize, buf: &mut Vec<T>) -> usize {
-        let start_bit = self.sequence_start_bit_unchecked(index);
+        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
 
         buf.clear();
 
@@ -1000,10 +1000,10 @@ where
         let code_reader = CodecReader::new(self.encoding);
 
         if let Some(lengths) = &self.seq_lengths {
-            let count = lengths.get_unchecked(index);
+            let count = unsafe { lengths.get_unchecked(index) };
             self.decode_counted(&mut reader, &code_reader, buf, count);
         } else {
-            let end_bit = self.sequence_end_bit_unchecked(index);
+            let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
             self.decode_until(&mut reader, &code_reader, buf, end_bit);
         }
 
@@ -1307,8 +1307,8 @@ where
         let mut results: Vec<Vec<T>> = indices
             .iter()
             .map(|&idx| {
-                let start = self.sequence_start_bit_unchecked(idx);
-                let end = self.sequence_end_bit_unchecked(idx);
+                let start = unsafe { self.sequence_start_bit_unchecked(idx) };
+                let end = unsafe { self.sequence_end_bit_unchecked(idx) };
                 // Estimate ~4 bits per element (reasonable for Delta with values 1-10k).
                 let cap = ((end - start) / 4).max(1) as usize;
                 Vec::with_capacity(cap)
@@ -1410,8 +1410,8 @@ where
         // Pre-allocate capacities for output vectors based on bit ranges.
         // Iterate in original order to populate capacities before decoding.
         for (i, &idx) in indices.iter().enumerate() {
-            let start = self.sequence_start_bit_unchecked(idx);
-            let end = self.sequence_end_bit_unchecked(idx);
+            let start = unsafe { self.sequence_start_bit_unchecked(idx) };
+            let end = unsafe { self.sequence_end_bit_unchecked(idx) };
             // Estimate ~4 bits per element (reasonable for Delta with values 1-10k).
             let cap = ((end - start) / 4).max(1) as usize;
             output[i].reserve(cap);

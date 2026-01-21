@@ -543,7 +543,7 @@ where
         let bits_per_word = <W as traits::Word>::BITS;
         // Optimization: if bit_width matches word size, access is trivial.
         if self.bit_width == bits_per_word {
-            let val = *self.as_limbs().get_unchecked(index);
+            let val = unsafe { *self.as_limbs().get_unchecked(index) };
             // Apply endianness correction if needed.
             let final_val = if E::IS_BIG { val.to_be() } else { val };
             return <T as Storable<W>>::from_word(final_val);
@@ -561,21 +561,21 @@ where
         if E::IS_LITTLE {
             // Fast path: the element is fully contained within a single word.
             if bit_offset + self.bit_width <= bits_per_word {
-                final_word = (*limbs.get_unchecked(word_index) >> bit_offset) & self.mask;
+                final_word = unsafe { (*limbs.get_unchecked(word_index) >> bit_offset) & self.mask };
             } else {
                 // Slow path: the element spans two words.
                 // Read the low part from the first word and the high part from the next.
-                let low = *limbs.get_unchecked(word_index) >> bit_offset;
-                let high = *limbs.get_unchecked(word_index + 1) << (bits_per_word - bit_offset);
+                let low = unsafe { *limbs.get_unchecked(word_index) >> bit_offset };
+                let high = unsafe { *limbs.get_unchecked(word_index + 1) << (bits_per_word - bit_offset) };
                 final_word = (low | high) & self.mask;
             }
         } else {
             // Big-Endian logic requires byte-swapping the words before extraction.
-            let word_hi = (*limbs.get_unchecked(word_index)).to_be();
+            let word_hi = unsafe { (*limbs.get_unchecked(word_index)).to_be() };
             if bit_offset + self.bit_width <= bits_per_word {
                 final_word = (word_hi << bit_offset) >> (bits_per_word - self.bit_width);
             } else {
-                let word_lo = (*limbs.get_unchecked(word_index + 1)).to_be();
+                let word_lo = unsafe { (*limbs.get_unchecked(word_index + 1)).to_be() };
                 let bits_in_first = bits_per_word - bit_offset;
                 let high = word_hi << bit_offset >> (bits_per_word - bits_in_first);
                 let low = word_lo >> (bits_per_word - (self.bit_width - bits_in_first));
@@ -686,7 +686,7 @@ where
             let bit_width = self.bit_width;
 
             if bit_width == bits_per_word {
-                return self.get_unchecked(index);
+                return unsafe { self.get_unchecked(index) };
             }
 
             // In debug builds, assert that this function is only called for `bit_width`
@@ -708,14 +708,14 @@ where
             let limbs_ptr = self.as_limbs().as_ptr() as *const u8;
 
             // Perform an unaligned read from the calculated byte position.
-            let word: W = (limbs_ptr.add(byte_pos) as *const W).read_unaligned();
+            let word: W = unsafe { (limbs_ptr.add(byte_pos) as *const W).read_unaligned() };
             let extracted_word = word >> bit_rem;
 
             <T as Storable<W>>::from_word(extracted_word & self.mask)
         } else {
             // For Big-Endian, the logic for unaligned reads is complex and
             // architecture-dependent. Fall back to the standard `get_unchecked`.
-            self.get_unchecked(index)
+            unsafe { self.get_unchecked(index) }
         }
     }
 
@@ -1800,11 +1800,13 @@ where
     pub unsafe fn set_unchecked(&mut self, index: usize, value_w: W) {
         let bits_per_word = <W as traits::Word>::BITS;
         if self.bit_width == bits_per_word {
-            *self.bits.as_mut().get_unchecked_mut(index) = if E::IS_LITTLE {
-                value_w
-            } else {
-                value_w.to_be()
-            };
+            unsafe {
+                *self.bits.as_mut().get_unchecked_mut(index) = if E::IS_LITTLE {
+                    value_w
+                } else {
+                    value_w.to_be()
+                };
+            }
             return;
         }
 
@@ -1817,38 +1819,38 @@ where
         if E::IS_LITTLE {
             // Fast path: the value fits entirely within a single word.
             if bit_offset + self.bit_width <= bits_per_word {
-                let mut word = *limbs.get_unchecked(word_index);
+                let mut word = unsafe { *limbs.get_unchecked(word_index) };
                 // Clear the target bits and then OR the new value.
                 word &= !(self.mask << bit_offset);
                 word |= value_w << bit_offset;
-                *limbs.get_unchecked_mut(word_index) = word;
+                unsafe { *limbs.get_unchecked_mut(word_index) = word };
             } else {
                 let remaining_bits_in_first_word = bits_per_word - bit_offset;
-                let (left, right) = limbs.split_at_mut_unchecked(word_index + 1);
-                let mut low_word_val = *left.get_unchecked(word_index);
+                let (left, right) = unsafe { limbs.split_at_mut_unchecked(word_index + 1) };
+                let mut low_word_val = unsafe { *left.get_unchecked(word_index) };
                 let low_mask = (<W as num_traits::NumCast>::from(1u8).unwrap() << bit_offset)
                     .wrapping_sub(<W as num_traits::NumCast>::from(1u8).unwrap());
                 low_word_val &= low_mask;
                 low_word_val |= value_w << bit_offset;
-                *left.get_unchecked_mut(word_index) = low_word_val;
+                unsafe { *left.get_unchecked_mut(word_index) = low_word_val };
 
-                let mut high_word_val = *right.get_unchecked(0);
+                let mut high_word_val = unsafe { *right.get_unchecked(0) };
                 high_word_val &= !(self.mask >> remaining_bits_in_first_word);
                 high_word_val |= value_w >> remaining_bits_in_first_word;
-                *right.get_unchecked_mut(0) = high_word_val;
+                unsafe { *right.get_unchecked_mut(0) = high_word_val };
             }
         } else {
             // Big-Endian set logic.
             if bit_offset + self.bit_width <= bits_per_word {
                 let shift = bits_per_word - self.bit_width - bit_offset;
                 let mask = self.mask << shift;
-                let word = limbs.get_unchecked_mut(word_index);
+                let word = unsafe { limbs.get_unchecked_mut(word_index) };
                 *word &= !mask.to_be();
                 *word |= (value_w << shift).to_be();
             } else {
-                let (left, right) = limbs.split_at_mut_unchecked(word_index + 1);
-                let high_word = left.get_unchecked_mut(word_index);
-                let low_word = right.get_unchecked_mut(0);
+                let (left, right) = unsafe { limbs.split_at_mut_unchecked(word_index + 1) };
+                let high_word = unsafe { left.get_unchecked_mut(word_index) };
+                let low_word = unsafe { right.get_unchecked_mut(0) };
 
                 let bits_in_first = bits_per_word - bit_offset;
                 let bits_in_second = self.bit_width - bits_in_first;
@@ -1939,13 +1941,13 @@ where
                 let new_val_t = f(val_t);
                 <T as Storable<W>>::into_word(new_val_t)
             };
-            self.map_in_place_generic_word_op(&mut word_op);
+            unsafe { self.map_in_place_generic_word_op(&mut word_op) };
         } else {
             // Fallback for BE, which is more complex to optimize at the word level.
             for i in 0..self.len {
-                let old_val_t = self.get_unchecked(i);
+                let old_val_t = unsafe { self.get_unchecked(i) };
                 let new_val_t = f(old_val_t);
-                self.set_unchecked(i, <T as Storable<W>>::into_word(new_val_t));
+                unsafe { self.set_unchecked(i, <T as Storable<W>>::into_word(new_val_t)) };
             }
         }
     }
@@ -1969,21 +1971,21 @@ where
             let num_full_words = self.len / elems_per_word;
 
             for word_idx in 0..num_full_words {
-                let old_word = *self.bits.as_ref().get_unchecked(word_idx);
+                let old_word = unsafe { *self.bits.as_ref().get_unchecked(word_idx) };
                 let mut new_word = W::ZERO;
                 for i in 0..elems_per_word {
                     let shift = i * bit_width;
                     let old_val_w = (old_word >> shift) & mask;
                     new_word |= f_w(old_val_w) << shift;
                 }
-                *self.bits.as_mut().get_unchecked_mut(word_idx) = new_word;
+                unsafe { *self.bits.as_mut().get_unchecked_mut(word_idx) = new_word };
             }
             // Process remaining elements individually.
             let start_idx = num_full_words * elems_per_word;
             for i in start_idx..self.len {
                 let old_val_t = self.get(i).unwrap();
                 let old_val_w = <T as Storable<W>>::into_word(old_val_t);
-                self.set_unchecked(i, f_w(old_val_w));
+                unsafe { self.set_unchecked(i, f_w(old_val_w)) };
             }
             return;
         }
@@ -1994,7 +1996,7 @@ where
         let last_word_idx = num_words.saturating_sub(1);
 
         let mut write_buffer = W::ZERO;
-        let mut read_buffer = *limbs.get_unchecked(0);
+        let mut read_buffer = unsafe { *limbs.get_unchecked(0) };
         let mut global_bit_offset = 0;
 
         for word_idx in 0..last_word_idx {
@@ -2008,13 +2010,13 @@ where
                 global_bit_offset += bit_width;
             }
 
-            let next_word = *limbs.get_unchecked(word_idx + 1);
+            let next_word = unsafe { *limbs.get_unchecked(word_idx + 1) };
             let mut new_write_buffer = W::ZERO;
 
             if upper_word_boundary != global_bit_offset {
                 let elem_idx = global_bit_offset / bit_width;
                 if elem_idx >= self.len {
-                    *limbs.get_unchecked_mut(word_idx) = write_buffer;
+                    unsafe { *limbs.get_unchecked_mut(word_idx) = write_buffer };
                     return;
                 }
 
@@ -2031,7 +2033,7 @@ where
                 global_bit_offset += bit_width;
             }
 
-            *limbs.get_unchecked_mut(word_idx) = write_buffer;
+            unsafe { *limbs.get_unchecked_mut(word_idx) = write_buffer };
 
             read_buffer = next_word;
             write_buffer = new_write_buffer;
@@ -2046,7 +2048,7 @@ where
             global_bit_offset += bit_width;
         }
 
-        *limbs.get_unchecked_mut(last_word_idx) = write_buffer;
+        unsafe { *limbs.get_unchecked_mut(last_word_idx) = write_buffer };
     }
 
     /// Applies a function to all elements in the vector, modifying them in-place.

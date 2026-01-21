@@ -125,7 +125,7 @@ where
         };
         // SAFETY: The caller guarantees that `index` is in bounds, which implies
         // that `sample_index` is also a valid index into the samples vector.
-        let start_bit = self.intvec.samples.get_unchecked(sample_index);
+        let start_bit = unsafe { self.intvec.samples.get_unchecked(sample_index) };
 
         // The underlying bitstream operations are infallible, so unwrap is safe.
         self.reader.set_bit_pos(start_bit).unwrap();
