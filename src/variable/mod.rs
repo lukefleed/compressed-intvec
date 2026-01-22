@@ -219,33 +219,32 @@
 //!     .unwrap();
 //!```
 //!
-//! # Migration from IntVec to VarVec
+//! # Deprecated Type Aliases
 //!
 //! As of version 0.6.0, all `IntVec*` types have been renamed to `VarVec*` for
-//! consistency with the module naming convention. The old names are still
-//! available as deprecated type aliases, but will be removed in a future major
-//! version.
+//! consistency with the module naming convention. The old names are available as
+//! deprecated type aliases for backward compatibility and will be removed in version 1.0.0.
 //!
-//! | Old Name (deprecated)         | New Name (use this)           |
-//! |-------------------------------|-------------------------------|
-//! | `IntVec`                      | `VarVec`                      |
-//! | `IntVecBuilder`               | `VarVecBuilder`               |
-//! | `IntVecFromIterBuilder`       | `VarVecFromIterBuilder`       |
-//! | `IntVecReader`                | `VarVecReader`                |
-//! | `IntVecSeqReader`             | `VarVecSeqReader`             |
-//! | `IntVecSlice`                 | `VarVecSlice`                 |
-//! | `IntVecIter`                  | `VarVecIter`                  |
-//! | `IntVecIntoIter`              | `VarVecIntoIter`              |
-//! | `IntVecError`                 | `VarVecError`                 |
-//! | `UIntVec`                     | `UVarVec`                     |
-//! | `SIntVec`                     | `SVarVec`                     |
-//! | `BEIntVec`                    | `BEVarVec`                    |
-//! | `LEIntVec`                    | `LEVarVec`                    |
-//! | `BESIntVec`                   | `BESVarVec`                   |
-//! | `LESIntVec`                   | `LESVarVec`                   |
+//! | Deprecated Name | New Name |
+//! |-----------------|----------|
+//! | `IntVec` | `VarVec` |
+//! | `IntVecBuilder` | `VarVecBuilder` |
+//! | `IntVecFromIterBuilder` | `VarVecFromIterBuilder` |
+//! | `IntVecReader` | `VarVecReader` |
+//! | `IntVecSeqReader` | `VarVecSeqReader` |
+//! | `IntVecSlice` | `VarVecSlice` |
+//! | `IntVecIter` | `VarVecIter` |
+//! | `IntVecIntoIter` | `VarVecIntoIter` |
+//! | `IntVecSliceIter` | `VarVecSliceIter` |
+//! | `IntVecError` | `VarVecError` |
+//! | `UIntVec` | `UVarVec` |
+//! | `SIntVec` | `SVarVec` |
+//! | `BEIntVec` | `BEVarVec` |
+//! | `LEIntVec` | `LEVarVec` |
+//! | `BESIntVec` | `BESVarVec` |
+//! | `LESIntVec` | `LESVarVec` |
 //!
-//! To migrate your code, simply replace all occurrences of the old names with
-//! the new ones. No changes to functionality or behavior are required.
+//! See the [`prelude`](crate::prelude) module for both new and deprecated aliases.
 //!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
@@ -273,7 +272,7 @@ use dsi_bitstream::{
         BitRead, BitSeek, BufBitReader, BufBitWriter, Codes, CodesRead, CodesWrite, Endianness,
         MemWordReader, MemWordWriterVec,
     },
-    traits::{BitWrite, BE, LE},
+    traits::{BE, BitWrite, LE},
 };
 use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
 use std::{
