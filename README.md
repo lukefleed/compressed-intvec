@@ -89,6 +89,43 @@ assert_eq!(varvec.len(), skewed_data.len());
 assert_eq!(varvec.get(3), Some(1000));
 ```
 
+### Example: [`SeqVec`] for Sequence Collections
+
+```rust
+use compressed_intvec::prelude::*;
+
+let sequences: &[&[u32]] = &[
+    &[1, 2, 3],
+    &[10, 20],
+    &[100, 200, 300, 400],
+    &[], // Empty sequences are supported
+];
+
+// Use the builder to choose a codec. Here we explicitly set
+// `store_lengths(false)` to show the default behaviour where lengths are
+// not stored, so length queries require decoding.
+// Use `store_lengths(true)` when you frequently need O(1) length queries; it stores per-sequence lengths at a small additional memory cost.
+let vec: LESeqVec<u32> = SeqVec::builder()
+    .codec(VariableCodecSpec::Auto)
+    .store_lengths(false)
+    .build(sequences)
+    .unwrap();
+
+assert_eq!(vec.num_sequences(), 4);
+assert!(!vec.has_stored_lengths());
+assert_eq!(vec.sequence_len(0), None);
+
+// Access a sequence by index
+let seq1: Vec<u32> = vec.get(1).unwrap().collect();
+assert_eq!(seq1, vec![10, 20]);
+
+// Iterate over all sequences
+for (idx, seq_iter) in vec.iter().enumerate() {
+    let seq: Vec<u32> = seq_iter.collect();
+    println!("Sequence {}: {:?}", idx, seq);
+}
+```
+
 [`prelude`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/prelude/index.html
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html
