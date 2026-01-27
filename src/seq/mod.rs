@@ -129,7 +129,7 @@ use crate::variable::traits::Storable;
 use dsi_bitstream::{
     dispatch::{Codes, CodesRead, StaticCodeRead},
     impls::{BufBitWriter, MemWordWriterVec},
-    prelude::{BitRead, BitSeek, BitWrite, CodesWrite, Endianness, BE, LE},
+    prelude::{BE, BitRead, BitSeek, BitWrite, CodesWrite, Endianness, LE},
 };
 use iter::SeqVecBitReader;
 use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
@@ -1080,8 +1080,7 @@ where
     ///
     /// - **Zero-copy iteration**: Returned iterators borrow directly from the
     ///   compressed data without intermediate allocations.
-    /// - **Stateless operation**: Each call to [`SeqVecReader::get`] is
-    ///   independent and creates a fresh [`SeqIter`].
+    /// - **Stateless operation**: Each call to [`get`](Self::get) is independent and creates a fresh [`SeqIter`].
     /// - **Convenience methods**: The reader provides [`decode_vec`](SeqVecReader::decode_vec)
     ///   and [`decode_into`](SeqVecReader::decode_into) for common patterns.
     ///

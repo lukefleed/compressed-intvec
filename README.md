@@ -7,41 +7,38 @@
 ![license](https://img.shields.io/crates/l/compressed-intvec)
 [![Line count](https://tokei.rs/b1/github/lukefleed/compressed-intvec?type=Rust,Python)](https://github.com/lukefleed/compressed-intvec)
 
-A Rust library that provides space-efficient, in-memory representations for integer vectors. It offers three complementary data structures: [`FixedVec`] for fixed-width encoding with O(1) mutable and atomic access, [`VarVec`] for variable-length encoding with high compression and amortized O(1) random access, and [`SeqVec`] for storing sequences of integers with indexed access.
+A Rust library that provides space-efficient, in-memory representations for integer vectors. It offers three complementary data structures: [`FixedVec`] for fixed-width encoding with _blazing fast_ mutable and atomic access, [`VarVec`] for variable-length encoding with high compression and amortized O(1) random access, and [`SeqVec`] for storing sequences of integers with indexed access.
 
 The library is designed to reduce the memory footprint of standard [`std::vec::Vec`] collections of integers while retaining performant access patterns.
 
 ## Core Structures: [`FixedVec`], [`VarVec`], and [`SeqVec`]
 
-The library provides three distinct vector types, each based on a different encoding principle and access pattern. Choosing the right one depends on your specific use case, performance requirements, and data characteristics.
+The library provides three distinct vector types, each based on a different encoding principle and access pattern. Choosing the right one depends on the specific use case, performance requirements, and data characteristics.
 
 ### [`FixedVec`]: Fixed-Width Encoding>
 
 Implements a vector where every integer occupies the same, predetermined number of bits.
 
-*   **Key Features**:
-    *   **O(1) Random Access**: The memory location of any element is determined by a direct bit-offset calculation, resulting in minimal-overhead access. With low bit widths (e.g., 8, 16, 32), [`FixedVec`] can be faster than [`std::vec::Vec`] for random access due to better cache utilization.
-    *   **Mutability**: Supports in-place modifications after creation through an API similar to [`std::vec::Vec`] (e.g., `push`, `set`, `pop`).
-    *   **Atomic Operations**: Provides [`AtomicFixedVec`], a thread-safe variant that supports atomic read-modify-write operations for concurrent environments.
+*   **O(1) Random Access**: The memory location of any element is determined by a direct bit-offset calculation, resulting in minimal-overhead access. With low bit widths (e.g., 8, 16, 32), [`FixedVec`] can be faster than [`std::vec::Vec`] for random access due to better cache utilization.
+*   **Mutability**: Supports in-place modifications after creation through an API similar to [`std::vec::Vec`] (e.g., `push`, `set`, `pop`).
+*   **Atomic Operations**: Provides [`AtomicFixedVec`], a thread-safe variant that supports atomic read-modify-write operations for concurrent environments.
 
 ### [`VarVec`]: Variable-Width Element Encoding
 
 Implements a vector using variable-length instantaneous codes (e.g., Gamma, Delta, Rice, Zeta) to represent each integer with amortized O(1) random access.
 
-*   **Key Features**:
-    *   **High Compression Ratios**: Achieves significant space savings for data with non-uniform distributions.
-    *   **Automatic Codec Selection**: Can analyze the data to select the most effective compression codec automatically.
-    *   **Amortized O(1) Random Access**: Enables fast random access by sampling the bit positions of elements at a configurable interval (`k`).
+*   **High Compression Ratios**: Achieves significant space savings for data with non-uniform distributions.
+*   **Automatic Codec Selection**: Can analyze the data to select the most effective compression codec automatically.
+*   **Amortized O(1) Random Access**: Enables fast random access by sampling the bit positions of elements at a configurable interval (`k`).
 
 ### [`SeqVec`]: Variable-Length Sequence Encoding
 
 Implements a vector of sequences where each sequence is stored in compressed form and accessed as a whole, with efficient indexed access to sequences.
 
-*   **Key Features**:
-    *   **Sequence-Oriented Access**: Optimized for workloads where entire sequences are retrieved together.
-    *   **Minimal Overhead**: Stores only the bit offset of sequence boundaries; sequence lengths are computed on-the-fly or stored optionally.
-    *   **Flexible Codec**: Supports the same compression codecs as [`VarVec`] for variable-length encoding of sequence elements.
-    *   **Zero-Copy Iteration**: Provides zero-allocation iterators over sequence elements.
+*   **Sequence-Oriented Access**: Optimized for workloads where entire sequences are retrieved together.
+*   **Minimal Overhead**: Stores only the bit offset of sequence boundaries; sequence lengths are computed on-the-fly or stored optionally.
+*   **Flexible Codec**: Supports the same compression codecs as [`VarVec`] for variable-length encoding of sequence elements.
+*   **Zero-Copy Iteration**: Provides zero-allocation iterators over sequence elements.
 
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html
@@ -226,7 +223,7 @@ assert_eq!(values, indices_to_get.iter().map(|&i| data[i]).collect::<Vec<_>>());
 
 For retrieving elements from a streaming iterator of indices.
 
-*   **Mechanism**: Processes indices on-the-fly using a stateful [`IntVecSeqReader`] internally, which is optimized for streams with sequential locality.
+*   **Mechanism**: Processes indices on-the-fly using a stateful [`variable::IntVecSeqReader`] internally, which is optimized for streams with sequential locality.
 
 Use when indices cannot be collected into a slice, for example due to memory constraints.
 

@@ -15,7 +15,7 @@
 //!
 //! [`SeqVec`]: crate::seq::SeqVec
 
-use super::{iter::SeqVecBitReader, SeqVec};
+use super::{SeqVec, iter::SeqVecBitReader};
 use crate::common::codec_reader::{CodecReader, VarVecBitReader};
 use crate::variable::traits::Storable;
 use dsi_bitstream::{
@@ -104,9 +104,9 @@ where
     ///
     /// This method reuses the internal bitstream reader and codec dispatcher,
     /// providing better performance than collecting a [`SeqVec::get`]
-    /// iterator into a vector. For optimal memory allocation, ensure
-    /// [`SeqVec::store_lengths(true)`](super::SeqVec::store_lengths) was used
-    /// during construction.
+    /// iterator into a vector. For optimal memory allocation, ensure the builder option
+    /// [`SeqVecBuilder::store_lengths`](crate::seq::SeqVecBuilder::store_lengths)
+    /// was used during construction.
     ///
     /// # Examples
     ///

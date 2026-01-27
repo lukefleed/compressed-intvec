@@ -33,7 +33,7 @@
 /// assert!(v.is_empty());
 /// ```
 ///
-/// Create an [`VarVec`] from a list of elements:
+/// Create a [`crate::variable::VarVec`] from a list of elements:
 /// ```
 /// # use compressed_intvec::int_vec;
 ///   let v = int_vec![100u32, 200, 300, 1024];
@@ -41,7 +41,7 @@
 /// assert_eq!(v.get(1), Some(200));
 /// ```
 ///
-/// Create an [`VarVec`] with a repeated element:
+/// Create a [`crate::variable::VarVec`] with a repeated element:
 /// ```
 /// # use compressed_intvec::int_vec;
 ///   let v = int_vec![42u8; 100];

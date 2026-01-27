@@ -1,7 +1,7 @@
 //! Comprehensive integration tests for [`SeqVecReader`] functionality.
 //!
 //! This test suite validates:
-//! - Basic random access via [`SeqVecReader::get`]
+//! - Basic random access via [`SeqVecReader::decode_vec`]
 //! - Bounds checking and out-of-bounds behavior
 //! - Convenience methods: `decode_vec()`, `decode_into()`
 //! - Empty sequence handling
