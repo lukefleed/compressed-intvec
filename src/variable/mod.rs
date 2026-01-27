@@ -653,10 +653,7 @@ impl<T: Storable + 'static, E: Endianness> VarVec<T, E, Vec<u64>> {
         for<'a> crate::variable::VarVecBitWriter<E>:
             BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
-        Self::builder()
-            .k(16)
-            .codec(Codec::Auto)
-            .build(slice)
+        Self::builder().k(16).codec(Codec::Auto).build(slice)
     }
 }
 
