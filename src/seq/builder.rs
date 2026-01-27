@@ -14,10 +14,10 @@
 //! [`SeqVec`]: crate::seq::SeqVec
 
 use super::{SeqVec, SeqVecBitWriter, SeqVecError};
+use crate::common::codec_writer::CodecWriter;
+use crate::fixed::{BitWidth, FixedVec};
 use crate::variable::codec::{self, Codec};
 use crate::variable::traits::Storable;
-use crate::fixed::{BitWidth, FixedVec};
-use crate::common::codec_writer::CodecWriter;
 use dsi_bitstream::{
     dispatch::StaticCodeWrite,
     impls::MemWordWriterVec,

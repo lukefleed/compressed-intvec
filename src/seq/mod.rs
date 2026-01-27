@@ -477,9 +477,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     where
         SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
-        Self::builder()
-            .codec(Codec::Auto)
-            .build(sequences)
+        Self::builder().codec(Codec::Auto).build(sequences)
     }
 
     /// Consumes the [`SeqVec`] and returns all sequences as a `Vec<Vec<T>>`.
@@ -629,11 +627,12 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
         }
 
         if let Some(lengths) = &seq_lengths
-            && lengths.len() + 1 != bit_offsets_len {
-                return Err(SeqVecError::InvalidParameters(
-                    "seq_lengths length must match number of sequences".to_string(),
-                ));
-            }
+            && lengths.len() + 1 != bit_offsets_len
+        {
+            return Err(SeqVecError::InvalidParameters(
+                "seq_lengths length must match number of sequences".to_string(),
+            ));
+        }
 
         let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
             bit_offsets_data,
