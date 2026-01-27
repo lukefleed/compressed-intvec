@@ -192,11 +192,11 @@ The compression strategy is controlled by the [`Codec`] enum, passed to the buil
 
 ### Choosing the Right Codec
 
-For most use cases, the recommended strategy is [`Codec::Auto`], which analyzes the data to select the most space-efficient codec. However, you can also specify a codec explicitly based on your data characteristics.
+For _not too large_ use cases, the recommended strategy is [`Codec::Auto`], which analyzes the data to select the most space-efficient codec. Note that this has a one-time cost during construction that is not negligible for very large datasets or frequent builds. You can also specify a codec explicitly based on your data characteristics.
 
 | `Codec` Variant | Description & Encoding Strategy | Optimal Data Distribution |
 | :--- | :--- | :--- |
-| **`Auto`** | **Recommended default.** Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
+| **`Auto`** | Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
 | `Gamma` (γ) | A universal, parameter-free code. Encodes `n` using the unary code of log₂(*n*+1), followed by the remaining bits of `n`+1. | Implied distribution is ≈ 1/(2*x*²). Optimal for data skewed towards small non-negative integers. |
 | `Delta` (δ) | A universal, parameter-free code. Encodes `n` using the γ code of  log₂(*n*+1) , making it more efficient than γ for larger values. | Implied distribution is ≈ 1/(2*x*(log *x*)²). |
 | `Rice` | A fast, tunable version of Golomb codes where the parameter *b* must be a power of two. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored in binary). | Geometric distributions. |
@@ -214,8 +214,6 @@ For most use cases, the recommended strategy is [`Codec::Auto`], which analyzes 
 The `Auto` strategy removes the guesswork from codec selection. During the build phase, it analyzes the input data and selects the codec that offers the best compression ratio. This introduces a one-time cost for the analysis at construction time. Use the `Auto` codec when you want to create a [`VarVec`] once and read it many times, as the amortized cost of the analysis is negligible compared to the space savings and performance of subsequent reads.
 
 If you need to create multiple [`VarVec`] instances at run-time, consider using a specific codec that matches your data distribution to avoid the overhead of analysis.
-
-
 
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`IntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.IntVec.html
@@ -516,14 +514,7 @@ The library includes benchmarks for [`FixedVec`], [`VarVec`], and [`SeqVec`]. It
 cargo bench
 ```
 
-The benchmarks measure the performance of random access, batch access, sequential access, and memory usage for various data distributions and vector sizes. For a visual representation of the random access performance, run the following command:
-
-```bash
-pip3 install -r python/requirements.txt
-python3 python/plot.py --random-access
-```
-
-The resulting SVGs file will be saved in the `images` directory.
+The benchmarks measure the performance of random access, batch access, sequential access, and memory usage for various data distributions and vector sizes.
 
 [`sux::BitFieldVec`]: https://docs.rs/sux/latest/sux/bits/bit_field_vec/index.htmll
 [`succinct::IntVector`]: https://docs.rs/succinct/latest/succinct/int_vec/trait.IntVec.html

@@ -286,7 +286,7 @@ where
     /// Reference to the bit offsets index.
     bit_offsets: &'a FixedVec<u64, u64, E, B>,
     /// Optional reference to stored sequence lengths.
-    seq_lengths: Option<&'a FixedVec<usize, u64, E, Vec<u64>>>,
+    seq_lengths: Option<&'a FixedVec<u64, u64, E, Vec<u64>>>,
     /// The codec used for compression.
     encoding: Codes,
     /// Current front index (for forward iteration).
@@ -313,7 +313,7 @@ where
     pub(crate) fn new(
         data: &'a [u64],
         bit_offsets: &'a FixedVec<u64, u64, E, B>,
-        seq_lengths: Option<&'a FixedVec<usize, u64, E, Vec<u64>>>,
+        seq_lengths: Option<&'a FixedVec<u64, u64, E, Vec<u64>>>,
         encoding: Codes,
         num_sequences: usize,
     ) -> Self {
@@ -355,7 +355,7 @@ where
         let end_bit = unsafe { self.bit_offsets.get_unchecked(self.front + 1) };
         let len = self
             .seq_lengths
-            .map(|lengths| unsafe { lengths.get_unchecked(self.front) });
+            .map(|lengths| unsafe { lengths.get_unchecked(self.front) as usize });
 
         self.front += 1;
 
@@ -411,7 +411,7 @@ where
         let end_bit = unsafe { self.bit_offsets.get_unchecked(self.back + 1) };
         let len = self
             .seq_lengths
-            .map(|lengths| unsafe { lengths.get_unchecked(self.back) });
+            .map(|lengths| unsafe { lengths.get_unchecked(self.back) as usize });
 
         Some(SeqIter::new_with_len(
             self.data,
@@ -517,7 +517,7 @@ where
     /// Total number of bit offsets (including sentinel at N+1).
     bit_offsets_len: usize,
     /// Optional stored sequence lengths.
-    seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
+    seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
     /// This field owns the data buffer, ensuring it lives as long as the iterator.
     _data_owner: Vec<u64>,
     /// This field owns the bit offsets buffer.
@@ -635,7 +635,7 @@ where
         let len = self
             .seq_lengths
             .as_ref()
-            .map(|lengths| unsafe { lengths.get_unchecked(self.current_index) });
+            .map(|lengths| unsafe { lengths.get_unchecked(self.current_index) as usize });
 
         self.current_index += 1;
 
@@ -691,7 +691,7 @@ where
         let len = self
             .seq_lengths
             .as_ref()
-            .map(|lengths| unsafe { lengths.get_unchecked(self.num_sequences) });
+            .map(|lengths| unsafe { lengths.get_unchecked(self.num_sequences) as usize });
 
         Some(SeqIter::new_with_len(
             self.data,

@@ -246,7 +246,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
                 .build(&[0u64])?;
             let seq_lengths = if self.store_lengths {
                 Some(
-                    FixedVec::<usize, u64, E>::builder()
+                    FixedVec::<u64, u64, E>::builder()
                         .bit_width(BitWidth::Minimal)
                         .build(&[])?,
                 )
@@ -277,7 +277,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 
         let seq_lengths = if let Some(lengths) = lengths {
             Some(
-                FixedVec::<usize, u64, E>::builder()
+                FixedVec::<u64, u64, E>::builder()
                     .bit_width(BitWidth::Minimal)
                     .build(&lengths)?,
             )
@@ -445,7 +445,7 @@ where
                 .build(&[0u64])?;
             let seq_lengths = if self.store_lengths {
                 Some(
-                    FixedVec::<usize, u64, E>::builder()
+                    FixedVec::<u64, u64, E>::builder()
                         .bit_width(BitWidth::Minimal)
                         .build(&[])?,
                 )
@@ -468,7 +468,7 @@ where
 
         let seq_lengths = if let Some(lengths) = lengths {
             Some(
-                FixedVec::<usize, u64, E>::builder()
+                FixedVec::<u64, u64, E>::builder()
                     .bit_width(BitWidth::Minimal)
                     .build(&lengths)?,
             )
@@ -511,8 +511,8 @@ impl CodecSpecExt for Codec {
 /// Type alias for the return value of `encode_sequences_impl`.
 ///
 /// Contains the compressed word data, bit offset boundaries, and optional
-/// per-sequence lengths.
-type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<usize>>);
+/// per-sequence lengths (stored as `u64` for architecture independence).
+type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<u64>>);
 
 /// Shared encoding implementation for sequences from an iterator.
 ///
@@ -537,7 +537,7 @@ type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<usize>>);
 /// A tuple containing:
 /// - Encoded word data (`Vec<u64>`)
 /// - Bit offset boundaries (`Vec<u64>`), with length = num_sequences + 1
-/// - Optional per-sequence lengths (`Vec<usize>`), if `store_lengths` is true
+/// - Optional per-sequence lengths (`Vec<u64>`), if `store_lengths` is true
 ///
 /// [`AsRef<[T]>`]: core::convert::AsRef
 fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
@@ -574,7 +574,7 @@ where
         offsets.push(current_bit_offset);
 
         if let Some(ref mut lengths) = lengths {
-            lengths.push(seq_ref.len());
+            lengths.push(seq_ref.len() as u64);
         }
 
         for elem in seq_ref {
@@ -702,7 +702,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     pub unsafe fn from_raw_parts_with_lengths(
         data: Vec<u64>,
         bit_offsets: crate::fixed::FixedVec<u64, u64, E, Vec<u64>>,
-        seq_lengths: Option<crate::fixed::FixedVec<usize, u64, E, Vec<u64>>>,
+        seq_lengths: Option<crate::fixed::FixedVec<u64, u64, E, Vec<u64>>>,
         encoding: dsi_bitstream::prelude::Codes,
     ) -> Self {
         SeqVec {

@@ -111,7 +111,7 @@ where
                 let capacity = self
                     .seq_lengths
                     .as_ref()
-                    .map(|l| unsafe { l.get_unchecked(i) })
+                    .map(|l| unsafe { l.get_unchecked(i) as usize })
                     .unwrap_or(0);
 
                 let mut buf = Vec::with_capacity(capacity);
@@ -204,7 +204,7 @@ where
                 // SAFETY: i < num_sequences by construction of the range.
                 let start_bit = unsafe { bit_offsets.get_unchecked(i) };
                 let end_bit = unsafe { bit_offsets.get_unchecked(i + 1) };
-                let len = seq_lengths.map(|l| unsafe { l.get_unchecked(i) });
+                let len = seq_lengths.map(|l| unsafe { l.get_unchecked(i) as usize });
 
                 let iter = SeqIter::new_with_len(data, start_bit, end_bit, encoding, len);
                 f(iter)
@@ -262,7 +262,7 @@ where
             .map(|i| {
                 let start_bit = unsafe { bit_offsets.get_unchecked(i) };
                 let end_bit = unsafe { bit_offsets.get_unchecked(i + 1) };
-                let len = seq_lengths.map(|l| unsafe { l.get_unchecked(i) });
+                let len = seq_lengths.map(|l| unsafe { l.get_unchecked(i) as usize });
 
                 let iter = SeqIter::new_with_len(data, start_bit, end_bit, encoding, len);
                 f(iter)
@@ -322,7 +322,7 @@ where
                     let capacity = seqvec
                         .seq_lengths
                         .as_ref()
-                        .map(|l| unsafe { l.get_unchecked(i) })
+                        .map(|l| unsafe { l.get_unchecked(i) as usize })
                         .unwrap_or(0);
 
                     let mut buf = Vec::with_capacity(capacity);
@@ -416,7 +416,7 @@ where
 
                 // Pre-allocate when sequence length is known.
                 if let Some(lengths) = &self.seq_lengths {
-                    let capacity = unsafe { lengths.get_unchecked(target_index) };
+                    let capacity = unsafe { lengths.get_unchecked(target_index) as usize };
                     result.reserve(capacity);
                 }
 
@@ -480,7 +480,7 @@ where
                 // SAFETY: bounds checked above.
                 let start_bit = unsafe { bit_offsets.get_unchecked(i) };
                 let end_bit = unsafe { bit_offsets.get_unchecked(i + 1) };
-                let len = seq_lengths.map(|l| unsafe { l.get_unchecked(i) });
+                let len = seq_lengths.map(|l| unsafe { l.get_unchecked(i) as usize });
 
                 let iter = SeqIter::new_with_len(data, start_bit, end_bit, encoding, len);
                 f(iter)

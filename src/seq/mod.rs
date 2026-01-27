@@ -225,7 +225,9 @@ pub struct SeqVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// Uses the same endianness `E` as the struct for design consistency.
     bit_offsets: FixedVec<u64, u64, E, B>,
     /// Optional per-sequence lengths stored in a compact fixed-width vector.
-    seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
+    /// Uses `u64` (architecture-independent) to ensure portability across 32-bit
+    /// and 64-bit systems. Accessor methods return `usize` via safe casting.
+    seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
     /// The compression codec used for all elements.
     encoding: Codes,
     /// Zero-sized markers for the generic type parameters.
@@ -283,7 +285,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for SeqVec<T
         // Add heap-allocated memory for optional sequence lengths.
         if let Some(lengths) = &self.seq_lengths {
             total +=
-                lengths.mem_size(flags) - core::mem::size_of::<FixedVec<usize, u64, E, Vec<u64>>>();
+                lengths.mem_size(flags) - core::mem::size_of::<FixedVec<u64, u64, E, Vec<u64>>>();
         }
         total
     }
@@ -617,7 +619,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
         bit_offsets_data: B,
         bit_offsets_len: usize,
         bit_offsets_num_bits: usize,
-        seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
+        seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
         encoding: Codes,
     ) -> Result<Self, SeqVecError> {
         if bit_offsets_len == 0 {
@@ -679,7 +681,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
     pub unsafe fn from_parts_with_lengths_unchecked(
         data: B,
         bit_offsets: FixedVec<u64, u64, E, B>,
-        seq_lengths: Option<FixedVec<usize, u64, E, Vec<u64>>>,
+        seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
         encoding: Codes,
     ) -> Self {
         Self {
@@ -765,7 +767,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
 
         self.seq_lengths
             .as_ref()
-            .map(|lengths| unsafe { lengths.get_unchecked(index) })
+            .map(|lengths| unsafe { lengths.get_unchecked(index) as usize })
     }
 
     /// Returns the total number of bits in the compressed data.
@@ -908,7 +910,7 @@ where
         let len = self
             .seq_lengths
             .as_ref()
-            .map(|lengths| unsafe { lengths.get_unchecked(index) });
+            .map(|lengths| unsafe { lengths.get_unchecked(index) as usize });
 
         SeqIter::new_with_len(self.data.as_ref(), start_bit, end_bit, self.encoding, len)
     }
@@ -1003,7 +1005,7 @@ where
         let code_reader = CodecReader::new(self.encoding);
 
         if let Some(lengths) = &self.seq_lengths {
-            let count = unsafe { lengths.get_unchecked(index) };
+            let count = unsafe { lengths.get_unchecked(index) as usize };
             self.decode_counted(&mut reader, &code_reader, buf, count);
         } else {
             let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };

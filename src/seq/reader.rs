@@ -184,7 +184,7 @@ where
         let _ = self.reader.set_bit_pos(start_bit);
 
         if let Some(lengths) = &self.seqvec.seq_lengths {
-            let count = unsafe { lengths.get_unchecked(index) };
+            let count = unsafe { lengths.get_unchecked(index) as usize };
             buf.reserve(count);
             for _ in 0..count {
                 let word = self.code_reader.read(&mut self.reader).unwrap();
