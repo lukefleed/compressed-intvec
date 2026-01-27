@@ -13,11 +13,11 @@
 //!
 //! [`SeqVec`]: crate::seq::SeqVec
 
-use super::{SeqVec, SeqVecBitWriter, SeqVecError, VariableCodecSpec};
-use crate::common::codec_writer::CodecWriter;
-use crate::fixed::{BitWidth, FixedVec};
-use crate::variable::codec;
+use super::{SeqVec, SeqVecBitWriter, SeqVecError};
+use crate::variable::codec::{self, Codec};
 use crate::variable::traits::Storable;
+use crate::fixed::{BitWidth, FixedVec};
+use crate::common::codec_writer::CodecWriter;
 use dsi_bitstream::{
     dispatch::StaticCodeWrite,
     impls::MemWordWriterVec,
@@ -35,7 +35,7 @@ use std::marker::PhantomData;
 ///
 /// ## Construction Strategy
 ///
-/// When the codec is [`VariableCodecSpec::Auto`] or requires parameter
+/// When the codec is [`Codec::Auto`] or requires parameter
 /// estimation (e.g., `Rice { log2_b: None }`), the builder performs a two-pass
 /// construction:
 ///
@@ -49,25 +49,25 @@ use std::marker::PhantomData;
 /// ## Examples
 ///
 /// ```
-/// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
+/// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
 ///
 /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
 ///
 /// // Automatic codec selection (two-pass)
 /// let vec_auto: LESeqVec<u32> = SeqVec::builder()
-///     .codec(VariableCodecSpec::Auto)
+///     .codec(Codec::Auto)
 ///     .build(sequences)
 ///     .unwrap();
 ///
 /// // Explicit codec (single-pass, more efficient)
 /// let vec_gamma: LESeqVec<u32> = SeqVec::builder()
-///     .codec(VariableCodecSpec::Gamma)
+///     .codec(Codec::Gamma)
 ///     .build(sequences)
 ///     .unwrap();
 /// ```
 #[derive(Debug, Clone)]
 pub struct SeqVecBuilder<T: Storable, E: Endianness> {
-    codec_spec: VariableCodecSpec,
+    codec_spec: Codec,
     store_lengths: bool,
     _markers: PhantomData<(T, E)>,
 }
@@ -81,12 +81,12 @@ impl<T: Storable, E: Endianness> Default for SeqVecBuilder<T, E> {
 impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     /// Creates a new builder with default settings.
     ///
-    /// The default codec is [`VariableCodecSpec::Auto`], which analyzes the
+    /// The default codec is [`Codec::Auto`], which analyzes the
     /// data to select the best codec.
     #[inline]
     pub fn new() -> Self {
         Self {
-            codec_spec: VariableCodecSpec::Auto,
+            codec_spec: Codec::Auto,
             store_lengths: false,
             _markers: PhantomData,
         }
@@ -94,9 +94,9 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 
     /// Sets the compression codec to use.
     ///
-    /// For the available codecs, see [`VariableCodecSpec`].
+    /// For the available codecs, see [`Codec`].
     #[inline]
-    pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
+    pub fn codec(mut self, codec_spec: Codec) -> Self {
         self.codec_spec = codec_spec;
         self
     }
@@ -304,7 +304,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 /// ## Limitations
 ///
 /// This builder does **not** support:
-/// - [`VariableCodecSpec::Auto`]: Automatic codec selection requires analyzing
+/// - [`Codec::Auto`]: Automatic codec selection requires analyzing
 ///   all data, which is impossible in a single pass.
 /// - Parameter estimation for codecs like `Rice { log2_b: None }` or
 ///   `Zeta { k: None }`.
@@ -315,13 +315,13 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 /// ## Examples
 ///
 /// ```
-/// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
+/// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
 ///
 /// // Generate sequences on the fly
 /// let sequences_iter = (0..100).map(|i| vec![i as u32, i as u32 + 1]);
 ///
 /// let vec: LESeqVec<u32> = SeqVec::from_iter_builder(sequences_iter)
-///     .codec(VariableCodecSpec::Gamma) // Must be specified
+///     .codec(Codec::Gamma) // Must be specified
 ///     .build()
 ///     .unwrap();
 ///
@@ -330,7 +330,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 #[derive(Debug)]
 pub struct SeqVecFromIterBuilder<T: Storable, E: Endianness, I> {
     iter: I,
-    codec_spec: VariableCodecSpec,
+    codec_spec: Codec,
     store_lengths: bool,
     _markers: PhantomData<(T, E)>,
 }
@@ -344,13 +344,13 @@ where
 {
     /// Creates a new builder from an iterator with default settings.
     ///
-    /// The default codec is [`VariableCodecSpec::Gamma`], as automatic
+    /// The default codec is [`Codec::Gamma`], as automatic
     /// selection is not possible in single-pass construction.
     #[inline]
     pub fn new(iter: I) -> Self {
         Self {
             iter,
-            codec_spec: VariableCodecSpec::Gamma,
+            codec_spec: Codec::Gamma,
             store_lengths: false,
             _markers: PhantomData,
         }
@@ -369,7 +369,7 @@ where
     /// The [`build`](Self::build) method will return an error if a codec
     /// requiring data analysis is provided.
     #[inline]
-    pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
+    pub fn codec(mut self, codec_spec: Codec) -> Self {
         self.codec_spec = codec_spec;
         self
     }
@@ -402,12 +402,12 @@ where
     /// ## Examples
     ///
     /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
     ///
     /// let sequences: Vec<Vec<u32>> = vec![vec![1, 2], vec![3, 4, 5]];
     ///
     /// let vec: LESeqVec<u32> = SeqVec::from_iter_builder(sequences.into_iter())
-    ///     .codec(VariableCodecSpec::Delta)
+    ///     .codec(Codec::Delta)
     ///     .build()
     ///     .unwrap();
     /// ```
@@ -486,24 +486,24 @@ where
     }
 }
 
-/// Extension trait for `VariableCodecSpec` to check if analysis is required.
+/// Extension trait for `Codec` to check if analysis is required.
 #[allow(dead_code)]
 trait CodecSpecExt {
     /// Returns `true` if this codec spec requires data analysis to resolve.
     fn requires_analysis(&self) -> bool;
 }
 
-impl CodecSpecExt for VariableCodecSpec {
+impl CodecSpecExt for Codec {
     #[inline]
     fn requires_analysis(&self) -> bool {
         matches!(
             self,
-            VariableCodecSpec::Auto
-                | VariableCodecSpec::Rice { log2_b: None }
-                | VariableCodecSpec::Zeta { k: None }
-                | VariableCodecSpec::Golomb { b: None }
-                | VariableCodecSpec::Pi { k: None }
-                | VariableCodecSpec::ExpGolomb { k: None }
+            Codec::Auto
+                | Codec::Rice { log2_b: None }
+                | Codec::Zeta { k: None }
+                | Codec::Golomb { b: None }
+                | Codec::Pi { k: None }
+                | Codec::ExpGolomb { k: None }
         )
     }
 }
@@ -605,12 +605,12 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
     ///
     /// let vec: LESeqVec<u32> = SeqVec::builder()
-    ///     .codec(VariableCodecSpec::Zeta { k: Some(3) })
+    ///     .codec(Codec::Zeta { k: Some(3) })
     ///     .build(sequences)
     ///     .unwrap();
     /// ```
@@ -628,13 +628,13 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
     ///
     /// // Generate sequences programmatically
     /// let sequences = (0..50).map(|i| vec![i as u32; i % 5 + 1]);
     ///
     /// let vec: LESeqVec<u32> = SeqVec::from_iter_builder(sequences)
-    ///     .codec(VariableCodecSpec::Gamma)
+    ///     .codec(Codec::Gamma)
     ///     .build()
     ///     .unwrap();
     ///

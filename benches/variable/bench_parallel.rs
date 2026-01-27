@@ -1,9 +1,9 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
 };
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 #[cfg(feature = "parallel")]
@@ -64,20 +64,17 @@ fn benchmark_access(c: &mut Criterion) {
     ];
 
     let codecs_to_test = [
-        ("Gamma", VariableCodecSpec::Gamma),
-        ("Delta", VariableCodecSpec::Delta),
-        ("Unary", VariableCodecSpec::Unary),
-        ("Rice", VariableCodecSpec::Rice { log2_b: None }),
-        ("Zeta", VariableCodecSpec::Zeta { k: None }),
-        ("Explicit_Omega", VariableCodecSpec::Omega),
-        ("Explicit_VByteLe", VariableCodecSpec::VByteLe),
-        ("Explicit_VByteBe", VariableCodecSpec::VByteBe),
-        ("Explicit_Pi", VariableCodecSpec::Pi { k: Some(3) }),
-        ("Explicit_Golomb", VariableCodecSpec::Golomb { b: Some(8) }),
-        (
-            "Explicit_ExpGolomb",
-            VariableCodecSpec::ExpGolomb { k: Some(2) },
-        ),
+        ("Gamma", Codec::Gamma),
+        ("Delta", Codec::Delta),
+        ("Unary", Codec::Unary),
+        ("Rice", Codec::Rice { log2_b: None }),
+        ("Zeta", Codec::Zeta { k: None }),
+        ("Explicit_Omega", Codec::Omega),
+        ("Explicit_VByteLe", Codec::VByteLe),
+        ("Explicit_VByteBe", Codec::VByteBe),
+        ("Explicit_Pi", Codec::Pi { k: Some(3) }),
+        ("Explicit_Golomb", Codec::Golomb { b: Some(8) }),
+        ("Explicit_ExpGolomb", Codec::ExpGolomb { k: Some(2) }),
     ];
 
     // Prepare a vector of random indices for access tests.
@@ -97,9 +94,7 @@ fn benchmark_access(c: &mut Criterion) {
                 Distribution::UniformHigh | Distribution::ZetaImplied
             ) && matches!(
                 codec_spec,
-                VariableCodecSpec::Unary
-                    | VariableCodecSpec::Rice { .. }
-                    | VariableCodecSpec::Golomb { .. }
+                Codec::Unary | Codec::Rice { .. } | Codec::Golomb { .. }
             ) {
                 println!(
                     "\n- Skipping codec: {} for {} distribution",

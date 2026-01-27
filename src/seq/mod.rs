@@ -88,7 +88,7 @@
 //! ## Custom Codec
 //!
 //! ```
-//! use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
+//! use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
 //!
 //! let sequences: Vec<Vec<u64>> = vec![
 //!     vec![1, 1, 1, 2, 3],
@@ -96,7 +96,7 @@
 //! ];
 //!
 //! let vec: LESeqVec<u64> = SeqVec::builder()
-//!     .codec(VariableCodecSpec::Zeta { k: Some(3) })
+//!     .codec(Codec::Zeta { k: Some(3) })
 //!     .build(&sequences)
 //!     .unwrap();
 //! ```
@@ -121,7 +121,11 @@ pub use reader::SeqVecReader;
 pub use slice::SeqVecSlice;
 
 // Re-export codec spec for convenience.
-pub use crate::variable::codec::VariableCodecSpec;
+pub use crate::variable::codec::Codec;
+
+// Re-export deprecated alias for backward compatibility.
+#[allow(deprecated)]
+pub use crate::variable::VariableCodecSpec;
 
 use crate::common::codec_reader::CodecReader;
 use crate::fixed::{Error as FixedVecError, FixedVec};
@@ -450,7 +454,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
 impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// Creates a [`SeqVec`] from a slice of slices using default settings.
     ///
-    /// This method uses [`VariableCodecSpec::Auto`] to select an optimal codec
+    /// This method uses [`Codec::Auto`] to select an optimal codec
     /// based on the data distribution.
     ///
     /// # Errors
@@ -472,7 +476,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
         SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
     {
         Self::builder()
-            .codec(VariableCodecSpec::Auto)
+            .codec(Codec::Auto)
             .build(sequences)
     }
 

@@ -126,7 +126,7 @@
 //! - [`VarVec`]: The core compressed vector.
 //! - [`VarVecBuilder`]: The primary tool for constructing an [`VarVec`] with
 //!   custom compression codecs and sampling rates.
-//! - [`VariableCodecSpec`]: An enum to specify the compression codec.
+//! - [`Codec`]: An enum to specify the compression codec.
 //! - [`VarVecReader`]: A reusable, stateless reader for efficient random access.
 //! - [`VarVecSeqReader`]: A stateful reader optimized for sequential or localized access patterns.
 //! - [`VarVecSlice`]: An immutable, zero-copy view over a portion of the vector.
@@ -171,13 +171,13 @@
 //! sampling rate of `k=8` and use the `Zeta` code with `k=3`.
 //!
 //! ```
-//! use compressed_intvec::variable::{VarVec, UVarVec, VariableCodecSpec};
+//! use compressed_intvec::variable::{VarVec, UVarVec, Codec};
 //!
 //! let data: Vec<u64> = (0..100).map(|i| i * i).collect();
 //!
 //! let vec: UVarVec<u64> = VarVec::builder()
 //!     .k(8) // Set sampling rate
-//!     .codec(VariableCodecSpec::Zeta { k: Some(3) }) // Set compression codec
+//!     .codec(Codec::Zeta { k: Some(3) }) // Set compression codec
 //!     .build(&data)
 //!     .unwrap();
 //!
@@ -205,7 +205,7 @@
 //! If your application creates many small [`VarVec`]s or accesses them frequently,
 //! the repeated cost of analysis can become a performance
 //! bottleneck. In such scenarios, it is better to explicitly specify a codec
-//! (e.g., [`VariableCodecSpec::Gamma`] or [`VariableCodecSpec::Delta`]) that is known
+//! (e.g., [`Gamma`](Codec::Gamma) or [`Delta`](Codec::Delta)) that is known
 //! to be a good general-purpose choice for your data.
 //!
 //! ```
@@ -237,6 +237,7 @@
 //! | `IntVecIntoIter` | `VarVecIntoIter` |
 //! | `IntVecSliceIter` | `VarVecSliceIter` |
 //! | `IntVecError` | `VarVecError` |
+//! | `VariableCodecSpec` | `Codec` |
 //! | `UIntVec` | `UVarVec` |
 //! | `SIntVec` | `SVarVec` |
 //! | `BEIntVec` | `BEVarVec` |
@@ -263,7 +264,7 @@ pub mod serde;
 pub mod slice;
 pub mod traits;
 
-pub use self::{codec::VariableCodecSpec, traits::Storable};
+pub use self::{codec::Codec, traits::Storable};
 use crate::fixed::{Error as FixedVecError, FixedVec};
 use dsi_bitstream::{
     codes::params::DefaultReadParams,
@@ -654,7 +655,7 @@ impl<T: Storable + 'static, E: Endianness> VarVec<T, E, Vec<u64>> {
     {
         Self::builder()
             .k(16)
-            .codec(VariableCodecSpec::Auto)
+            .codec(Codec::Auto)
             .build(slice)
     }
 }
@@ -1309,6 +1310,11 @@ pub type BESIntVec = BESVarVec;
     note = "renamed to `LESVarVec`; use `LESVarVec` instead"
 )]
 pub type LESIntVec = LESVarVec;
+
+/// Deprecated alias for [`Codec`]. Use [`Codec`] instead.
+#[deprecated(since = "0.6.0", note = "renamed to `Codec`; use `Codec` instead")]
+#[allow(deprecated)]
+pub use self::codec::VariableCodecSpec;
 
 // Deprecated internal type aliases
 /// Deprecated alias for [`VarVecBitReader`]. Use [`VarVecBitReader`] instead.

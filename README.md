@@ -81,7 +81,7 @@ let skewed_data: &[u64] = &[5, 8, 13, 1000, 7, 6, 10_000, 10, 2, 3];
 
 // The builder can automatically select the best compression codec.
 let varvec: LEVarVec = VarVec::builder()
-    .codec(VariableCodecSpec::Auto)
+    .codec(Codec::Auto)
     .build(skewed_data)
     .unwrap();
 
@@ -106,7 +106,7 @@ let sequences: &[&[u32]] = &[
 // not stored, so length queries require decoding.
 // Use `store_lengths(true)` when you frequently need O(1) length queries; it stores per-sequence lengths at a small additional memory cost.
 let vec: LESeqVec<u32> = SeqVec::builder()
-    .codec(VariableCodecSpec::Auto)
+    .codec(Codec::Auto)
     .store_lengths(false)
     .build(sequences)
     .unwrap();
@@ -134,7 +134,7 @@ for (idx, seq_iter) in vec.iter().enumerate() {
 [`VarVec::builder`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html#method.builder
 [`UFixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/type.UFixedVec.html
 [`LEVarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/type.LEVarVec.html
-[`VariableCodecSpec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.VariableCodecSpec.html#variant.Auto
+[`Codec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.Codec.html#variant.Auto
 
 ## Atomic Operations with [`AtomicFixedVec`]
 
@@ -188,13 +188,13 @@ assert_eq!(final_value, NUM_THREADS * INCREMENTS_PER_THREAD);
 
 [`VarVec`] is the optimal choice when data is not uniformly distributed and minimizing memory usage is a priority. It uses variable-length codes to represent integers.
 
-The compression strategy is controlled by the [`VariableCodecSpec`] enum, passed to the builder.
+The compression strategy is controlled by the [`Codec`] enum, passed to the builder.
 
 ### Choosing the Right Codec
 
-For most use cases, the recommended strategy is [`VariableCodecSpec::Auto`], which analyzes the data to select the most space-efficient codec. However, you can also specify a codec explicitly based on your data characteristics.
+For most use cases, the recommended strategy is [`Codec::Auto`], which analyzes the data to select the most space-efficient codec. However, you can also specify a codec explicitly based on your data characteristics.
 
-| `VariableCodecSpec` Variant | Description & Encoding Strategy | Optimal Data Distribution |
+| `Codec` Variant | Description & Encoding Strategy | Optimal Data Distribution |
 | :--- | :--- | :--- |
 | **`Auto`** | **Recommended default.** Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
 | `Gamma` (γ) | A universal, parameter-free code. Encodes `n` using the unary code of log₂(*n*+1), followed by the remaining bits of `n`+1. | Implied distribution is ≈ 1/(2*x*²). Optimal for data skewed towards small non-negative integers. |
@@ -209,7 +209,7 @@ For most use cases, the recommended strategy is [`VariableCodecSpec::Auto`], whi
 
 [dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/enum.Codes.html
 
-### Automatic Selection with [`VariableCodecSpec::Auto`]
+### Automatic Selection with [`Codec::Auto`]
 
 The `Auto` strategy removes the guesswork from codec selection. During the build phase, it analyzes the input data and selects the codec that offers the best compression ratio. This introduces a one-time cost for the analysis at construction time. Use the `Auto` codec when you want to create a [`VarVec`] once and read it many times, as the amortized cost of the analysis is negligible compared to the space savings and performance of subsequent reads.
 
@@ -219,8 +219,8 @@ If you need to create multiple [`VarVec`] instances at run-time, consider using 
 
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`IntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.IntVec.html
-[`VariableCodecSpec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.VariableCodecSpec.html
-[`VariableCodecSpec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.VariableCodecSpec.html#variant.Auto
+[`Codec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.Codec.html
+[`Codec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.Codec.html#variant.Auto
 [dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/enum.Codes.html
 [`mem-dbg`]: https://docs.rs/mem-dbg/latest/mem_dbg/
 
@@ -242,7 +242,7 @@ use rand::Rng;
 
 let data: Vec<u64> = (0..10_000).collect();
 let varvec: LEVarVec = VarVec::builder()
-    .codec(VariableCodecSpec::Delta)
+    .codec(Codec::Delta)
     .k(32)
     .build(&data)
     .unwrap();
@@ -364,7 +364,7 @@ for (idx, seq_iter) in vec.iter().enumerate() {
 Like [`VarVec`], [`SeqVec`] supports the same compression codecs and can automatically select the best one:
 
 ```rust
-use compressed_intvec::seq::{SeqVec, LESeqVec, VariableCodecSpec};
+use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
 
 let sequences: Vec<Vec<u64>> = vec![
     vec![1, 1, 1, 2, 3],
@@ -372,7 +372,7 @@ let sequences: Vec<Vec<u64>> = vec![
 ];
 
 let vec: LESeqVec<u64> = SeqVec::builder()
-    .codec(VariableCodecSpec::Zeta { k: Some(3) })
+    .codec(Codec::Zeta { k: Some(3) })
     .build(&sequences)
     .unwrap();
 
@@ -421,7 +421,7 @@ fn main() {
 
     // Create a VarVec with Gamma encoding.
     let gamma_varvec = LEVarVec::builder()
-        .codec(VariableCodecSpec::Gamma)
+        .codec(Codec::Gamma)
         .build(&data)
         .unwrap();
 
@@ -430,7 +430,7 @@ fn main() {
 
     // Let the library analyze the data and choose the best codec.
     let auto_varvec = LEVarVec::builder()
-        .codec(VariableCodecSpec::Auto)
+        .codec(Codec::Auto)
         .build(&data)
         .unwrap();
 

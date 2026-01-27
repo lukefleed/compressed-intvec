@@ -15,9 +15,9 @@
 
 #![cfg(feature = "parallel")]
 
-use compressed_intvec::seq::{LESeqVec, SeqVec, VariableCodecSpec};
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use compressed_intvec::seq::{Codec, LESeqVec, SeqVec};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use rayon::prelude::*;
 use std::time::Duration;
 
@@ -88,7 +88,7 @@ fn benchmark_iter_vs_par_iter(c: &mut Criterion) {
         let total_elements = count_total_elements(&sequences);
 
         let seqvec: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .build(&sequences)
             .expect("Failed to build SeqVec");
 
@@ -174,7 +174,7 @@ fn benchmark_par_for_each_vs_par_iter(c: &mut Criterion) {
         let total_elements = count_total_elements(&sequences);
 
         let seqvec: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .build(&sequences)
             .expect("Failed to build SeqVec");
 
@@ -252,7 +252,7 @@ fn benchmark_par_for_each_operations(c: &mut Criterion) {
     let total_elements = count_total_elements(&sequences);
 
     let seqvec: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&sequences)
         .expect("Failed to build SeqVec");
 
@@ -314,7 +314,7 @@ fn benchmark_par_decode_many_scaling(c: &mut Criterion) {
     let sequences = generate_power_law_sequences(&mut rng, NUM_SEQUENCES);
 
     let seqvec: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&sequences)
         .expect("Failed to build SeqVec");
 
@@ -372,7 +372,7 @@ fn benchmark_par_for_each_many_scaling(c: &mut Criterion) {
     let sequences = generate_power_law_sequences(&mut rng, NUM_SEQUENCES);
 
     let seqvec: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&sequences)
         .expect("Failed to build SeqVec");
 
@@ -444,7 +444,7 @@ fn benchmark_into_vecs(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     SeqVec::builder()
-                        .codec(VariableCodecSpec::Delta)
+                        .codec(Codec::Delta)
                         .build(&sequences)
                         .expect("Failed to build SeqVec")
                 },
@@ -461,7 +461,7 @@ fn benchmark_into_vecs(c: &mut Criterion) {
             b.iter_batched(
                 || {
                     SeqVec::builder()
-                        .codec(VariableCodecSpec::Delta)
+                        .codec(Codec::Delta)
                         .build(&sequences)
                         .expect("Failed to build SeqVec")
                 },
@@ -495,7 +495,7 @@ fn benchmark_sequence_length_effect(c: &mut Criterion) {
         let total_elements = (NUM_SEQUENCES * seq_len) as u64;
 
         let seqvec: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .build(&sequences)
             .expect("Failed to build SeqVec");
 
@@ -553,14 +553,14 @@ fn benchmark_stored_lengths_effect(c: &mut Criterion) {
 
     // Build SeqVec without stored lengths
     let seqvec_no_lengths: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .store_lengths(false)
         .build(&sequences)
         .expect("Failed to build SeqVec without lengths");
 
     // Build SeqVec with stored lengths
     let seqvec_with_lengths: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .store_lengths(true)
         .build(&sequences)
         .expect("Failed to build SeqVec with lengths");

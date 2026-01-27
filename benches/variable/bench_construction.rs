@@ -1,7 +1,7 @@
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use dsi_bitstream::codes::len_rice;
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 /// Defines the data distributions for testing.
@@ -43,18 +43,18 @@ fn benchmark_construction(c: &mut Criterion) {
     let distributions = [Distribution::UniformLow, Distribution::RiceImplied];
 
     let codecs_to_test = [
-        ("Auto", VariableCodecSpec::Auto),
-        ("Gamma", VariableCodecSpec::Gamma),
-        ("Delta", VariableCodecSpec::Delta),
-        ("Unary", VariableCodecSpec::Unary),
-        ("Rice_Auto", VariableCodecSpec::Rice { log2_b: None }),
-        ("Zeta_Auto", VariableCodecSpec::Zeta { k: None }),
-        ("Omega", VariableCodecSpec::Omega),
-        ("VByteLe", VariableCodecSpec::VByteLe),
-        ("VByteBe", VariableCodecSpec::VByteBe),
-        ("Pi", VariableCodecSpec::Pi { k: None }),
-        ("Golomb_Auto", VariableCodecSpec::Golomb { b: None }),
-        ("ExpGolomb", VariableCodecSpec::ExpGolomb { k: None }),
+        ("Auto", Codec::Auto),
+        ("Gamma", Codec::Gamma),
+        ("Delta", Codec::Delta),
+        ("Unary", Codec::Unary),
+        ("Rice_Auto", Codec::Rice { log2_b: None }),
+        ("Zeta_Auto", Codec::Zeta { k: None }),
+        ("Omega", Codec::Omega),
+        ("VByteLe", Codec::VByteLe),
+        ("VByteBe", Codec::VByteBe),
+        ("Pi", Codec::Pi { k: None }),
+        ("Golomb_Auto", Codec::Golomb { b: None }),
+        ("ExpGolomb", Codec::ExpGolomb { k: None }),
     ];
 
     for distribution in distributions {
@@ -65,9 +65,7 @@ fn benchmark_construction(c: &mut Criterion) {
 
         for (spec_name, codec_spec) in codecs_to_test {
             // Skip Unary codec for RiceImplied distribution as it's too slow
-            if distribution == Distribution::RiceImplied
-                && matches!(codec_spec, VariableCodecSpec::Unary)
-            {
+            if distribution == Distribution::RiceImplied && matches!(codec_spec, Codec::Unary) {
                 println!(
                     "Skipping codec {} for {} distribution (impractical).",
                     spec_name,

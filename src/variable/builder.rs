@@ -11,7 +11,7 @@
 //!
 //! [`VarVec`]: crate::variable::VarVec
 
-use super::{codec, traits::Storable, VarVec, VarVecBitWriter, VarVecError, VariableCodecSpec};
+use super::{codec, codec::Codec, traits::Storable, VarVec, VarVecBitWriter, VarVecError};
 use crate::common::codec_writer::CodecWriter;
 use crate::fixed::{BitWidth, FixedVec};
 use dsi_bitstream::{
@@ -32,7 +32,7 @@ use std::marker::PhantomData;
 #[derive(Debug)]
 pub struct VarVecBuilder<T: Storable, E: Endianness> {
     k: usize,
-    codec_spec: VariableCodecSpec,
+    codec_spec: Codec,
     _markers: PhantomData<(T, E)>,
 }
 
@@ -40,11 +40,11 @@ impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
     /// Creates a new builder for an `VarVec` with default settings.
     ///
     /// By default, the sampling rate is `k=32` and the codec is chosen
-    /// automatically via [`VariableCodecSpec::Auto`].
+    /// automatically via [`Codec::Auto`].
     pub(super) fn new() -> Self {
         Self {
             k: 32,
-            codec_spec: VariableCodecSpec::Auto,
+            codec_spec: Codec::Auto,
             _markers: PhantomData,
         }
     }
@@ -67,9 +67,9 @@ impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
     /// Sets the compression codec to use.
     ///
     /// The choice of codec can significantly impact the compression ratio.
-    /// By default, this is [`VariableCodecSpec::Auto`], which analyzes the data
+    /// By default, this is [`Codec::Auto`], which analyzes the data
     /// to select the best codec.
-    pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
+    pub fn codec(mut self, codec_spec: Codec) -> Self {
         self.codec_spec = codec_spec;
         self
     }
@@ -86,13 +86,13 @@ impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{VarVec, SVarVec, VariableCodecSpec};
+    /// use compressed_intvec::variable::{VarVec, SVarVec, Codec};
     ///
     /// let data: &[i16] = &[-100, 0, 50, -2, 1000];
     ///
     /// let vec: SVarVec<i16> = VarVec::builder()
     ///     .k(2) // Smaller `k` for faster access
-    ///     .codec(VariableCodecSpec::Delta) // Explicitly choose Delta coding
+    ///     .codec(Codec::Delta) // Explicitly choose Delta coding
     ///     .build(data)
     ///     .unwrap();
     ///
@@ -172,28 +172,28 @@ impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
 ///
 /// # Limitations
 ///
-/// This builder does **not** support automatic codec selection (i.e., [`VariableCodecSpec::Auto`])
-/// or automatic parameter estimation for codecs like [`Rice`](VariableCodecSpec::Rice) or [`Golomb`](VariableCodecSpec::Golomb). Since the
+/// This builder does **not** support automatic codec selection (i.e., [`Codec::Auto`])
+/// or automatic parameter estimation for codecs like [`Rice`](Codec::Rice) or [`Golomb`](Codec::Golomb). Since the
 /// iterator is consumed in a single pass, the data cannot be pre-analyzed to
 /// determine its statistical properties. The user must specify a concrete codec.
 #[derive(Debug)]
 pub struct VarVecFromIterBuilder<T: Storable, E: Endianness, I: IntoIterator<Item = T>> {
     iter: I,
     k: usize,
-    codec_spec: VariableCodecSpec,
+    codec_spec: Codec,
     _markers: PhantomData<(T, E)>,
 }
 
 impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilder<T, E, I> {
     /// Creates a new builder from an iterator with default settings.
     ///
-    /// By default, the sampling rate is `k=32` and the codec is [`VariableCodecSpec::Gamma`],
+    /// By default, the sampling rate is `k=32` and the codec is [`Codec::Gamma`],
     /// as automatic selection is not possible.
     pub(super) fn new(iter: I) -> Self {
         Self {
             iter,
             k: 32,
-            codec_spec: VariableCodecSpec::Gamma,
+            codec_spec: Codec::Gamma,
             _markers: PhantomData,
         }
     }
@@ -209,8 +209,8 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilde
     /// # Errors
     ///
     /// The [`build`](Self::build) method will return an error if a codec specification that
-    /// requires data analysis is provided (e.g., [`VariableCodecSpec::Auto`]).
-    pub fn codec(mut self, codec_spec: VariableCodecSpec) -> Self {
+    /// requires data analysis is provided (e.g., [`Codec::Auto`]).
+    pub fn codec(mut self, codec_spec: Codec) -> Self {
         self.codec_spec = codec_spec;
         self
     }
@@ -227,14 +227,14 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilde
     /// # Examples
     ///
     /// ```
-    /// use compressed_intvec::variable::{VarVec, UVarVec, VariableCodecSpec};
+    /// use compressed_intvec::variable::{VarVec, UVarVec, Codec};
     ///
     /// // Create a vector from a range iterator
     /// let data_iter = 0..1000u32;
     ///
     /// let vec: UVarVec<u32> = VarVec::from_iter_builder(data_iter)
     ///     .k(64)
-    ///     .codec(VariableCodecSpec::Gamma) // Must be specified
+    ///     .codec(Codec::Gamma) // Must be specified
     ///     .build()
     ///     .unwrap();
     ///
@@ -247,10 +247,10 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilde
     {
         // Resolve the codec, but return an error if it requires data analysis.
         let resolved_code = match self.codec_spec {
-            VariableCodecSpec::Auto
-            | VariableCodecSpec::Rice { log2_b: None }
-            | VariableCodecSpec::Zeta { k: None }
-            | VariableCodecSpec::Golomb { b: None } => {
+            Codec::Auto
+            | Codec::Rice { log2_b: None }
+            | Codec::Zeta { k: None }
+            | Codec::Golomb { b: None } => {
                 return Err(VarVecError::InvalidParameters("Automatic parameter selection is not supported for iterator-based construction. Please provide fixed parameters.".to_string()));
             }
             // Pass an empty slice for validation; the parameters are explicit.

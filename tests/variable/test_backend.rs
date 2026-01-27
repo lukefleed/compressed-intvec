@@ -1,7 +1,7 @@
 use compressed_intvec::{
     // FIX: Rimosso l'import non utilizzato di FixedVecError
     prelude::*,
-    variable::{codec::VariableCodecSpec, BEVarVec, LEVarVec, VarVec},
+    variable::{BEVarVec, LEVarVec, VarVec, codec::Codec},
 };
 use dsi_bitstream::prelude::{BE, LE};
 
@@ -14,7 +14,7 @@ fn test_intvec_owned_to_borrowed_conversion() {
     // 1. Create an owned vector, which will be our source of truth.
     let owned_vec = LEVarVec::builder()
         .k(16)
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&data)
         .unwrap();
 
@@ -100,7 +100,7 @@ fn test_sintvec_owned_to_borrowed_conversion() {
     let data = generate_random_signed_vec(1000, 10000);
     let owned_svec: VarVec<i64, LE> = VarVec::builder()
         .k(16)
-        .codec(VariableCodecSpec::Auto)
+        .codec(Codec::Auto)
         .build(&data)
         .unwrap();
 

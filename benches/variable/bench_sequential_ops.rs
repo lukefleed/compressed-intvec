@@ -1,10 +1,10 @@
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
 };
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 #[cfg(feature = "parallel")]
@@ -68,17 +68,17 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
     ];
 
     let codecs_to_test = [
-        ("Gamma", VariableCodecSpec::Gamma),
-        ("Delta", VariableCodecSpec::Delta),
-        ("Unary", VariableCodecSpec::Unary),
-        ("Rice", VariableCodecSpec::Rice { log2_b: None }),
-        ("Zeta", VariableCodecSpec::Zeta { k: None }),
-        ("Omega", VariableCodecSpec::Omega),
-        ("VByteLe", VariableCodecSpec::VByteLe),
-        ("VByteBe", VariableCodecSpec::VByteBe),
-        ("Pi", VariableCodecSpec::Pi { k: Some(3) }),
-        ("Golomb", VariableCodecSpec::Golomb { b: Some(8) }),
-        ("ExpGolomb", VariableCodecSpec::ExpGolomb { k: Some(2) }),
+        ("Gamma", Codec::Gamma),
+        ("Delta", Codec::Delta),
+        ("Unary", Codec::Unary),
+        ("Rice", Codec::Rice { log2_b: None }),
+        ("Zeta", Codec::Zeta { k: None }),
+        ("Omega", Codec::Omega),
+        ("VByteLe", Codec::VByteLe),
+        ("VByteBe", Codec::VByteBe),
+        ("Pi", Codec::Pi { k: Some(3) }),
+        ("Golomb", Codec::Golomb { b: Some(8) }),
+        ("ExpGolomb", Codec::ExpGolomb { k: Some(2) }),
     ];
 
     for distribution in distributions {
@@ -109,11 +109,9 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
                 Distribution::UniformHigh | Distribution::ZetaImplied
             ) && matches!(
                 codec_spec,
-                VariableCodecSpec::Unary
-                    | VariableCodecSpec::Rice { .. }
-                    | VariableCodecSpec::Golomb { .. }
+                Codec::Unary | Codec::Rice { .. } | Codec::Golomb { .. }
             )) || (matches!(distribution, Distribution::RiceImplied)
-                && matches!(codec_spec, VariableCodecSpec::Unary))
+                && matches!(codec_spec, Codec::Unary))
             {
                 println!(
                     "Skipping codec {} for {} distribution (impractical).",

@@ -1,6 +1,6 @@
 //! Codec selection for variable-length integer compression.
 //!
-//! This module defines [`VariableCodecSpec`], an enum for controlling the
+//! This module defines [`Codec`], an enum for controlling the
 //! compression strategy of an [`VarVec`]. The choice of codec is a critical
 //! performance parameter, as its effectiveness depends on the statistical
 //! properties of the data being compressed.
@@ -15,7 +15,7 @@
 //! 1.  **Explicit Specification**: A specific codec and all its parameters are
 //!     provided. This is suitable when the data characteristics are known in
 //!     advance.
-//!     - Non-parametric examples: [`Gamma`](VariableCodecSpec::Gamma), [`Delta`](VariableCodecSpec::Delta).
+//!     - Non-parametric examples: [`Gamma`](Codec::Gamma), [`Delta`](Codec::Delta).
 //!     - Parametric example: `Zeta { k: Some(3) }`.
 //!
 //! ```
@@ -25,14 +25,14 @@
 //!
 //! // Explicitly specify a non-parametric codec
 //! let delta_vec: UVarVec<u32> = VarVec::builder()
-//!     .codec(VariableCodecSpec::Delta)
+//!     .codec(Codec::Delta)
 //!     .k(16)
 //!     .build(&data)
 //!     .unwrap();
 //!
 //! // Explicitly specify a parametric codec with a fixed parameter
 //! let zeta_vec: UVarVec<u32> = VarVec::builder()
-//!     .codec(VariableCodecSpec::Zeta { k: Some(3) })
+//!     .codec(Codec::Zeta { k: Some(3) })
 //!     .build(&data)
 //!     .unwrap();
 //! ```
@@ -50,7 +50,7 @@
 //!
 //! // Automatically select the best Rice parameter
 //! let rice_vec: UVarVec<u32> = VarVec::builder()
-//!     .codec(VariableCodecSpec::Rice { log2_b: None })
+//!     .codec(Codec::Rice { log2_b: None })
 //!     .build(&data)
 //!     .unwrap();
 //! ```
@@ -65,7 +65,7 @@
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //! // Automatically select the best codec and parameters for the data
 //! let auto_vec: UVarVec<u32> = VarVec::builder()
-//!    .codec(VariableCodecSpec::Auto)
+//!    .codec(Codec::Auto)
 //!    .build(&data)
 //!    .unwrap();
 //! ```
@@ -111,7 +111,7 @@ use dsi_bitstream::prelude::{Codes, CodesStats};
 /// automatically select suitable parameters by performing a full analysis of
 /// the data distribution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum VariableCodecSpec {
+pub enum Codec {
     /// Elias γ-coding. A simple, universal code that is effective for integers
     /// with a distribution skewed towards small values. It is the default codec
     /// for the iterator-based builder, which cannot perform data analysis.
@@ -193,7 +193,16 @@ pub enum VariableCodecSpec {
     Explicit(Codes),
 }
 
-impl VariableCodecSpec {
+/// Deprecated alias for [`Codec`]. Use [`Codec`] instead.
+///
+/// # Deprecation Notice
+///
+/// This type has been renamed to [`Codec`] for brevity and consistency.
+/// This alias will be removed in version 1.0.0.
+#[deprecated(since = "0.6.0", note = "renamed to `Codec`; use `Codec` instead")]
+pub type VariableCodecSpec = Codec;
+
+impl Codec {
     /// Returns `true` if this codec specification requires data analysis to resolve.
     ///
     /// Analysis is needed when parameters are not explicitly specified and must
@@ -202,17 +211,17 @@ impl VariableCodecSpec {
     pub(crate) fn requires_analysis(&self) -> bool {
         matches!(
             self,
-            VariableCodecSpec::Auto
-                | VariableCodecSpec::Rice { log2_b: None }
-                | VariableCodecSpec::Zeta { k: None }
-                | VariableCodecSpec::Golomb { b: None }
-                | VariableCodecSpec::Pi { k: None }
-                | VariableCodecSpec::ExpGolomb { k: None }
+            Codec::Auto
+                | Codec::Rice { log2_b: None }
+                | Codec::Zeta { k: None }
+                | Codec::Golomb { b: None }
+                | Codec::Pi { k: None }
+                | Codec::ExpGolomb { k: None }
         )
     }
 }
 
-/// Resolves a user-provided [`VariableCodecSpec`] into a concrete [`Codes`] variant.
+/// Resolves a user-provided [`Codec`] into a concrete [`Codes`] variant.
 ///
 /// This function translates the user's high-level request into a fully-parameterized,
 /// concrete [`Codes`] variant that can be used for compression.
@@ -220,34 +229,34 @@ impl VariableCodecSpec {
 /// If the `spec` includes requests for automatic parameter selection (e.g., `Auto`
 /// or `Zeta { k: None }`), this function analyzes the **entire** provided `input`
 /// data slice to determine the optimal settings.
-pub(crate) fn resolve_codec<U>(input: &[U], spec: VariableCodecSpec) -> Result<Codes, VarVecError>
+pub(crate) fn resolve_codec<U>(input: &[U], spec: Codec) -> Result<Codes, VarVecError>
 where
     U: Into<u64> + Copy,
 {
     match spec {
         // Parameter-free codecs: direct mapping, no data needed.
-        VariableCodecSpec::Gamma => Ok(Codes::Gamma),
-        VariableCodecSpec::Delta => Ok(Codes::Delta),
-        VariableCodecSpec::Unary => Ok(Codes::Unary),
-        VariableCodecSpec::Omega => Ok(Codes::Omega),
-        VariableCodecSpec::VByteLe => Ok(Codes::VByteLe),
-        VariableCodecSpec::VByteBe => Ok(Codes::VByteBe),
-        VariableCodecSpec::Explicit(codes) => Ok(codes),
+        Codec::Gamma => Ok(Codes::Gamma),
+        Codec::Delta => Ok(Codes::Delta),
+        Codec::Unary => Ok(Codes::Unary),
+        Codec::Omega => Ok(Codes::Omega),
+        Codec::VByteLe => Ok(Codes::VByteLe),
+        Codec::VByteBe => Ok(Codes::VByteBe),
+        Codec::Explicit(codes) => Ok(codes),
 
         // Codecs with explicit parameters: direct mapping.
-        VariableCodecSpec::Rice { log2_b: Some(p) } => Ok(Codes::Rice { log2_b: p as usize }),
-        VariableCodecSpec::Zeta { k: Some(p) } => Ok(Codes::Zeta { k: p as usize }),
-        VariableCodecSpec::Golomb { b: Some(p) } => Ok(Codes::Golomb { b: p as usize }),
-        VariableCodecSpec::Pi { k: Some(p) } => Ok(Codes::Pi { k: p as usize }),
-        VariableCodecSpec::ExpGolomb { k: Some(p) } => Ok(Codes::ExpGolomb { k: p as usize }),
+        Codec::Rice { log2_b: Some(p) } => Ok(Codes::Rice { log2_b: p as usize }),
+        Codec::Zeta { k: Some(p) } => Ok(Codes::Zeta { k: p as usize }),
+        Codec::Golomb { b: Some(p) } => Ok(Codes::Golomb { b: p as usize }),
+        Codec::Pi { k: Some(p) } => Ok(Codes::Pi { k: p as usize }),
+        Codec::ExpGolomb { k: Some(p) } => Ok(Codes::ExpGolomb { k: p as usize }),
 
         // Codecs requiring analysis: return error if no data provided.
-        VariableCodecSpec::Auto
-        | VariableCodecSpec::Rice { log2_b: None }
-        | VariableCodecSpec::Zeta { k: None }
-        | VariableCodecSpec::Golomb { b: None }
-        | VariableCodecSpec::Pi { k: None }
-        | VariableCodecSpec::ExpGolomb { k: None } => {
+        Codec::Auto
+        | Codec::Rice { log2_b: None }
+        | Codec::Zeta { k: None }
+        | Codec::Golomb { b: None }
+        | Codec::Pi { k: None }
+        | Codec::ExpGolomb { k: None } => {
             if input.is_empty() {
                 return Ok(Codes::Gamma); // Safe default only for analysis codecs
             }
@@ -264,11 +273,11 @@ where
 
             // Use the populated stats to resolve the codec specification.
             match spec {
-                VariableCodecSpec::Auto => {
+                Codec::Auto => {
                     let (best_code, _) = stats.best_code();
                     Ok(best_code)
                 }
-                VariableCodecSpec::Rice { log2_b: None } => {
+                Codec::Rice { log2_b: None } => {
                     let (best_param, _) = stats
                         .rice
                         .iter()
@@ -277,7 +286,7 @@ where
                         .unwrap_or((0, &0)); // Fallback to 0 if array is empty.
                     Ok(Codes::Rice { log2_b: best_param })
                 }
-                VariableCodecSpec::Zeta { k: None } => {
+                Codec::Zeta { k: None } => {
                     let (best_param, _) = stats
                         .zeta
                         .iter()
@@ -286,7 +295,7 @@ where
                         .unwrap_or((0, &0));
                     Ok(Codes::Zeta { k: best_param + 1 }) // Zeta params are 1-based.
                 }
-                VariableCodecSpec::Golomb { b: None } => {
+                Codec::Golomb { b: None } => {
                     let (best_param, _) = stats
                         .golomb
                         .iter()
@@ -295,7 +304,7 @@ where
                         .unwrap_or((0, &0));
                     Ok(Codes::Golomb { b: best_param + 1 }) // Golomb params are 1-based.
                 }
-                VariableCodecSpec::Pi { k: None } => {
+                Codec::Pi { k: None } => {
                     let (best_param, _) = stats
                         .pi
                         .iter()
@@ -304,7 +313,7 @@ where
                         .unwrap_or((0, &0));
                     Ok(Codes::Pi { k: best_param + 2 }) // Pi params are offset by 2.
                 }
-                VariableCodecSpec::ExpGolomb { k: None } => {
+                Codec::ExpGolomb { k: None } => {
                     let (best_param, _) = stats
                         .exp_golomb
                         .iter()
@@ -333,10 +342,7 @@ where
 ///
 /// * `spec` - The codec specification requesting analysis (Auto or a codec with
 ///   None parameters).
-pub(crate) fn resolve_codec_from_iter<I>(
-    iter: I,
-    spec: VariableCodecSpec,
-) -> Result<Codes, VarVecError>
+pub(crate) fn resolve_codec_from_iter<I>(iter: I, spec: Codec) -> Result<Codes, VarVecError>
 where
     I: Iterator<Item = u64>,
 {
@@ -359,11 +365,11 @@ where
 
     // Use the accumulated statistics to determine the best codec.
     match spec {
-        VariableCodecSpec::Auto => {
+        Codec::Auto => {
             let (best_code, _) = stats.best_code();
             Ok(best_code)
         }
-        VariableCodecSpec::Rice { log2_b: None } => {
+        Codec::Rice { log2_b: None } => {
             let (best_param, _) = stats
                 .rice
                 .iter()
@@ -372,7 +378,7 @@ where
                 .unwrap_or((0, &0));
             Ok(Codes::Rice { log2_b: best_param })
         }
-        VariableCodecSpec::Zeta { k: None } => {
+        Codec::Zeta { k: None } => {
             let (best_param, _) = stats
                 .zeta
                 .iter()
@@ -381,7 +387,7 @@ where
                 .unwrap_or((0, &0));
             Ok(Codes::Zeta { k: best_param + 1 })
         }
-        VariableCodecSpec::Golomb { b: None } => {
+        Codec::Golomb { b: None } => {
             let (best_param, _) = stats
                 .golomb
                 .iter()
@@ -390,7 +396,7 @@ where
                 .unwrap_or((0, &0));
             Ok(Codes::Golomb { b: best_param + 1 })
         }
-        VariableCodecSpec::Pi { k: None } => {
+        Codec::Pi { k: None } => {
             let (best_param, _) = stats
                 .pi
                 .iter()
@@ -399,7 +405,7 @@ where
                 .unwrap_or((0, &0));
             Ok(Codes::Pi { k: best_param + 2 })
         }
-        VariableCodecSpec::ExpGolomb { k: None } => {
+        Codec::ExpGolomb { k: None } => {
             let (best_param, _) = stats
                 .exp_golomb
                 .iter()

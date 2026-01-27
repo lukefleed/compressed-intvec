@@ -8,9 +8,9 @@
 // 3. Codec read performance: Gamma vs Delta vs Zeta3
 // 4. store_lengths optimization: bit-position termination vs count-based termination
 
-use compressed_intvec::seq::{LESeqVec, SeqVec, VariableCodecSpec};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use compressed_intvec::seq::{Codec, LESeqVec, SeqVec};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 const NUM_SEQUENCES: usize = 50_000;
@@ -77,7 +77,7 @@ fn benchmark_api_methods(c: &mut Criterion) {
         let sequences = generate_fixed_length_sequences(&mut rng, NUM_SEQUENCES, seq_len);
 
         let seqvec: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .build(&sequences)
             .expect("Failed to build SeqVec");
 
@@ -154,7 +154,7 @@ fn benchmark_buffer_reuse(c: &mut Criterion) {
     let sequences = generate_fixed_length_sequences(&mut rng, NUM_SEQUENCES, seq_len);
 
     let seqvec: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&sequences)
         .expect("Failed to build SeqVec");
 
@@ -206,9 +206,9 @@ fn benchmark_codec_read(c: &mut Criterion) {
     let total_elements = (NUM_ACCESSES * seq_len) as u64;
 
     let codecs = [
-        ("Gamma", VariableCodecSpec::Gamma),
-        ("Delta", VariableCodecSpec::Delta),
-        ("Zeta3", VariableCodecSpec::Zeta { k: Some(3) }),
+        ("Gamma", Codec::Gamma),
+        ("Delta", Codec::Delta),
+        ("Zeta3", Codec::Zeta { k: Some(3) }),
     ];
 
     let mut group = c.benchmark_group("SeqCodecRead");
@@ -268,13 +268,13 @@ fn benchmark_store_lengths(c: &mut Criterion) {
         let total_elements = (NUM_ACCESSES * seq_len) as u64;
 
         let seqvec_without: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .store_lengths(false)
             .build(&sequences)
             .expect("Failed to build SeqVec");
 
         let seqvec_with: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .store_lengths(true)
             .build(&sequences)
             .expect("Failed to build SeqVec");
@@ -349,13 +349,13 @@ fn benchmark_store_lengths(c: &mut Criterion) {
         let total_elements: u64 = indices.iter().map(|&i| sequences[i].len() as u64).sum();
 
         let seqvec_without: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .store_lengths(false)
             .build(&sequences)
             .expect("Failed to build SeqVec");
 
         let seqvec_with: LESeqVec<u32> = SeqVec::builder()
-            .codec(VariableCodecSpec::Delta)
+            .codec(Codec::Delta)
             .store_lengths(true)
             .build(&sequences)
             .expect("Failed to build SeqVec");

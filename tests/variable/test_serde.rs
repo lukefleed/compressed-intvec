@@ -105,61 +105,49 @@ macro_rules! test_sintvec_serde_roundtrip {
 }
 
 // --- VarVec Test Suite ---
-test_intvec_serde_roundtrip!(
-    test_intvec_empty_le,
-    LE,
-    Vec::<u64>::new(),
-    32,
-    VariableCodecSpec::Auto
-);
-test_intvec_serde_roundtrip!(
-    test_intvec_empty_be,
-    BE,
-    Vec::<u64>::new(),
-    32,
-    VariableCodecSpec::Auto
-);
+test_intvec_serde_roundtrip!(test_intvec_empty_le, LE, Vec::<u64>::new(), 32, Codec::Auto);
+test_intvec_serde_roundtrip!(test_intvec_empty_be, BE, Vec::<u64>::new(), 32, Codec::Auto);
 test_intvec_serde_roundtrip!(
     test_intvec_uniform_small_auto_le,
     LE,
     generate_random_vec(1000, 100),
     32,
-    VariableCodecSpec::Auto
+    Codec::Auto
 );
 test_intvec_serde_roundtrip!(
     test_intvec_uniform_large_auto_be,
     BE,
     generate_random_vec(1000, 1_000_000),
     32,
-    VariableCodecSpec::Auto
+    Codec::Auto
 );
 test_intvec_serde_roundtrip!(
     test_intvec_gamma_explicit_le,
     LE,
     generate_random_vec(500, 2000),
     16,
-    VariableCodecSpec::Gamma
+    Codec::Gamma
 );
 test_intvec_serde_roundtrip!(
     test_intvec_vbyte_le,
     LE,
     generate_random_vec(500, 5000),
     32,
-    VariableCodecSpec::VByteLe
+    Codec::VByteLe
 );
 test_intvec_serde_roundtrip!(
     test_intvec_omega_be,
     BE,
     generate_random_vec(500, 5000),
     32,
-    VariableCodecSpec::Omega
+    Codec::Omega
 );
 test_intvec_serde_roundtrip!(
     test_intvec_golomb_le,
     LE,
     generate_random_vec(500, 5000),
     32,
-    VariableCodecSpec::Golomb { b: Some(10) }
+    Codec::Golomb { b: Some(10) }
 );
 
 // --- SVarVec Test Suite ---
@@ -169,19 +157,19 @@ test_sintvec_serde_roundtrip!(
     Vec::<i64>::new(),
     16,
     // FIX: Auto codec is now supported for signed integers as well.
-    VariableCodecSpec::Auto
+    Codec::Auto
 );
 test_sintvec_serde_roundtrip!(
     test_sintvec_mixed_values_be,
     BE,
     generate_random_signed_vec(1000, 1000),
     32,
-    VariableCodecSpec::Delta
+    Codec::Delta
 );
 test_sintvec_serde_roundtrip!(
     test_sintvec_vbyte_be,
     BE,
     generate_random_signed_vec(1000, 10_000),
     32,
-    VariableCodecSpec::VByteBe
+    Codec::VByteBe
 );

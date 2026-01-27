@@ -4,9 +4,9 @@
 // (sequential, clustered, random) to measure the impact of spatial locality
 // on compressed sequence decoding performance.
 
-use compressed_intvec::seq::{LESeqVec, SeqVec, VariableCodecSpec};
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
+use compressed_intvec::seq::{Codec, LESeqVec, SeqVec};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use rand::{Rng, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 use rand_distr::{Distribution as RandDistribution, Uniform};
 use std::time::Duration;
 
@@ -95,7 +95,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
     let sequences = generate_sequences(&mut rng, NUM_SEQUENCES);
 
     let seqvec: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&sequences)
         .expect("Failed to build SeqVec");
 
@@ -152,7 +152,7 @@ fn benchmark_sorted_batch(c: &mut Criterion) {
     let sequences = generate_sequences(&mut rng, NUM_SEQUENCES);
 
     let seqvec: LESeqVec<u32> = SeqVec::builder()
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&sequences)
         .expect("Failed to build SeqVec");
 

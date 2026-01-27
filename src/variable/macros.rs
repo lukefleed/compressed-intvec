@@ -13,7 +13,7 @@
 /// alias for `VarVec<u64, LE>`. It uses a set of reasonable defaults for its
 /// build parameters:
 ///
-/// - **Codec**: [`VariableCodecSpec::Auto`] is used to automatically select the
+/// - **Codec**: [`Codec::Auto`] is used to automatically select the
 ///   most space-efficient codec for the provided data.
 /// - **Sampling Rate (`k`)**: A default value of `16` is used, offering a
 ///   good balance between random access speed and memory overhead.
@@ -50,7 +50,7 @@
 /// ```
 ///
 /// [`LEVarVec`]: crate::variable::LEVarVec
-/// [`VariableCodecSpec::Auto`]: crate::variable::VariableCodecSpec::Auto
+/// [`Codec::Auto`]: crate::variable::Codec::Auto
 #[macro_export]
 macro_rules! int_vec {
     () => {
@@ -58,7 +58,7 @@ macro_rules! int_vec {
     };
     ($($elem:expr),* $(,)?) => {
         $crate::variable::VarVec::<_, dsi_bitstream::prelude::LE>::builder()
-            .codec($crate::variable::VariableCodecSpec::Auto)
+            .codec($crate::variable::Codec::Auto)
             .k(16)
             .build(&[$($elem),*])
             .unwrap()
@@ -68,7 +68,7 @@ macro_rules! int_vec {
             let mut v = ::std::vec::Vec::with_capacity($len);
             v.resize($len, $elem);
             $crate::variable::VarVec::<_, dsi_bitstream::prelude::LE>::builder()
-                .codec($crate::variable::VariableCodecSpec::Auto)
+                .codec($crate::variable::Codec::Auto)
                 .k(16)
                 .build(&v)
                 .unwrap()
@@ -81,7 +81,7 @@ macro_rules! int_vec {
 /// `sint_vec!` allows for concise initialization of a [`LESVarVec`], which is an
 /// alias for `VarVec<i64, LE>`. It uses a set of reasonable defaults:
 ///
-/// - **Codec**: [`VariableCodecSpec::Auto`] is used to automatically select the
+/// - **Codec**: [`Codec::Auto`] is used to automatically select the
 ///   best codec based on the data's properties (via zig-zag encoding).
 /// - **Sampling Rate (`k`)**: A default value of `16` is used.
 ///
@@ -121,7 +121,7 @@ macro_rules! int_vec {
 /// ```
 ///
 /// [`LESVarVec`]: crate::variable::LESVarVec
-/// [`VariableCodecSpec::Auto`]: crate::variable::VariableCodecSpec::Auto
+/// [`Codec::Auto`]: crate::variable::Codec::Auto
 #[macro_export]
 macro_rules! sint_vec {
     () => {
@@ -129,7 +129,7 @@ macro_rules! sint_vec {
     };
     ($($elem:expr),* $(,)?) => {
         $crate::variable::VarVec::<i64, dsi_bitstream::prelude::LE>::builder()
-            .codec($crate::variable::VariableCodecSpec::Auto)
+            .codec($crate::variable::Codec::Auto)
             .k(16)
             .build(&[$($elem as i64),*])
             .unwrap()
@@ -139,7 +139,7 @@ macro_rules! sint_vec {
             let mut v = ::std::vec::Vec::with_capacity($len);
             v.resize($len, $elem as i64);
             $crate::variable::VarVec::<i64, dsi_bitstream::prelude::LE>::builder()
-                .codec($crate::variable::VariableCodecSpec::Auto)
+                .codec($crate::variable::Codec::Auto)
                 .k(16)
                 .build(&v)
                 .unwrap()

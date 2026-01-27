@@ -1,10 +1,10 @@
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
 };
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector as SuccinctIntVector};
 use sux::prelude::{BitFieldSlice, BitFieldVec};
@@ -74,13 +74,13 @@ fn benchmark_random_access(c: &mut Criterion) {
 
     // Codecs for VarVec (k-dependent).
     let variable_codecs = [
-        ("Gamma", VariableCodecSpec::Gamma),
-        ("Delta", VariableCodecSpec::Delta),
-        ("Unary", VariableCodecSpec::Unary),
-        ("Rice", VariableCodecSpec::Rice { log2_b: None }),
-        ("Zeta", VariableCodecSpec::Zeta { k: None }),
-        ("Omega", VariableCodecSpec::Omega),
-        ("VByteLe", VariableCodecSpec::VByteLe),
+        ("Gamma", Codec::Gamma),
+        ("Delta", Codec::Delta),
+        ("Unary", Codec::Unary),
+        ("Rice", Codec::Rice { log2_b: None }),
+        ("Zeta", Codec::Zeta { k: None }),
+        ("Omega", Codec::Omega),
+        ("VByteLe", Codec::VByteLe),
     ];
 
     // Prepare a vector of random indices for access tests.
@@ -152,10 +152,8 @@ fn benchmark_random_access(c: &mut Criterion) {
             if matches!(
                 distribution,
                 Distribution::UniformHigh | Distribution::ZetaImplied
-            ) && matches!(
-                codec_spec,
-                VariableCodecSpec::Unary | VariableCodecSpec::Rice { .. }
-            ) {
+            ) && matches!(codec_spec, Codec::Unary | Codec::Rice { .. })
+            {
                 continue;
             }
 

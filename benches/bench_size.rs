@@ -9,13 +9,13 @@
 //! A `size_results.csv` file is generated in the `bench_results/` directory.
 
 use compressed_intvec::prelude::*;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
 };
 use mem_dbg::{DbgFlags, MemDbg, MemSize, SizeFlags};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::{
     collections::HashSet,
     fmt::{Display, Formatter},
@@ -104,16 +104,16 @@ fn run_space_measurements() {
             Distribution::ZetaImplied,
         ];
         let dsi_codecs_to_test = [
-            ("Gamma", VariableCodecSpec::Gamma),
-            ("Delta", VariableCodecSpec::Delta),
-            ("Unary", VariableCodecSpec::Unary),
-            ("Rice_auto", VariableCodecSpec::Rice { log2_b: None }),
-            ("Zeta_auto", VariableCodecSpec::Zeta { k: None }),
-            ("Omega", VariableCodecSpec::Omega),
-            ("VByteLe", VariableCodecSpec::VByteLe),
-            ("VByteBe", VariableCodecSpec::VByteBe),
-            ("Pi", VariableCodecSpec::Pi { k: None }),
-            ("ExpGolomb", VariableCodecSpec::ExpGolomb { k: None }),
+            ("Gamma", Codec::Gamma),
+            ("Delta", Codec::Delta),
+            ("Unary", Codec::Unary),
+            ("Rice_auto", Codec::Rice { log2_b: None }),
+            ("Zeta_auto", Codec::Zeta { k: None }),
+            ("Omega", Codec::Omega),
+            ("VByteLe", Codec::VByteLe),
+            ("VByteBe", Codec::VByteBe),
+            ("Pi", Codec::Pi { k: None }),
+            ("ExpGolomb", Codec::ExpGolomb { k: None }),
         ];
 
         let mut all_results: Vec<BenchResult> = Vec::new();
@@ -164,11 +164,9 @@ fn run_space_measurements() {
                 if (matches!(
                     distribution,
                     Distribution::UniformHigh | Distribution::ZetaImplied
-                ) && matches!(
-                    codec_spec,
-                    VariableCodecSpec::Unary | VariableCodecSpec::Rice { .. }
-                )) || (matches!(distribution, Distribution::UniformLow)
-                    && matches!(codec_spec, VariableCodecSpec::Unary))
+                ) && matches!(codec_spec, Codec::Unary | Codec::Rice { .. }))
+                    || (matches!(distribution, Distribution::UniformLow)
+                        && matches!(codec_spec, Codec::Unary))
                 {
                     println!("- Skipping {} for distribution {}", spec_name, dist_name);
                     continue;

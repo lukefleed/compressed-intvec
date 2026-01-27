@@ -1,6 +1,6 @@
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use rand::{Rng, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 use rand_distr::{Distribution as RandDistribution, Uniform};
 use std::time::Duration;
 
@@ -100,7 +100,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
     let data = generate_random_vec(VECTOR_SIZE, 1 << 20);
     let intvec = LEVarVec::builder()
         .k(K_VALUE)
-        .codec(VariableCodecSpec::Delta)
+        .codec(Codec::Delta)
         .build(&data)
         .expect("Failed to build VarVec");
 

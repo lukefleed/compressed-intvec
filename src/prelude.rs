@@ -18,7 +18,7 @@ pub use crate::fixed::{
 // --- Variable-Width Vector Prelude ---
 pub use crate::variable::{
     builder::{VarVecBuilder, VarVecFromIterBuilder},
-    codec::VariableCodecSpec,
+    codec::Codec,
     iter::{VarVecIntoIter, VarVecIter},
     reader::VarVecReader,
     seq_reader::VarVecSeqReader,
@@ -32,7 +32,7 @@ pub use crate::variable::{
 pub use crate::variable::{
     BEIntVec, BESIntVec, IntVec, IntVecBuilder, IntVecError, IntVecFromIterBuilder, IntVecIntoIter,
     IntVecIter, IntVecReader, IntVecSeqReader, IntVecSlice, IntVecSliceIter, LEIntVec, LESIntVec,
-    SIntVec, UIntVec,
+    SIntVec, UIntVec, VariableCodecSpec,
 };
 
 // --- Sequence Vector Prelude ---
