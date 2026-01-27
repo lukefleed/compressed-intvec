@@ -626,13 +626,12 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
             ));
         }
 
-        if let Some(lengths) = &seq_lengths {
-            if lengths.len() + 1 != bit_offsets_len {
+        if let Some(lengths) = &seq_lengths
+            && lengths.len() + 1 != bit_offsets_len {
                 return Err(SeqVecError::InvalidParameters(
                     "seq_lengths length must match number of sequences".to_string(),
                 ));
             }
-        }
 
         let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
             bit_offsets_data,
