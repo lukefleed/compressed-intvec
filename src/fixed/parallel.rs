@@ -23,8 +23,6 @@
 //!
 //! [Rayon]: https://docs.rs/rayon/latest/rayon/
 
-#![cfg(feature = "parallel")]
-
 use crate::fixed::{
     Error as FixedVecError, FixedVec,
     traits::{Storable, Word},

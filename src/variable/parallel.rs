@@ -8,7 +8,7 @@
 //! [Rayon]: https://github.com/rayon-rs/rayon
 //! [`VarVec`]: crate::variable::VarVec
 
-use super::{traits::Storable, VarVec, VarVecBitReader, VarVecError};
+use super::{VarVec, VarVecBitReader, VarVecError, traits::Storable};
 use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
@@ -17,7 +17,6 @@ use rayon::prelude::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
 };
 
-#[cfg(feature = "parallel")]
 impl<T, E, B> VarVec<T, E, B>
 where
     T: Storable + Send + Sync,

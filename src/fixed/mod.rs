@@ -126,6 +126,7 @@ pub mod macros;
 pub mod builder;
 pub mod iter;
 pub mod iter_mut;
+#[cfg(feature = "parallel")]
 pub mod parallel;
 pub mod proxy;
 pub mod slice;
@@ -561,12 +562,14 @@ where
         if E::IS_LITTLE {
             // Fast path: the element is fully contained within a single word.
             if bit_offset + self.bit_width <= bits_per_word {
-                final_word = unsafe { (*limbs.get_unchecked(word_index) >> bit_offset) & self.mask };
+                final_word =
+                    unsafe { (*limbs.get_unchecked(word_index) >> bit_offset) & self.mask };
             } else {
                 // Slow path: the element spans two words.
                 // Read the low part from the first word and the high part from the next.
                 let low = unsafe { *limbs.get_unchecked(word_index) >> bit_offset };
-                let high = unsafe { *limbs.get_unchecked(word_index + 1) << (bits_per_word - bit_offset) };
+                let high =
+                    unsafe { *limbs.get_unchecked(word_index + 1) << (bits_per_word - bit_offset) };
                 final_word = (low | high) & self.mask;
             }
         } else {
@@ -691,7 +694,8 @@ where
 
             // In debug builds, assert that this function is only called for `bit_width`
             // values where a single unaligned read is guaranteed to be sufficient.
-            debug_assert!({
+            debug_assert!(
+                {
                     let is_safe_contiguous = bit_width <= bits_per_word.saturating_sub(6); // e.g., <= 58 for u64
                     let is_safe_case_60 = bit_width == bits_per_word.saturating_sub(4); // e.g., == 60 for u64
                     is_safe_contiguous || is_safe_case_60
@@ -865,7 +869,7 @@ where
 
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         {
-            use std::arch::x86_64::{_mm_prefetch, _MM_HINT_T0};
+            use std::arch::x86_64::{_MM_HINT_T0, _mm_prefetch};
 
             let bit_pos = index * self.bit_width;
             let byte_pos = bit_pos / 8;

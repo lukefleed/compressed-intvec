@@ -51,7 +51,6 @@ use rayon::prelude::{
     IntoParallelRefMutIterator, ParallelIterator,
 };
 
-#[cfg(feature = "parallel")]
 impl<T, E, B> SeqVec<T, E, B>
 where
     T: Storable + Send + Sync,
