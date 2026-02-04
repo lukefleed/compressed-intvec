@@ -94,32 +94,10 @@
 //!
 //! # Migration Notice
 //!
-//! As of version 0.3.0, all `IntVec*` types have been renamed to `VarVec*` for
+//! As of version 0.6.0, all `IntVec*` types have been renamed to `VarVec*` for
 //! consistency with the module naming convention (`fixed` → `FixedVec`, `seq` → `SeqVec`,
 //! `variable` → `VarVec`). The old names remain available as deprecated type aliases
 //! and will continue to work, but using the new names is recommended.
-//!
-//! ## Quick Migration Guide
-//!
-//! | Old Name | New Name |
-//! |----------|----------|
-//! | `IntVec` | `VarVec` |
-//! | `IntVecBuilder` | `VarVecBuilder` |
-//! | `IntVecError` | `VarVecError` |
-//! | `IntVecReader` | `VarVecReader` |
-//! | `IntVecSeqReader` | `VarVecSeqReader` |
-//! | `IntVecSlice` | `VarVecSlice` |
-//! | `IntVecIter` | `VarVecIter` |
-//! | `IntVecIntoIter` | `VarVecIntoIter` |
-//! | `UIntVec` | `UVarVec` |
-//! | `SIntVec` | `SVarVec` |
-//! | `LEIntVec` | `LEVarVec` |
-//! | `BEIntVec` | `BEVarVec` |
-//! | `LESIntVec` | `LESVarVec` |
-//! | `BESIntVec` | `BESVarVec` |
-//!
-//! Code using the old names will continue to compile but will emit deprecation
-//! warnings during compilation. The deprecated aliases will be removed in version 1.0.0.
 //!
 //! # Main Components
 //!
@@ -218,34 +196,6 @@
 //!     .build(&data)
 //!     .unwrap();
 //!```
-//!
-//! # Deprecated Type Aliases
-//!
-//! As of version 0.6.0, all `IntVec*` types have been renamed to `VarVec*` for
-//! consistency with the module naming convention. The old names are available as
-//! deprecated type aliases for backward compatibility and will be removed in version 1.0.0.
-//!
-//! | Deprecated Name | New Name |
-//! |-----------------|----------|
-//! | `IntVec` | `VarVec` |
-//! | `IntVecBuilder` | `VarVecBuilder` |
-//! | `IntVecFromIterBuilder` | `VarVecFromIterBuilder` |
-//! | `IntVecReader` | `VarVecReader` |
-//! | `IntVecSeqReader` | `VarVecSeqReader` |
-//! | `IntVecSlice` | `VarVecSlice` |
-//! | `IntVecIter` | `VarVecIter` |
-//! | `IntVecIntoIter` | `VarVecIntoIter` |
-//! | `IntVecSliceIter` | `VarVecSliceIter` |
-//! | `IntVecError` | `VarVecError` |
-//! | `VariableCodecSpec` | `Codec` |
-//! | `UIntVec` | `UVarVec` |
-//! | `SIntVec` | `SVarVec` |
-//! | `BEIntVec` | `BEVarVec` |
-//! | `LEIntVec` | `LEVarVec` |
-//! | `BESIntVec` | `BESVarVec` |
-//! | `LESIntVec` | `LESVarVec` |
-//!
-//! See the [`prelude`](crate::prelude) module for both new and deprecated aliases.
 //!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 

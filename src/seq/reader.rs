@@ -30,7 +30,7 @@ use dsi_bitstream::{
 /// method. It provides a convenient interface for performing multiple random
 /// sequence lookups, with internal reader reuse for efficiency.
 ///
-/// ## Design Rationale
+/// ## Design
 ///
 /// Unlike the stateless [`crate::seq::SeqVec`] accessors, `SeqVecReader` maintains an
 /// internal `VarVecBitReader` and `CodecReader` that are reused across

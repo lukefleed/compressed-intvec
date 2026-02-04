@@ -9,7 +9,7 @@
 //! - [`SeqIter`]: Iterator over the elements of a single sequence.
 //! - [`SeqVecIter`]: Iterator over all sequences in a [`SeqVec`].
 //!
-//! [`SeqVec`]: crate::seq::SeqVec
+//! [`SeqVec']: crate::seq::SeqVec
 
 use crate::common::codec_reader::CodecReader;
 use crate::fixed::FixedVec;
@@ -456,7 +456,7 @@ where
 
 /// An owning iterator over all sequences in a [`crate::seq::SeqVec`].
 ///
-/// This iterator consumes a [`crate::seq::SeqVec<T, E, Vec<u64>>`] and yields [`SeqIter`]
+/// This iterator consumes a `SeqVec<T, E, Vec<u64>>` and yields [`SeqIter`]
 /// instances for each sequence. The iterator owns the underlying data buffer,
 /// ensuring it lives as long as the iterator.
 ///

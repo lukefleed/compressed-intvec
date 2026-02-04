@@ -121,21 +121,19 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     ///
     /// ## Type Requirements
     ///
-    /// The sequences can be any type that implements [`AsRef<[T]>`], such as
+    /// The sequences can be any type that implements `AsRef<[T]>`, such as
     /// `&[T]`, `Vec<T>`, or `Box<[T]>`.
     ///
     /// # Arguments
     ///
     /// * `sequences` - A slice of sequences to compress. Each sequence is accessed
-    ///   via [`AsRef<[T]>`].
+    ///   via `AsRef<[T]>`.
     ///
     /// # Errors
     ///
     /// Returns a [`SeqVecError`] if:
     /// - Codec resolution fails.
     /// - An I/O error occurs during encoding.
-    ///
-    /// [`AsRef<[T]>`]: core::convert::AsRef
     ///
     /// ## Examples
     ///
@@ -524,7 +522,7 @@ type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<u64>>);
 /// # Arguments
 ///
 /// * `sequences` - Iterator of sequences to encode. Each sequence is accessed
-///   via [`AsRef<[T]>`].
+///   via `AsRef<[T]>`.
 /// * `resolved_codec` - The codec specification to use for all elements.
 /// * `offsets` - Pre-allocated vector to store bit offset boundaries. This vector
 ///   is populated with one offset per sequence plus a final sentinel offset.
@@ -538,8 +536,6 @@ type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<u64>>);
 /// - Encoded word data (`Vec<u64>`)
 /// - Bit offset boundaries (`Vec<u64>`), with length = num_sequences + 1
 /// - Optional per-sequence lengths (`Vec<u64>`), if `store_lengths` is true
-///
-/// [`AsRef<[T]>`]: core::convert::AsRef
 fn encode_sequences_impl<T: Storable, E: Endianness, I, S>(
     sequences: I,
     resolved_codec: Codes,
