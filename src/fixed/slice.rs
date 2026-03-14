@@ -9,13 +9,14 @@
 //! ## Creating and using an immutable slice
 //!
 //! ```rust
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec};
 //!
 //! let data: Vec<u32> = (0..10).collect();
-//! let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+//! let vec: UFixedVec<u32> = FixedVec::builder().build(&data)?;
 //!
 //! // Create a slice of the elements from index 2 to 6.
-//! let slice = vec.slice(2, 5).unwrap();
+//! let slice = vec.slice(2, 5).ok_or("slice failed")?;
 //!
 //! assert_eq!(slice.len(), 5);
 //! assert_eq!(slice.get(0), Some(2));
@@ -24,15 +25,18 @@
 //! // The slice can be iterated over.
 //! let sum: u32 = slice.iter().sum();
 //! assert_eq!(sum, 2 + 3 + 4 + 5 + 6);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Creating and using a mutable slice
 //!
 //! ```rust
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
 //!
 //! let data: Vec<u32> = (0..10).collect();
-//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(&data).unwrap();
+//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(&data)?;
 //!
 //! // `split_at_mut` is one way to get mutable slices.
 //! let (_, mut slice2) = vec.split_at_mut(5);
@@ -43,6 +47,8 @@
 //! }
 //!
 //! assert_eq!(vec.get(5), Some(99));
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::fixed::{

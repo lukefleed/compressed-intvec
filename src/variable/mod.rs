@@ -117,14 +117,17 @@
 //! select a suitable codec and use a default sampling rate.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::variable::{VarVec, UVarVec};
 //!
 //! let data: Vec<u32> = vec![100, 200, 300, 1024];
-//! let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
+//! let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
 //!
 //! assert_eq!(vec.len(), 4);
 //! // Accessing an element
 //! assert_eq!(vec.get(1), Some(200));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Storing Signed Integers
@@ -133,14 +136,17 @@
 //! values using zig-zag encoding.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::variable::{VarVec, SVarVec};
 //!
 //! let data: &[i16] = &[-5, 20, -100, 0, 8];
-//! let vec: SVarVec<i16> = VarVec::from_slice(data).unwrap();
+//! let vec: SVarVec<i16> = VarVec::from_slice(data)?;
 //!
 //! assert_eq!(vec.len(), 5);
 //! assert_eq!(vec.get(0), Some(-5));
 //! assert_eq!(vec.get(2), Some(-100));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Manual Codec and Sampling Rate
@@ -149,6 +155,7 @@
 //! sampling rate of `k=8` and use the `Zeta` code with `k=3`.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::variable::{VarVec, UVarVec, Codec};
 //!
 //! let data: Vec<u64> = (0..100).map(|i| i * i).collect();
@@ -156,11 +163,12 @@
 //! let vec: UVarVec<u64> = VarVec::builder()
 //!     .k(8) // Set sampling rate
 //!     .codec(Codec::Zeta { k: Some(3) }) // Set compression codec
-//!     .build(&data)
-//!     .unwrap();
+//!     .build(&data)?;
 //!
-//! assert_eq!(vec.get_sampling_rate(), 8);
+//! assert_eq!(vec.sampling_rate(), 8);
 //! assert_eq!(vec.get(10), Some(100));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! Best performance is achieved when the sampling rate `k` is a power of two. Usually a value of `32` or `16` is a good trade-off between speed and compression ratio.
@@ -169,14 +177,14 @@
 //!
 //! The choice of compression codec is critical for performance and space efficiency.
 //! [`VarVecBuilder`] offers automatic codec selection via
-//! [`VariableCodecSpec::Auto`]. When enabled, the builder analyzes the entire input
+//! [`Codec::Auto`]. When enabled, the builder analyzes the entire input
 //! dataset to find the codec that offers the best compression ratio.
 //!
 //! This analysis involves calculating the compressed size for the data with
 //! approximately 70 different codec configurations. This process introduces a
 //! significant, one-time **construction overhead**.
 //!
-//! Use [`Auto`](VariableCodecSpec::Auto) for read-heavy workloads where the [`VarVec`]
+//! Use [`Auto`](Codec::Auto) for read-heavy workloads where the [`VarVec`]
 //! is built once and then accessed many times. The initial cost is easily amortized by
 //! the long-term space savings.
 //!
@@ -187,15 +195,17 @@
 //! to be a good general-purpose choice for your data.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::prelude::*;
 //!
 //! let data: Vec<u32> = (0..100).collect();
 //!
 //! // Create an VarVec with automatic codec selection
 //! let vec: UVarVec<u32> = VarVec::builder()
-//!     .build(&data)
-//!     .unwrap();
-//!```
+//!     .build(&data)?;
+//! # Ok(())
+//! # }
+//! ```
 //!
 //! [`dsi-bitstream`]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/
 
@@ -323,6 +333,628 @@ pub struct VarVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     pub(super) encoding: Codes,
     /// Zero-sized markers for the generic type parameters.
     pub(super) _markers: PhantomData<(T, E)>,
+}
+
+/// Type alias for the bit writer used internally by `VarVec` builders.
+pub(crate) type VarVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
+/// Type alias for the bit reader used internally by `VarVec` accessors.
+pub(crate) type VarVecBitReader<'a, E> =
+    BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
+
+impl<T: Storable + 'static, E: Endianness> VarVec<T, E, Vec<u64>> {
+    /// Creates a builder for constructing an owned [`VarVec`] from a slice of data.
+    ///
+    /// This is the most flexible way to create an [`VarVec`], allowing customization
+    /// of the compression codec and sampling rate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::variable::{VarVec, UVarVec, Codec};
+    ///
+    /// let data: &[u32] = &[5, 8, 13, 21, 34];
+    /// let vec: UVarVec<u32> = VarVec::builder()
+    ///     .k(2) // Sample every 2nd element
+    ///     .codec(Codec::Delta)
+    ///     .build(data)?;
+    ///
+    /// assert_eq!(vec.get(3), Some(21));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn builder() -> VarVecBuilder<T, E> {
+        VarVecBuilder::new()
+    }
+
+    /// Creates a builder for constructing an owned [`VarVec`] from an iterator.
+    ///
+    /// This is useful for large datasets that are generated on the fly.
+    pub fn from_iter_builder<I>(iter: I) -> VarVecFromIterBuilder<T, E, I>
+    where
+        I: IntoIterator<Item = T> + Clone,
+    {
+        VarVecFromIterBuilder::new(iter)
+    }
+
+    /// Consumes the [`VarVec`] and returns its decoded values as a standard `Vec<T>`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::variable::{VarVec, SVarVec};
+    ///
+    /// let data: &[i32] = &[-10, 0, 10];
+    /// let vec: SVarVec<i32> = VarVec::from_slice(data)?;
+    /// let decoded_data = vec.into_vec();
+    ///
+    /// assert_eq!(decoded_data, &[-10, 0, 10]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn into_vec(self) -> Vec<T>
+    where
+        for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        self.into_iter().collect()
+    }
+
+    /// Creates an owned [`VarVec`] from a slice of data using default settings.
+    ///
+    /// This method uses [`Codec::Auto`] to select a codec and a
+    /// default sampling rate of `k=16`.
+    pub fn from_slice(slice: &[T]) -> Result<Self, VarVecError>
+    where
+        for<'a> crate::variable::VarVecBitWriter<E>:
+            BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
+    {
+        Self::builder().k(16).codec(Codec::Auto).build(slice)
+    }
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B> {
+    /// Creates a new [`VarVec`] from its raw components, enabling zero-copy views.
+    ///
+    /// This constructor is intended for advanced use cases, such as memory-mapping
+    /// a pre-built [`VarVec`] from disk without copying the data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`VarVecError::InvalidParameters`] if `k` is zero or if the
+    /// number of samples is inconsistent with `len` and `k`.
+    pub fn from_parts(
+        data: B,
+        samples_data: B,
+        samples_len: usize,
+        samples_num_bits: usize,
+        k: usize,
+        len: usize,
+        encoding: Codes,
+    ) -> Result<Self, VarVecError> {
+        let samples =
+            FixedVec::<u64, u64, LE, B>::from_parts(samples_data, samples_len, samples_num_bits)?;
+
+        if k == 0 {
+            return Err(VarVecError::InvalidParameters(
+                "Sampling rate k cannot be zero".to_string(),
+            ));
+        }
+        let expected_samples = if len == 0 { 0 } else { len.div_ceil(k) };
+        if samples.len() != expected_samples {
+            return Err(VarVecError::InvalidParameters(format!(
+                "Inconsistent number of samples. Expected {}, found {}",
+                expected_samples,
+                samples.len()
+            )));
+        }
+
+        Ok(unsafe { Self::new_unchecked(data, samples, k, len, encoding) })
+    }
+
+    /// Creates a new [`VarVec`] from its raw parts without performing safety checks.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that all parameters are consistent and valid. The
+    /// `samples` must contain the correct bit offsets for the `data` stream,
+    /// and `len`, `k`, and `encoding` must accurately describe the layout.
+    /// Mismatched parameters will lead to panics or incorrect data retrieval.
+    pub(crate) unsafe fn new_unchecked(
+        data: B,
+        samples: FixedVec<u64, u64, LE, B>,
+        k: usize,
+        len: usize,
+        encoding: Codes,
+    ) -> Self {
+        Self {
+            data,
+            samples,
+            k,
+            len,
+            encoding,
+            _markers: PhantomData,
+        }
+    }
+
+    /// Creates a zero-copy, immutable view (a _slice_) of this vector.
+    ///
+    /// Returns `None` if the specified range is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::variable::{VarVec, UVarVec};
+    ///
+    /// let data: Vec<u32> = (0..20).collect();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
+    /// let slice = vec.slice(5, 10).expect("valid slice range");
+    ///
+    /// assert_eq!(slice.len(), 10);
+    /// assert_eq!(slice.get(0), Some(5)); // Corresponds to index 5 of the original vec
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn slice(&'_ self, start: usize, len: usize) -> Option<VarVecSlice<'_, T, E, B>> {
+        if start.saturating_add(len) > self.len {
+            return None;
+        }
+        Some(VarVecSlice::new(self, start..start + len))
+    }
+
+    /// Splits the vector into two immutable slices at a given index.
+    ///
+    /// Returns `None` if `mid` is out of bounds.
+    #[allow(clippy::type_complexity)]
+    pub fn split_at(
+        &'_ self,
+        mid: usize,
+    ) -> Option<(VarVecSlice<'_, T, E, B>, VarVecSlice<'_, T, E, B>)> {
+        if mid > self.len {
+            return None;
+        }
+        let left = VarVecSlice::new(self, 0..mid);
+        let right = VarVecSlice::new(self, mid..self.len);
+        Some((left, right))
+    }
+
+    /// Returns the number of integers in the vector.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns `true` if the vector contains no elements.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Returns the sampling rate `k` used during encoding.
+    #[inline]
+    pub fn sampling_rate(&self) -> usize {
+        self.k
+    }
+
+    /// Returns the number of sample points stored in the vector.
+    #[inline]
+    pub fn num_samples(&self) -> usize {
+        self.samples.len()
+    }
+
+    /// Returns the sampling rate `k` used during encoding.
+    #[deprecated(since = "0.6.0", note = "renamed to `sampling_rate`; use `sampling_rate` instead")]
+    #[inline]
+    pub fn get_sampling_rate(&self) -> usize {
+        self.sampling_rate()
+    }
+
+    /// Returns the number of sample points stored in the vector.
+    #[deprecated(
+        since = "0.6.0",
+        note = "renamed to `num_samples`; use `num_samples` instead"
+    )]
+    #[inline]
+    pub fn get_num_samples(&self) -> usize {
+        self.num_samples()
+    }
+
+    /// Returns a reference to the inner `FixedVec` of samples.
+    #[inline]
+    pub fn samples_ref(&self) -> &FixedVec<u64, u64, LE, B> {
+        &self.samples
+    }
+
+    /// Returns a read-only slice of the underlying compressed data words (`&[u64]`).
+    #[inline]
+    pub fn as_limbs(&self) -> &[u64] {
+        self.data.as_ref()
+    }
+
+    /// Returns the concrete [`Codes`] variant that was used for compression.
+    #[inline]
+    pub fn encoding(&self) -> Codes {
+        self.encoding
+    }
+
+    /// Returns a clone of the underlying storage as a `Vec<u64>`.
+    pub fn limbs(&self) -> Vec<u64> {
+        self.data.as_ref().to_vec()
+    }
+
+    /// Returns an iterator over the decompressed values.
+    pub fn iter(&'_ self) -> impl Iterator<Item = T> + '_
+    where
+        for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        VarVecIter::new(self)
+    }
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B>
+where
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// Creates a reusable, stateless reader for efficient random access.
+    ///
+    /// This method returns an [`VarVecReader`], a struct that maintains a persistent,
+    /// reusable bitstream reader. This amortizes the setup cost across multiple `get`
+    /// operations, making it more efficient than calling [`get`](VarVec::get) repeatedly in a loop.
+    ///
+    /// This reader is **stateless**: it performs a full seek from the nearest sample point for each call,
+    /// independently of any previous access.
+    ///
+    /// # When to use it
+    /// Use [`VarVecReader`] for true random access patterns where lookup indices are sparse,
+    /// unordered, or not known in advance (e.g., graph traversals, pointer chasing).
+    /// For accessing a known set of indices, [`get_many`](VarVec::get_many) is generally superior.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::prelude::*;
+    ///
+    /// let data: Vec<u32> = (0..100).rev().collect(); // Data is not sequential
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
+    ///
+    /// // Create a reusable reader for multiple random lookups
+    /// let mut reader = vec.reader();
+    ///
+    /// assert_eq!(reader.get(99)?, Some(0));
+    /// assert_eq!(reader.get(0)?, Some(99));
+    /// assert_eq!(reader.get(50)?, Some(49));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn reader(&'_ self) -> VarVecReader<'_, T, E, B> {
+        VarVecReader::new(self)
+    }
+
+    /// Creates a stateful, reusable reader optimized for sequential access.
+    ///
+    /// This method returns an [`VarVecSeqReader`], which is specifically designed
+    /// to take advantage of the vector's internal state, tracking the current decoding position (cursor).
+    ///
+    /// This statefulness enables a key optimization:
+    /// - **Fast Path**: If a requested index is at or after the cursor and within
+    ///   the same sample block, the reader decodes forward from its last known
+    ///   position. This avoids a costly seek operation.
+    /// - **Fallback Path**: If the requested index is before the cursor (requiring a
+    ///   backward move) or in a different sample block, the reader falls back to
+    ///   the standard behavior of seeking to the nearest sample point.
+    ///
+    /// # When to use it
+    /// Use [`VarVecSeqReader`] when your access pattern has high locality, meaning
+    /// indices are primarily increasing and often clustered together. It is ideal
+    /// for iterating through a sorted list of indices or for stream-like processing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::prelude::*;
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
+    ///
+    /// // Create a reader optimized for sequential access
+    /// let mut seq_reader = vec.seq_reader();
+    ///
+    /// // Accessing indices in increasing order is efficient
+    /// assert_eq!(seq_reader.get(10)?, Some(10));
+    /// // This next call is fast, as it decodes forward from index 10
+    /// assert_eq!(seq_reader.get(15)?, Some(15));
+    ///
+    /// // A large jump will trigger a seek to a new sample block
+    /// assert_eq!(seq_reader.get(90)?, Some(90));
+    ///
+    /// // A backward jump will also trigger a seek
+    /// assert_eq!(seq_reader.get(5)?, Some(5));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn seq_reader(&'_ self) -> VarVecSeqReader<'_, T, E, B> {
+        VarVecSeqReader::new(self)
+    }
+
+    /// Returns the element at the specified index, or `None` if the index is
+    /// out of bounds.
+    ///
+    /// This operation is amortized O(1).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::variable::{VarVec, UVarVec};
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
+    ///
+    /// assert_eq!(vec.get(50), Some(50));
+    /// assert_eq!(vec.get(100), None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<T> {
+        if index >= self.len {
+            return None;
+        }
+        Some(unsafe { self.get_unchecked(index) })
+    }
+
+    /// Returns the element at the specified index without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds `index` is undefined behavior.
+    /// The `index` must be less than the vector's `len`.
+    #[inline]
+    pub unsafe fn get_unchecked(&self, index: usize) -> T {
+        let mut reader = self.reader();
+        unsafe { reader.get_unchecked(index) }
+    }
+
+    /// Retrieves multiple elements from the vector at the specified indices.
+    ///
+    /// This method is generally more efficient than calling [`get`](Self::get) in a loop, as
+    /// it sorts the indices and scans through the compressed data stream once.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VarVecError::IndexOutOfBounds`] if any index is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::variable::{VarVec, UVarVec};
+    ///
+    /// let data: Vec<u32> = (0..100).collect();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
+    ///
+    /// let indices = [99, 0, 50];
+    /// let values = vec.get_many(&indices)?;
+    /// assert_eq!(values, vec![99, 0, 50]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn get_many(&self, indices: &[usize]) -> Result<Vec<T>, VarVecError> {
+        if indices.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        for &index in indices {
+            if index >= self.len {
+                return Err(VarVecError::IndexOutOfBounds(index));
+            }
+        }
+        // SAFETY: We have just performed the bounds checks.
+        Ok(unsafe { self.get_many_unchecked(indices) })
+    }
+
+    /// Retrieves multiple elements without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with any out-of-bounds index is undefined behavior.
+    #[allow(clippy::uninit_vec)]
+    pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<T> {
+        if indices.is_empty() {
+            return Vec::new();
+        }
+        let mut results = Vec::with_capacity(indices.len());
+        // SAFETY: The vector is immediately populated by the sorted access logic below.
+        unsafe { results.set_len(indices.len()) };
+
+        let mut indexed_indices: Vec<(usize, usize)> = indices
+            .iter()
+            .enumerate()
+            .map(|(i, &idx)| (idx, i))
+            .collect();
+        // Sort by the target index to enable efficient sequential scanning.
+        indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
+
+        if self.k.is_power_of_two() {
+            // Optimization: use bit-shift for division if k is a power of two.
+            let k_exp = self.k.trailing_zeros();
+            self.get_many_dsi_inner(
+                &indexed_indices,
+                &mut results,
+                |idx| idx >> k_exp,
+                |block| block << k_exp,
+            )
+            .unwrap();
+        } else {
+            self.get_many_dsi_inner(
+                &indexed_indices,
+                &mut results,
+                |idx| idx / self.k,
+                |block| block * self.k,
+            )
+            .unwrap();
+        }
+
+        results
+    }
+
+    /// Internal implementation for `get_many_unchecked`.
+    ///
+    /// This function takes closures to abstract away the division/multiplication
+    /// by `k`, allowing for a bit-shift optimization when `k` is a power of two.
+    fn get_many_dsi_inner<F1, F2>(
+        &self,
+        indexed_indices: &[(usize, usize)],
+        results: &mut [T],
+        block_of: F1,
+        start_of_block: F2,
+    ) -> Result<(), VarVecError>
+    where
+        F1: Fn(usize) -> usize,
+        F2: Fn(usize) -> usize,
+    {
+        let mut reader = self.reader();
+        let mut current_decoded_index: usize = 0;
+
+        for &(target_index, original_position) in indexed_indices {
+            // Check if we need to jump to a new sample block. This is true if the
+            // target index is before our current position, or if it's in a different
+            // sample block than the one we're currently in.
+            if target_index < current_decoded_index
+                || block_of(target_index) != block_of(current_decoded_index.saturating_sub(1))
+            {
+                let target_sample_block = block_of(target_index);
+                // SAFETY: The public-facing `get_many` performs bounds checks.
+                let start_bit = unsafe { self.samples.get_unchecked(target_sample_block) };
+                reader.reader.set_bit_pos(start_bit)?;
+                current_decoded_index = start_of_block(target_sample_block);
+            }
+
+            // Sequentially decode elements until we reach our target.
+            for _ in current_decoded_index..target_index {
+                reader.code_reader.read(&mut reader.reader)?;
+            }
+            let value = reader.code_reader.read(&mut reader.reader)?;
+            // Place the decoded value in its original requested position.
+            results[original_position] = Storable::from_word(value);
+            current_decoded_index = target_index + 1;
+        }
+        Ok(())
+    }
+
+    /// Retrieves multiple elements from an iterator of indices.
+    ///
+    /// This is a convenient alternative to [`get_many`](Self::get_many) when the indices are not
+    /// already in a slice. It may be less performant as it cannot pre-sort the
+    /// indices for optimal access.
+    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<T>, VarVecError>
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let indices_iter = indices.into_iter();
+        let (lower_bound, _) = indices_iter.size_hint();
+        let mut results = Vec::with_capacity(lower_bound);
+        let mut seq_reader = self.seq_reader();
+
+        for index in indices_iter {
+            let value = seq_reader
+                .get(index)?
+                .ok_or(VarVecError::IndexOutOfBounds(index))?;
+            results.push(value);
+        }
+
+        Ok(results)
+    }
+}
+
+impl<T: Storable + Ord, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B>
+where
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// Binary searches this vector for a given element.
+    ///
+    /// If the value is found, returns `Ok(usize)` with the index of the
+    /// matching element. If the value is not found, returns `Err(usize)` with
+    /// the index where the value could be inserted to maintain order.
+    ///
+    /// # Complexity
+    ///
+    /// The time complexity of this operation is O(k * log n), where `n` is the
+    /// number of elements in the vector and `k` is the sampling rate. This is
+    /// because each of the O(log n) probes during the search requires an
+    /// element access, which has a cost proportional to `k` in the worst case.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::variable::{VarVec, SVarVec};
+    ///
+    /// let data: &[i32] = &[-10, 0, 10, 20, 30];
+    /// let vec: SVarVec<i32> = VarVec::from_slice(data)?;
+    ///
+    /// assert_eq!(vec.binary_search(&10), Ok(2));
+    /// assert_eq!(vec.binary_search(&15), Err(3));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn binary_search(&self, value: &T) -> Result<usize, usize> {
+        self.binary_search_by(|probe| probe.cmp(value))
+    }
+
+    /// Binary searches this vector with a custom comparison function.
+    ///
+    /// # Complexity
+    ///
+    /// The time complexity of this operation is O(k * log n), where `n` is the
+    /// number of elements in the vector and `k` is the sampling rate.
+    #[inline]
+    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(T) -> std::cmp::Ordering,
+    {
+        let mut low = 0;
+        let mut high = self.len();
+        let mut reader = self.reader();
+
+        while low < high {
+            let mid = low + (high - low) / 2;
+            // SAFETY: The loop invariants ensure `mid` is always in bounds.
+            let cmp = f(unsafe { reader.get_unchecked(mid) });
+
+            match cmp {
+                std::cmp::Ordering::Less => low = mid + 1,
+                std::cmp::Ordering::Equal => return Ok(mid),
+                std::cmp::Ordering::Greater => high = mid,
+            }
+        }
+        Err(low)
+    }
+
+    /// Binary searches this vector with a key extraction function.
+    ///
+    /// # Complexity
+    ///
+    /// The time complexity of this operation is O(k * log n), where `n` is the
+    /// number of elements in the vector and `k` is the sampling rate.
+    #[inline]
+    pub fn binary_search_by_key<K: Ord, F>(&self, b: &K, mut f: F) -> Result<usize, usize>
+    where
+        F: FnMut(T) -> K,
+    {
+        self.binary_search_by(|k| f(k).cmp(b))
+    }
 }
 
 impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for VarVec<T, E, B> {
@@ -529,588 +1161,6 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
             flags,
         )?;
         Ok(())
-    }
-}
-
-/// Type alias for the bit writer used internally by `VarVec` builders.
-pub(crate) type VarVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
-/// Type alias for the bit reader used internally by `VarVec` accessors.
-pub(crate) type VarVecBitReader<'a, E> =
-    BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
-
-impl<T: Storable + 'static, E: Endianness> VarVec<T, E, Vec<u64>> {
-    /// Creates a builder for constructing an owned [`VarVec`] from a slice of data.
-    ///
-    /// This is the most flexible way to create an [`VarVec`], allowing customization
-    /// of the compression codec and sampling rate.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::variable::{VarVec, UVarVec, VariableCodecSpec};
-    ///
-    /// let data: &[u32] = &[5, 8, 13, 21, 34];
-    /// let vec: UVarVec<u32> = VarVec::builder()
-    ///     .k(2) // Sample every 2nd element
-    ///     .codec(VariableCodecSpec::Delta)
-    ///     .build(data)
-    ///     .unwrap();
-    ///
-    /// assert_eq!(vec.get(3), Some(21));
-    /// ```
-    pub fn builder() -> VarVecBuilder<T, E> {
-        VarVecBuilder::new()
-    }
-
-    /// Creates a builder for constructing an owned [`VarVec`] from an iterator.
-    ///
-    /// This is useful for large datasets that are generated on the fly.
-    pub fn from_iter_builder<I>(iter: I) -> VarVecFromIterBuilder<T, E, I>
-    where
-        I: IntoIterator<Item = T> + Clone,
-    {
-        VarVecFromIterBuilder::new(iter)
-    }
-
-    /// Consumes the [`VarVec`] and returns its decoded values as a standard `Vec<T>`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::variable::{VarVec, SVarVec};
-    ///
-    /// let data: &[i32] = &[-10, 0, 10];
-    /// let vec: SVarVec<i32> = VarVec::from_slice(data).unwrap();
-    /// let decoded_data = vec.into_vec();
-    ///
-    /// assert_eq!(decoded_data, &[-10, 0, 10]);
-    /// ```
-    pub fn into_vec(self) -> Vec<T>
-    where
-        for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-            + CodesRead<E>
-            + BitSeek<Error = core::convert::Infallible>,
-    {
-        self.into_iter().collect()
-    }
-
-    /// Creates an owned [`VarVec`] from a slice of data using default settings.
-    ///
-    /// This method uses [`VariableCodecSpec::Auto`] to select a codec and a
-    /// default sampling rate of `k=16`.
-    pub fn from_slice(slice: &[T]) -> Result<Self, VarVecError>
-    where
-        for<'a> crate::variable::VarVecBitWriter<E>:
-            BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
-    {
-        Self::builder().k(16).codec(Codec::Auto).build(slice)
-    }
-}
-
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B> {
-    /// Creates a new [`VarVec`] from its raw components, enabling zero-copy views.
-    ///
-    /// This constructor is intended for advanced use cases, such as memory-mapping
-    /// a pre-built [`VarVec`] from disk without copying the data.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`VarVecError::InvalidParameters`] if `k` is zero or if the
-    /// number of samples is inconsistent with `len` and `k`.
-    pub fn from_parts(
-        data: B,
-        samples_data: B,
-        samples_len: usize,
-        samples_num_bits: usize,
-        k: usize,
-        len: usize,
-        encoding: Codes,
-    ) -> Result<Self, VarVecError> {
-        let samples =
-            FixedVec::<u64, u64, LE, B>::from_parts(samples_data, samples_len, samples_num_bits)?;
-
-        if k == 0 {
-            return Err(VarVecError::InvalidParameters(
-                "Sampling rate k cannot be zero".to_string(),
-            ));
-        }
-        let expected_samples = if len == 0 { 0 } else { len.div_ceil(k) };
-        if samples.len() != expected_samples {
-            return Err(VarVecError::InvalidParameters(format!(
-                "Inconsistent number of samples. Expected {}, found {}",
-                expected_samples,
-                samples.len()
-            )));
-        }
-
-        Ok(unsafe { Self::new_unchecked(data, samples, k, len, encoding) })
-    }
-
-    /// Creates a new [`VarVec`] from its raw parts without performing safety checks.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that all parameters are consistent and valid. The
-    /// `samples` must contain the correct bit offsets for the `data` stream,
-    /// and `len`, `k`, and `encoding` must accurately describe the layout.
-    /// Mismatched parameters will lead to panics or incorrect data retrieval.
-    pub(crate) unsafe fn new_unchecked(
-        data: B,
-        samples: FixedVec<u64, u64, LE, B>,
-        k: usize,
-        len: usize,
-        encoding: Codes,
-    ) -> Self {
-        Self {
-            data,
-            samples,
-            k,
-            len,
-            encoding,
-            _markers: PhantomData,
-        }
-    }
-
-    /// Creates a zero-copy, immutable view (a _slice_) of this vector.
-    ///
-    /// Returns `None` if the specified range is out of bounds.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::variable::{VarVec, UVarVec};
-    ///
-    /// let data: Vec<u32> = (0..20).collect();
-    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
-    /// let slice = vec.slice(5, 10).unwrap();
-    ///
-    /// assert_eq!(slice.len(), 10);
-    /// assert_eq!(slice.get(0), Some(5)); // Corresponds to index 5 of the original vec
-    /// ```
-    pub fn slice(&'_ self, start: usize, len: usize) -> Option<VarVecSlice<'_, T, E, B>> {
-        if start.saturating_add(len) > self.len {
-            return None;
-        }
-        Some(VarVecSlice::new(self, start..start + len))
-    }
-
-    /// Splits the vector into two immutable slices at a given index.
-    ///
-    /// Returns `None` if `mid` is out of bounds.
-    #[allow(clippy::type_complexity)]
-    pub fn split_at(
-        &'_ self,
-        mid: usize,
-    ) -> Option<(VarVecSlice<'_, T, E, B>, VarVecSlice<'_, T, E, B>)> {
-        if mid > self.len {
-            return None;
-        }
-        let left = VarVecSlice::new(self, 0..mid);
-        let right = VarVecSlice::new(self, mid..self.len);
-        Some((left, right))
-    }
-
-    /// Returns the number of integers in the vector.
-    #[inline]
-    pub fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Returns `true` if the vector contains no elements.
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Returns the sampling rate `k` used during encoding.
-    #[inline]
-    pub fn get_sampling_rate(&self) -> usize {
-        self.k
-    }
-
-    /// Returns the number of sample points stored in the vector.
-    #[inline]
-    pub fn get_num_samples(&self) -> usize {
-        self.samples.len()
-    }
-
-    /// Returns a reference to the inner `FixedVec` of samples.
-    #[inline]
-    pub fn samples_ref(&self) -> &FixedVec<u64, u64, LE, B> {
-        &self.samples
-    }
-
-    /// Returns a read-only slice of the underlying compressed data words (`&[u64]`).
-    #[inline]
-    pub fn as_limbs(&self) -> &[u64] {
-        self.data.as_ref()
-    }
-
-    /// Returns the concrete [`Codes`] variant that was used for compression.
-    #[inline]
-    pub fn encoding(&self) -> Codes {
-        self.encoding
-    }
-
-    /// Returns a clone of the underlying storage as a `Vec<u64>`.
-    pub fn limbs(&self) -> Vec<u64> {
-        self.data.as_ref().to_vec()
-    }
-
-    /// Returns an iterator over the decompressed values.
-    pub fn iter(&'_ self) -> impl Iterator<Item = T> + '_
-    where
-        for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-            + CodesRead<E>
-            + BitSeek<Error = core::convert::Infallible>,
-    {
-        VarVecIter::new(self)
-    }
-}
-
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B>
-where
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// Creates a reusable, stateless reader for efficient random access.
-    ///
-    /// This method returns an [`VarVecReader`], a struct that maintains a persistent,
-    /// reusable bitstream reader. This amortizes the setup cost across multiple `get`
-    /// operations, making it more efficient than calling [`get`](VarVec::get) repeatedly in a loop.
-    ///
-    /// This reader is **stateless**: it performs a full seek from the nearest sample point for each call,
-    /// independently of any previous access.
-    ///
-    /// # When to use it
-    /// Use [`VarVecReader`] for true random access patterns where lookup indices are sparse,
-    /// unordered, or not known in advance (e.g., graph traversals, pointer chasing).
-    /// For accessing a known set of indices, [`get_many`](VarVec::get_many) is generally superior.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let data: Vec<u32> = (0..100).rev().collect(); // Data is not sequential
-    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
-    ///
-    /// // Create a reusable reader for multiple random lookups
-    /// let mut reader = vec.reader();
-    ///
-    /// assert_eq!(reader.get(99).unwrap(), Some(0));
-    /// assert_eq!(reader.get(0).unwrap(), Some(99));
-    /// assert_eq!(reader.get(50).unwrap(), Some(49));
-    /// ```
-    pub fn reader(&'_ self) -> VarVecReader<'_, T, E, B> {
-        VarVecReader::new(self)
-    }
-
-    /// Creates a stateful, reusable reader optimized for sequential access.
-    ///
-    /// This method returns an [`VarVecSeqReader`], which is specifically designed
-    /// to take advantage of the vector's internal state, tracking the current decoding position (cursor).
-    ///
-    /// This statefulness enables a key optimization:
-    /// - **Fast Path**: If a requested index is at or after the cursor and within
-    ///   the same sample block, the reader decodes forward from its last known
-    ///   position. This avoids a costly seek operation.
-    /// - **Fallback Path**: If the requested index is before the cursor (requiring a
-    ///   backward move) or in a different sample block, the reader falls back to
-    ///   the standard behavior of seeking to the nearest sample point.
-    ///
-    /// # When to use it
-    /// Use [`VarVecSeqReader`] when your access pattern has high locality, meaning
-    /// indices are primarily increasing and often clustered together. It is ideal
-    /// for iterating through a sorted list of indices or for stream-like processing.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::prelude::*;
-    ///
-    /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
-    ///
-    /// // Create a reader optimized for sequential access
-    /// let mut seq_reader = vec.seq_reader();
-    ///
-    /// // Accessing indices in increasing order is efficient
-    /// assert_eq!(seq_reader.get(10).unwrap(), Some(10));
-    /// // This next call is fast, as it decodes forward from index 10
-    /// assert_eq!(seq_reader.get(15).unwrap(), Some(15));
-    ///
-    /// // A large jump will trigger a seek to a new sample block
-    /// assert_eq!(seq_reader.get(90).unwrap(), Some(90));
-    ///
-    /// // A backward jump will also trigger a seek
-    /// assert_eq!(seq_reader.get(5).unwrap(), Some(5));
-    /// ```
-    pub fn seq_reader(&'_ self) -> VarVecSeqReader<'_, T, E, B> {
-        VarVecSeqReader::new(self)
-    }
-
-    /// Returns the element at the specified index, or `None` if the index is
-    /// out of bounds.
-    ///
-    /// This operation is amortized O(1).
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::variable::{VarVec, UVarVec};
-    ///
-    /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
-    ///
-    /// assert_eq!(vec.get(50), Some(50));
-    /// assert_eq!(vec.get(100), None);
-    /// ```
-    #[inline]
-    pub fn get(&self, index: usize) -> Option<T> {
-        if index >= self.len {
-            return None;
-        }
-        Some(unsafe { self.get_unchecked(index) })
-    }
-
-    /// Returns the element at the specified index without bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with an out-of-bounds `index` is undefined behavior.
-    /// The `index` must be less than the vector's `len`.
-    #[inline]
-    pub unsafe fn get_unchecked(&self, index: usize) -> T {
-        let mut reader = self.reader();
-        unsafe { reader.get_unchecked(index) }
-    }
-
-    /// Retrieves multiple elements from the vector at the specified indices.
-    ///
-    /// This method is generally more efficient than calling [`get`](Self::get) in a loop, as
-    /// it sorts the indices and scans through the compressed data stream once.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VarVecError::IndexOutOfBounds`] if any index is out of bounds.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::variable::{VarVec, UVarVec};
-    ///
-    /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
-    ///
-    /// let indices = [99, 0, 50];
-    /// let values = vec.get_many(&indices).unwrap();
-    /// assert_eq!(values, vec![99, 0, 50]);
-    /// ```
-    pub fn get_many(&self, indices: &[usize]) -> Result<Vec<T>, VarVecError> {
-        if indices.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        for &index in indices {
-            if index >= self.len {
-                return Err(VarVecError::IndexOutOfBounds(index));
-            }
-        }
-        // SAFETY: We have just performed the bounds checks.
-        Ok(unsafe { self.get_many_unchecked(indices) })
-    }
-
-    /// Retrieves multiple elements without bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with any out-of-bounds index is undefined behavior.
-    #[allow(clippy::uninit_vec)]
-    pub unsafe fn get_many_unchecked(&self, indices: &[usize]) -> Vec<T> {
-        if indices.is_empty() {
-            return Vec::new();
-        }
-        let mut results = Vec::with_capacity(indices.len());
-        // SAFETY: The vector is immediately populated by the sorted access logic below.
-        unsafe { results.set_len(indices.len()) };
-
-        let mut indexed_indices: Vec<(usize, usize)> = indices
-            .iter()
-            .enumerate()
-            .map(|(i, &idx)| (idx, i))
-            .collect();
-        // Sort by the target index to enable efficient sequential scanning.
-        indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
-
-        if self.k.is_power_of_two() {
-            // Optimization: use bit-shift for division if k is a power of two.
-            let k_exp = self.k.trailing_zeros();
-            self.get_many_dsi_inner(
-                &indexed_indices,
-                &mut results,
-                |idx| idx >> k_exp,
-                |block| block << k_exp,
-            )
-            .unwrap();
-        } else {
-            self.get_many_dsi_inner(
-                &indexed_indices,
-                &mut results,
-                |idx| idx / self.k,
-                |block| block * self.k,
-            )
-            .unwrap();
-        }
-
-        results
-    }
-
-    /// Internal implementation for `get_many_unchecked`.
-    ///
-    /// This function takes closures to abstract away the division/multiplication
-    /// by `k`, allowing for a bit-shift optimization when `k` is a power of two.
-    fn get_many_dsi_inner<F1, F2>(
-        &self,
-        indexed_indices: &[(usize, usize)],
-        results: &mut [T],
-        block_of: F1,
-        start_of_block: F2,
-    ) -> Result<(), VarVecError>
-    where
-        F1: Fn(usize) -> usize,
-        F2: Fn(usize) -> usize,
-    {
-        let mut reader = self.reader();
-        let mut current_decoded_index: usize = 0;
-
-        for &(target_index, original_position) in indexed_indices {
-            // Check if we need to jump to a new sample block. This is true if the
-            // target index is before our current position, or if it's in a different
-            // sample block than the one we're currently in.
-            if target_index < current_decoded_index
-                || block_of(target_index) != block_of(current_decoded_index.saturating_sub(1))
-            {
-                let target_sample_block = block_of(target_index);
-                // SAFETY: The public-facing `get_many` performs bounds checks.
-                let start_bit = unsafe { self.samples.get_unchecked(target_sample_block) };
-                reader.reader.set_bit_pos(start_bit)?;
-                current_decoded_index = start_of_block(target_sample_block);
-            }
-
-            // Sequentially decode elements until we reach our target.
-            for _ in current_decoded_index..target_index {
-                reader.code_reader.read(&mut reader.reader)?;
-            }
-            let value = reader.code_reader.read(&mut reader.reader)?;
-            // Place the decoded value in its original requested position.
-            results[original_position] = Storable::from_word(value);
-            current_decoded_index = target_index + 1;
-        }
-        Ok(())
-    }
-
-    /// Retrieves multiple elements from an iterator of indices.
-    ///
-    /// This is a convenient alternative to [`get_many`](Self::get_many) when the indices are not
-    /// already in a slice. It may be less performant as it cannot pre-sort the
-    /// indices for optimal access.
-    pub fn get_many_from_iter<I>(&self, indices: I) -> Result<Vec<T>, VarVecError>
-    where
-        I: IntoIterator<Item = usize>,
-    {
-        let indices_iter = indices.into_iter();
-        let (lower_bound, _) = indices_iter.size_hint();
-        let mut results = Vec::with_capacity(lower_bound);
-        let mut seq_reader = self.seq_reader();
-
-        for index in indices_iter {
-            let value = seq_reader
-                .get(index)?
-                .ok_or(VarVecError::IndexOutOfBounds(index))?;
-            results.push(value);
-        }
-
-        Ok(results)
-    }
-}
-
-impl<T: Storable + Ord, E: Endianness, B: AsRef<[u64]>> VarVec<T, E, B>
-where
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// Binary searches this vector for a given element.
-    ///
-    /// If the value is found, returns `Ok(usize)` with the index of the
-    /// matching element. If the value is not found, returns `Err(usize)` with
-    /// the index where the value could be inserted to maintain order.
-    ///
-    /// # Complexity
-    ///
-    /// The time complexity of this operation is O(k * log n), where `n` is the
-    /// number of elements in the vector and `k` is the sampling rate. This is
-    /// because each of the O(log n) probes during the search requires an
-    /// element access, which has a cost proportional to `k` in the worst case.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::variable::{VarVec, SVarVec};
-    ///
-    /// let data: &[i32] = &[-10, 0, 10, 20, 30];
-    /// let vec: SVarVec<i32> = VarVec::from_slice(data).unwrap();
-    ///
-    /// assert_eq!(vec.binary_search(&10), Ok(2));
-    /// assert_eq!(vec.binary_search(&15), Err(3));
-    /// ```
-    pub fn binary_search(&self, value: &T) -> Result<usize, usize> {
-        self.binary_search_by(|probe| probe.cmp(value))
-    }
-
-    /// Binary searches this vector with a custom comparison function.
-    ///
-    /// # Complexity
-    ///
-    /// The time complexity of this operation is O(k * log n), where `n` is the
-    /// number of elements in the vector and `k` is the sampling rate.
-    #[inline]
-    pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
-    where
-        F: FnMut(T) -> std::cmp::Ordering,
-    {
-        let mut low = 0;
-        let mut high = self.len();
-        let mut reader = self.reader();
-
-        while low < high {
-            let mid = low + (high - low) / 2;
-            // SAFETY: The loop invariants ensure `mid` is always in bounds.
-            let cmp = f(unsafe { reader.get_unchecked(mid) });
-
-            match cmp {
-                std::cmp::Ordering::Less => low = mid + 1,
-                std::cmp::Ordering::Equal => return Ok(mid),
-                std::cmp::Ordering::Greater => high = mid,
-            }
-        }
-        Err(low)
-    }
-
-    /// Binary searches this vector with a key extraction function.
-    ///
-    /// # Complexity
-    ///
-    /// The time complexity of this operation is O(k * log n), where `n` is the
-    /// number of elements in the vector and `k` is the sampling rate.
-    #[inline]
-    pub fn binary_search_by_key<K: Ord, F>(&self, b: &K, mut f: F) -> Result<usize, usize>
-    where
-        F: FnMut(T) -> K,
-    {
-        self.binary_search_by(|k| f(k).cmp(b))
     }
 }
 

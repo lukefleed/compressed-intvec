@@ -13,6 +13,7 @@
 //! ## Building from a slice
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
 //! use compressed_intvec::fixed::builder::FixedVecBuilder;
 //!
@@ -20,18 +21,18 @@
 //!
 //! // The builder can infer the minimal bit width.
 //! let vec: UFixedVec<u32> = FixedVecBuilder::new()
-//!     .build(data)
-//!     .unwrap();
+//!     .build(data)?;
 //!
 //! assert_eq!(vec.bit_width(), 6); // 50 requires 6 bits
 //!
 //! // Or a specific strategy can be chosen.
 //! let vec_pow2: UFixedVec<u32> = FixedVecBuilder::new()
 //!     .bit_width(BitWidth::PowerOfTwo)
-//!     .build(data)
-//!     .unwrap();
+//!     .build(data)?;
 //!
 //! assert_eq!(vec_pow2.bit_width(), 8);
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::fixed::traits::{Storable, Word};

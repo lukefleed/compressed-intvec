@@ -10,6 +10,7 @@ use super::{iter::SeqVecBitReader, SeqIter, SeqVec};
 use crate::variable::traits::Storable;
 use dsi_bitstream::prelude::{BitRead, BitSeek, CodesRead, Endianness};
 use std::cmp::Ordering;
+use std::fmt;
 use std::ops::Range;
 
 /// An immutable, zero-copy slice of a [`SeqVec`].
@@ -25,10 +26,11 @@ use std::ops::Range;
 /// # Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::seq::{SeqVec, LESeqVec};
 ///
 /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6], &[7, 8, 9, 10]];
-/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
 ///
 /// // Create a slice of sequences 1 through 2 (indices 1 and 2)
 /// let slice = vec.slice(1, 2).unwrap();
@@ -45,6 +47,8 @@ use std::ops::Range;
 ///     .map(|seq| seq.collect())
 ///     .collect();
 /// assert_eq!(all_values, vec![vec![3, 4, 5], vec![6]]);
+/// #     Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct SeqVecSlice<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
@@ -130,15 +134,18 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let slice = vec.slice(1, 2).unwrap();
     /// assert_eq!(slice.decode_vec(0), Some(vec![3, 4, 5]));
     /// assert_eq!(slice.decode_vec(1), Some(vec![6]));
     /// assert_eq!(slice.decode_vec(2), None); // Out of bounds
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn decode_vec(&self, index: usize) -> Option<Vec<T>>
@@ -180,10 +187,11 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let slice = vec.slice(1, 2).unwrap();
     ///
@@ -194,6 +202,8 @@ impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
     /// // Buffer is reused (cleared internally).
     /// assert_eq!(slice.decode_into(1, &mut buf), Some(1));
     /// assert_eq!(buf, vec![6]);
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn decode_into(&self, index: usize, buf: &mut Vec<T>) -> Option<usize>
@@ -273,16 +283,19 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6, 7], &[8]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let slice = vec.slice(0, 4).unwrap();
     ///
     /// assert_eq!(slice.binary_search(&[3, 4, 5]), Ok(1));
     /// assert_eq!(slice.binary_search(&[6, 7]), Ok(2));
     /// assert_eq!(slice.binary_search(&[5]), Err(2)); // Would be inserted at index 2
+    /// #     Ok(())
+    /// # }
     /// ```
     pub fn binary_search(&self, sequence: &[T]) -> Result<usize, usize>
     where
@@ -333,11 +346,12 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     /// use std::cmp::Ordering;
     ///
     /// let sequences: &[&[u32]] = &[&[1], &[1, 2], &[1, 2, 3], &[1, 2, 3, 4]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let slice = vec.slice(0, 4).unwrap();
     ///
@@ -356,6 +370,8 @@ where
     ///         None => Ordering::Less,
     ///     }
     /// });
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn binary_search_by<F>(&self, mut f: F) -> Result<usize, usize>
@@ -384,16 +400,19 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[10], &[20], &[30, 40], &[50]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let slice = vec.slice(0, 4).unwrap();
     ///
     /// // Search by first element
     /// let result = slice.binary_search_by_key(&30, |mut probe| probe.next().unwrap());
     /// assert_eq!(result, Ok(2)); // Found sequence [30, 40]
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn binary_search_by_key<K, F>(&self, b: &K, mut f: F) -> Result<usize, usize>
@@ -417,6 +436,14 @@ pub struct SeqVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
     back: usize,
 }
 
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for SeqVecSliceIter<'_, T, E, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SeqVecSliceIter")
+            .field("remaining", &self.back.saturating_sub(self.front))
+            .finish()
+    }
+}
+
 // --- IntoIterator Implementation ---
 
 impl<'a, T, E, B> IntoIterator for &'a SeqVecSlice<'a, T, E, B>
@@ -436,12 +463,15 @@ where
     /// This implementation allows slices to be used in `for` loops:
     ///
     /// ```no_run
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # use compressed_intvec::seq::{SeqVec, LESeqVec};
-    /// # let vec: LESeqVec<u32> = SeqVec::from_slices(&[&[1, 2][..], &[3, 4, 5][..]]).unwrap();
+    /// # let vec: LESeqVec<u32> = SeqVec::from_slices(&[&[1, 2][..], &[3, 4, 5][..]])?;
     /// # let slice = vec.slice(0, 2).unwrap();
     /// for seq in &slice {
     ///     // Process each sequence
     /// }
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     fn into_iter(self) -> Self::IntoIter {

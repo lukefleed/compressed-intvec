@@ -82,7 +82,8 @@ where
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "parallel")] {
+    /// # #[cfg(feature = "parallel")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     /// use rayon::prelude::*;
     ///
@@ -91,14 +92,17 @@ where
     ///     &[10, 20],
     ///     &[100, 200, 300],
     /// ];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// // Collect all sequences in parallel
     /// let all_sequences: Vec<Vec<u32>> = vec.par_iter().collect();
     ///
     /// assert_eq!(all_sequences.len(), 3);
     /// assert_eq!(all_sequences[0], vec![1, 2, 3]);
+    /// #     Ok(())
     /// # }
+    /// # #[cfg(not(feature = "parallel"))]
+    /// # fn main() {}
     /// ```
     pub fn par_iter(&self) -> impl ParallelIterator<Item = Vec<T>> + '_ {
         let num_sequences = self.num_sequences();
@@ -144,11 +148,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "parallel")] {
+    /// # #[cfg(feature = "parallel")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// // Sum each sequence without allocating intermediate Vecs
     /// let sums: Vec<u64> = vec.par_for_each(|seq| seq.map(|v| v as u64).sum());
@@ -161,18 +166,22 @@ where
     /// // Check if any sequence contains a value > 50
     /// let has_large: Vec<bool> = vec.par_for_each(|mut seq| seq.any(|v| v > 50));
     /// assert_eq!(has_large, vec![false, false, true]);
+    /// #     Ok(())
     /// # }
+    /// # #[cfg(not(feature = "parallel"))]
+    /// # fn main() {}
     /// ```
     ///
     /// # Comparison with [`par_iter`](Self::par_iter)
     ///
     /// ```
-    /// # #[cfg(feature = "parallel")] {
+    /// # #[cfg(feature = "parallel")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     /// use rayon::prelude::*;
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// // par_iter: allocates Vec<T> per sequence, then sums
     /// let sums_alloc: Vec<u64> = vec
@@ -184,7 +193,10 @@ where
     /// let sums_noalloc: Vec<u64> = vec.par_for_each(|seq| seq.map(|v| v as u64).sum());
     ///
     /// assert_eq!(sums_alloc, sums_noalloc);
+    /// #     Ok(())
     /// # }
+    /// # #[cfg(not(feature = "parallel"))]
+    /// # fn main() {}
     /// ```
     pub fn par_for_each<F, R>(&self, f: F) -> Vec<R>
     where
@@ -220,11 +232,12 @@ where
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "parallel")] {
+    /// # #[cfg(feature = "parallel")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// // Total sum across all sequences
     /// let total: u64 = vec.par_for_each_reduce(
@@ -241,7 +254,10 @@ where
     ///     |a, b| a.max(b),
     /// );
     /// assert_eq!(max, 100);
+    /// #     Ok(())
     /// # }
+    /// # #[cfg(not(feature = "parallel"))]
+    /// # fn main() {}
     /// ```
     pub fn par_for_each_reduce<F, R, ID, OP>(&self, f: F, identity: ID, op: OP) -> R
     where
@@ -288,7 +304,8 @@ where
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "parallel")] {
+    /// # #[cfg(feature = "parallel")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[
@@ -296,7 +313,7 @@ where
     ///     &[10, 20],
     ///     &[100, 200, 300],
     /// ];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// // Decode all sequences in parallel
     /// let all_sequences: Vec<Vec<u32>> = vec.par_into_vecs();
@@ -304,7 +321,10 @@ where
     /// assert_eq!(all_sequences.len(), 3);
     /// assert_eq!(all_sequences[0], vec![1, 2, 3]);
     /// assert_eq!(all_sequences[1], vec![10, 20]);
+    /// #     Ok(())
     /// # }
+    /// # #[cfg(not(feature = "parallel"))]
+    /// # fn main() {}
     /// ```
     ///
     /// [`into_vecs`]: super::SeqVec::into_vecs
@@ -345,7 +365,8 @@ where
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "parallel")] {
+    /// # #[cfg(feature = "parallel")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[
@@ -354,15 +375,18 @@ where
     ///     &[100, 200, 300],
     ///     &[1000],
     /// ];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let indices = [3, 0, 2];
-    /// let sequences = vec.par_decode_many(&indices).unwrap();
+    /// let sequences = vec.par_decode_many(&indices)?;
     /// assert_eq!(sequences.len(), 3);
     /// assert_eq!(sequences[0], vec![1000]);  // Index 3
     /// assert_eq!(sequences[1], vec![1, 2, 3]); // Index 0
     /// assert_eq!(sequences[2], vec![100, 200, 300]); // Index 2
+    /// #     Ok(())
     /// # }
+    /// # #[cfg(not(feature = "parallel"))]
+    /// # fn main() {}
     /// ```
     pub fn par_decode_many(&self, indices: &[usize]) -> Result<Vec<Vec<T>>, SeqVecError> {
         if indices.is_empty() {
@@ -439,16 +463,20 @@ where
     /// # Examples
     ///
     /// ```
-    /// # #[cfg(feature = "parallel")] {
+    /// # #[cfg(feature = "parallel")]
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100], &[1000, 2000]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// // Sum only sequences at indices 0 and 2
-    /// let sums = vec.par_for_each_many(&[0, 2], |seq| seq.map(|v| v as u64).sum::<u64>()).unwrap();
+    /// let sums = vec.par_for_each_many(&[0, 2], |seq| seq.map(|v| v as u64).sum::<u64>())?;
     /// assert_eq!(sums, vec![6, 100]);
+    /// #     Ok(())
     /// # }
+    /// # #[cfg(not(feature = "parallel"))]
+    /// # fn main() {}
     /// ```
     pub fn par_for_each_many<F, R>(&self, indices: &[usize], f: F) -> Result<Vec<R>, SeqVecError>
     where

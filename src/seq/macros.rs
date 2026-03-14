@@ -26,11 +26,13 @@
 macro_rules! seq_vec {
     // Empty case: seq_vec![]
     () => {
-        $crate::seq::SeqVec::<u64, dsi_bitstream::prelude::LE>::builder().build(&[&[0u64; 0]]).unwrap()
+        $crate::seq::SeqVec::<u64, ::dsi_bitstream::prelude::LE>::builder()
+            .build(&[] as &[&[u64]])
+            .unwrap()
     };
     // One or more sequences: seq_vec![[1, 2], [3, 4]]
     ($([$($elem:expr),* $(,)?]),* $(,)?) => {
-        $crate::seq::SeqVec::<_, dsi_bitstream::prelude::LE>::from_slices(&[
+        $crate::seq::SeqVec::<_, ::dsi_bitstream::prelude::LE>::from_slices(&[
             $(&[$($elem),*] as &[_]),*
         ]).unwrap()
     };
@@ -56,7 +58,9 @@ macro_rules! seq_vec {
 macro_rules! sseq_vec {
     // Empty case
     () => {
-        $crate::seq::SeqVec::<i64, dsi_bitstream::prelude::LE>::builder().build(&[&[0i64; 0]]).unwrap()
+        $crate::seq::SeqVec::<i64, ::dsi_bitstream::prelude::LE>::builder()
+            .build(&[] as &[&[i64]])
+            .unwrap()
     };
     // One or more sequences with automatic casting to i64
     ($([$($elem:expr),* $(,)?]),* $(,)?) => {

@@ -15,6 +15,7 @@
 //! Serializing and deserializing an `VarVec` using `serde_json`:
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # #[cfg(feature = "serde")] {
 //! use compressed_intvec::prelude::*;
 //!
@@ -23,14 +24,16 @@
 //! let vec: LESVarVec = sint_vec![-10, 20, -30, 40, -50];
 //!
 //! // Serialize the vector to a JSON string
-//! let serialized = serde_json::to_string(&vec).unwrap();
+//! let serialized = serde_json::to_string(&vec)?;
 //!
 //! // Deserialize the JSON string back into an VarVec of the same type.
-//! let deserialized: LESVarVec = serde_json::from_str(&serialized).unwrap();
+//! let deserialized: LESVarVec = serde_json::from_str(&serialized)?;
 //!
 //! // To compare for equality, we can collect both into a standard Vec.
 //! // This verifies that the content is identical after the round trip.
 //! assert_eq!(vec.iter().collect::<Vec<_>>(), deserialized.iter().collect::<Vec<_>>());
+//! # }
+//! # Ok(())
 //! # }
 //! ```
 //!

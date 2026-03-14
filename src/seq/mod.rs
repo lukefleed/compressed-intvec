@@ -67,6 +67,7 @@
 //! ## Basic Usage
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::seq::{SeqVec, LESeqVec};
 //!
 //! let sequences: &[&[u32]] = &[
@@ -76,18 +77,21 @@
 //!     &[], // Empty sequences are supported
 //! ];
 //!
-//! let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+//! let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
 //!
 //! assert_eq!(vec.num_sequences(), 4);
 //!
 //! // Access a sequence by index
 //! let seq1: Vec<u32> = vec.get(1).unwrap().collect();
 //! assert_eq!(seq1, vec![10, 20]);
+//! #     Ok(())
+//! # }
 //! ```
 //!
 //! ## Custom Codec
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
 //!
 //! let sequences: Vec<Vec<u64>> = vec![
@@ -97,8 +101,9 @@
 //!
 //! let vec: LESeqVec<u64> = SeqVec::builder()
 //!     .codec(Codec::Zeta { k: Some(3) })
-//!     .build(&sequences)
-//!     .unwrap();
+//!     .build(&sequences)?;
+//! #     Ok(())
+//! # }
 //! ```
 //!
 //! [`VarVec`]: crate::variable::VarVec
@@ -258,7 +263,7 @@ pub type SSeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 ///
 /// Signed integers are transparently encoded using zig-zag encoding via the
 /// [`Storable`] trait.
-pub type BESEqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
+pub type BESSeqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
 
 /// A [`SeqVec`] for signed integers with little-endian bit ordering.
 ///
@@ -267,10 +272,797 @@ pub type BESEqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
 ///
 /// Signed integers are transparently encoded using zig-zag encoding via the
 /// [`Storable`] trait.
-pub type LESEqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
+pub type LESSeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 
 /// Type alias for a tuple of two [`SeqVecSlice`] references.
 pub type SeqVecSlicePair<'a, T, E, B> = (SeqVecSlice<'a, T, E, B>, SeqVecSlice<'a, T, E, B>);
+
+// --- Construction (Owned) ---
+
+impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
+    /// Creates a [`SeqVec`] from a slice of slices using default settings.
+    ///
+    /// This method uses [`Codec::Auto`] to select an optimal codec
+    /// based on the data distribution.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`SeqVecError`] if codec resolution or encoding fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// assert_eq!(vec.num_sequences(), 3);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    pub fn from_slices<S: AsRef<[T]>>(sequences: &[S]) -> Result<Self, SeqVecError>
+    where
+        SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
+    {
+        Self::builder().codec(Codec::Auto).build(sequences)
+    }
+
+    /// Consumes the [`SeqVec`] and returns all sequences as a `Vec<Vec<T>>`.
+    ///
+    /// This method decodes the entire compressed data, allocating a separate
+    /// vector for each sequence. The operation requires time proportional to the
+    /// total number of elements across all sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[10, 20, 30]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// let decoded: Vec<Vec<u32>> = vec.into_vecs();
+    /// assert_eq!(decoded, vec![vec![1, 2], vec![10, 20, 30]]);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    pub fn into_vecs(self) -> Vec<Vec<T>>
+    where
+        for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+            + CodesRead<E>
+            + BitSeek<Error = core::convert::Infallible>,
+    {
+        self.iter().map(|seq_iter| seq_iter.collect()).collect()
+    }
+}
+
+// --- Construction (Generic Buffer) ---
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
+    /// Creates a [`SeqVec`] from raw components for zero-copy views.
+    ///
+    /// This constructor is intended for advanced use cases such as memory-mapping
+    /// a pre-built [`SeqVec`] from disk or creating a borrowed view.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - The compressed bitstream buffer.
+    /// * `bit_offsets_data` - The buffer containing the bit offsets index.
+    /// * `bit_offsets_len` - Number of entries in the bit offsets index (N+1).
+    /// * `bit_offsets_num_bits` - Bit width of each entry in the offsets index.
+    /// * `encoding` - The codec used for compression.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SeqVecError::InvalidParameters`] if:
+    /// * `bit_offsets_len` is zero (must have at least the sentinel entry).
+    /// * The underlying [`FixedVec`] construction fails.
+    ///
+    /// # Safety Considerations
+    ///
+    /// The caller must ensure that:
+    /// * `data` contains valid compressed data encoded with `encoding`.
+    ///   Invalid data will cause panics or incorrect results during decoding.
+    /// * `bit_offsets_data` contains monotonically increasing bit positions.
+    ///   Unsorted offsets will cause out-of-order or corrupted sequence retrieval.
+    /// * The sentinel value (final bit offset) does not exceed the total bits
+    ///   in `data`. Violations cause panics during decoding.
+    /// * All bit positions fall within valid boundaries of the bitstream.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    /// use compressed_intvec::fixed::FixedVec;
+    /// use dsi_bitstream::prelude::LE;
+    /// use dsi_bitstream::impls::{BufBitWriter, MemWordWriterVec};
+    /// use dsi_bitstream::prelude::{BitWrite, CodesWrite};
+    ///
+    /// // Create a simple vector using high-level API
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// // In a real zero-copy scenario, these would come from disk/memory-map
+    /// let data = vec.as_limbs().to_vec();
+    /// let offsets_ref = vec.bit_offsets_ref();
+    ///
+    /// // Verify structure is sound before reconstruction
+    /// assert_eq!(vec.num_sequences(), 2);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    pub fn from_parts(
+        data: B,
+        bit_offsets_data: B,
+        bit_offsets_len: usize,
+        bit_offsets_num_bits: usize,
+        encoding: Codes,
+    ) -> Result<Self, SeqVecError> {
+        if bit_offsets_len == 0 {
+            return Err(SeqVecError::InvalidParameters(
+                "bit_offsets must have at least one entry (the sentinel)".to_string(),
+            ));
+        }
+
+        let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
+            bit_offsets_data,
+            bit_offsets_len,
+            bit_offsets_num_bits,
+        )?;
+
+        Ok(Self {
+            data,
+            bit_offsets,
+            seq_lengths: None,
+            encoding,
+            _markers: PhantomData,
+        })
+    }
+
+    /// Creates a [`SeqVec`] from raw components with optional stored lengths.
+    ///
+    /// Use this variant when you have pre-computed sequence lengths from an
+    /// earlier encoding. The `seq_lengths` parameter must be consistent with
+    /// `bit_offsets` when provided (element count must equal `num_sequences()`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SeqVecError::InvalidParameters`] if the number of lengths does
+    /// not equal the number of sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// // Typical usage: start with high-level API
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// // Verify structure
+    /// assert!(!vec.has_stored_lengths());
+    /// assert_eq!(vec.num_sequences(), 2);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    pub fn from_parts_with_lengths(
+        data: B,
+        bit_offsets_data: B,
+        bit_offsets_len: usize,
+        bit_offsets_num_bits: usize,
+        seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
+        encoding: Codes,
+    ) -> Result<Self, SeqVecError> {
+        if bit_offsets_len == 0 {
+            return Err(SeqVecError::InvalidParameters(
+                "bit_offsets must have at least one entry (the sentinel)".to_string(),
+            ));
+        }
+
+        if let Some(lengths) = &seq_lengths
+            && lengths.len() + 1 != bit_offsets_len
+        {
+            return Err(SeqVecError::InvalidParameters(
+                "seq_lengths length must match number of sequences".to_string(),
+            ));
+        }
+
+        let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
+            bit_offsets_data,
+            bit_offsets_len,
+            bit_offsets_num_bits,
+        )?;
+
+        Ok(Self {
+            data,
+            bit_offsets,
+            seq_lengths,
+            encoding,
+            _markers: PhantomData,
+        })
+    }
+
+    /// Creates a [`SeqVec`] from pre-built components without validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure all components are consistent and valid. Mismatched
+    /// parameters will lead to panics or incorrect data retrieval.
+    #[inline]
+    pub unsafe fn from_parts_unchecked(
+        data: B,
+        bit_offsets: FixedVec<u64, u64, E, B>,
+        encoding: Codes,
+    ) -> Self {
+        Self {
+            data,
+            bit_offsets,
+            seq_lengths: None,
+            encoding,
+            _markers: PhantomData,
+        }
+    }
+
+    /// Creates a [`SeqVec`] from pre-built components with optional lengths
+    /// without validation.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure all components are consistent and valid.
+    #[inline]
+    pub unsafe fn from_parts_with_lengths_unchecked(
+        data: B,
+        bit_offsets: FixedVec<u64, u64, E, B>,
+        seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
+        encoding: Codes,
+    ) -> Self {
+        Self {
+            data,
+            bit_offsets,
+            seq_lengths,
+            encoding,
+            _markers: PhantomData,
+        }
+    }
+}
+
+// --- Query Methods ---
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
+    /// Returns the number of sequences stored.
+    ///
+    /// This is O(1) as it is derived from the bit offsets index length.
+    #[inline(always)]
+    pub fn num_sequences(&self) -> usize {
+        // bit_offsets has N+1 entries for N sequences (always at least the sentinel).
+        self.bit_offsets.len() - 1
+    }
+
+    /// Returns `true` if there are no sequences stored.
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.num_sequences() == 0
+    }
+
+    /// Returns the compression codec used for encoding.
+    #[inline(always)]
+    pub fn encoding(&self) -> Codes {
+        self.encoding
+    }
+
+    /// Returns a reference to the underlying compressed data buffer.
+    #[inline(always)]
+    pub fn as_limbs(&self) -> &[u64] {
+        self.data.as_ref()
+    }
+
+    /// Returns a reference to the bit offsets index.
+    #[inline(always)]
+    pub fn bit_offsets_ref(&self) -> &FixedVec<u64, u64, E, B> {
+        &self.bit_offsets
+    }
+
+    /// Returns `true` if explicit sequence lengths were stored at construction time.
+    #[inline(always)]
+    pub fn has_stored_lengths(&self) -> bool {
+        self.seq_lengths.is_some()
+    }
+
+    /// Returns the length of sequence `index` if explicit lengths are stored.
+    ///
+    /// Returns `None` if `index` is out of bounds or if lengths were not
+    /// stored at construction time. Use [`has_stored_lengths`](Self::has_stored_lengths)
+    /// to distinguish between these cases.
+    ///
+    /// If lengths are stored, this query completes in O(1) time. Otherwise,
+    /// determining sequence length requires full iteration. Store lengths at
+    /// construction time via [`SeqVecBuilder::store_lengths`](crate::seq::SeqVecBuilder::store_lengths)
+    /// when O(1) length queries are needed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// // Without storing lengths, returns None
+    /// assert_eq!(vec.sequence_len(0), None);
+    /// assert!(!vec.has_stored_lengths());
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn sequence_len(&self, index: usize) -> Option<usize> {
+        if index >= self.num_sequences() {
+            return None;
+        }
+
+        self.seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(index) as usize })
+    }
+
+    /// Returns the total number of bits in the compressed data.
+    ///
+    /// This is the sentinel value at the end of the bit offsets index.
+    #[inline(always)]
+    pub fn total_bits(&self) -> u64 {
+        // bit_offsets always has at least one sentinel entry by construction invariant.
+        unsafe { self.bit_offsets.get_unchecked(self.bit_offsets.len() - 1) }
+    }
+
+    /// Returns the bit offset where sequence `index` starts in the compressed data.
+    ///
+    /// Returns `None` if `index >= num_sequences()`. This is useful for
+    /// understanding the compression footprint or verifying sequence boundaries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// // First sequence always starts at bit 0
+    /// assert_eq!(vec.sequence_start_bit(0), Some(0));
+    /// // Second sequence starts after the first
+    /// assert!(vec.sequence_start_bit(1).is_some());
+    /// // Out of bounds
+    /// assert_eq!(vec.sequence_start_bit(2), None);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn sequence_start_bit(&self, index: usize) -> Option<u64> {
+        if index >= self.num_sequences() {
+            return None;
+        }
+        // SAFETY: bounds checked above.
+        Some(unsafe { self.bit_offsets.get_unchecked(index) })
+    }
+
+    /// Returns the bit offset where sequence `index` starts, without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure `index < num_sequences()`.
+    #[inline(always)]
+    pub unsafe fn sequence_start_bit_unchecked(&self, index: usize) -> u64 {
+        debug_assert!(
+            index < self.num_sequences(),
+            "index {} out of bounds for {} sequences",
+            index,
+            self.num_sequences()
+        );
+        unsafe { self.bit_offsets.get_unchecked(index) }
+    }
+
+    /// Returns the bit offset immediately after sequence `index` ends.
+    ///
+    /// This is equivalent to the start bit of the next sequence, or the total
+    /// bit length for the final sequence. Useful for calculating per-sequence
+    /// compression footprint.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// let start = vec.sequence_start_bit(0).unwrap();
+    /// let end = unsafe { vec.sequence_end_bit_unchecked(0) };
+    /// println!("Sequence 0 occupies {} bits", end - start);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure `index < num_sequences()`.
+    #[inline]
+    pub unsafe fn sequence_end_bit_unchecked(&self, index: usize) -> u64 {
+        debug_assert!(
+            index < self.num_sequences(),
+            "index {} out of bounds for {} sequences",
+            index,
+            self.num_sequences()
+        );
+        unsafe { self.bit_offsets.get_unchecked(index + 1) }
+    }
+}
+
+// --- Access Methods ---
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B>
+where
+    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    /// Returns an iterator over the elements of sequence `index`.
+    ///
+    /// Returns `None` if `index >= num_sequences()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// let first: Vec<u32> = vec.get(0).unwrap().collect();
+    /// assert_eq!(first, vec![1, 2, 3]);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn get(&self, index: usize) -> Option<SeqIter<'_, T, E>> {
+        if index >= self.num_sequences() {
+            return None;
+        }
+        // SAFETY: bounds checked above.
+        Some(unsafe { self.get_unchecked(index) })
+    }
+
+    /// Returns an iterator over the elements of sequence `index` without
+    /// bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with `index >= num_sequences()` is undefined behavior.
+    #[inline(always)]
+    pub unsafe fn get_unchecked(&self, index: usize) -> SeqIter<'_, T, E> {
+        debug_assert!(
+            index < self.num_sequences(),
+            "index {} out of bounds for {} sequences",
+            index,
+            self.num_sequences()
+        );
+
+        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
+        let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
+        let len = self
+            .seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(index) as usize });
+
+        SeqIter::new_with_len(self.data.as_ref(), start_bit, end_bit, self.encoding, len)
+    }
+
+    /// Returns the elements of sequence `index` as a newly allocated `Vec`.
+    ///
+    /// Returns `None` if `index >= num_sequences()`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[10, 20, 30]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// assert_eq!(vec.decode_vec(0), Some(vec![10, 20, 30]));
+    /// assert_eq!(vec.decode_vec(1), None);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn decode_vec(&self, index: usize) -> Option<Vec<T>> {
+        if index >= self.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        Some(unsafe { self.decode_vec_unchecked(index) })
+    }
+
+    /// Returns the elements of sequence `index` as a newly allocated `Vec`
+    /// without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with `index >= num_sequences()` is undefined behavior.
+    #[inline(always)]
+    pub unsafe fn decode_vec_unchecked(&self, index: usize) -> Vec<T> {
+        unsafe { self.get_unchecked(index).collect() }
+    }
+
+    /// Decodes sequence `index` into the provided buffer.
+    ///
+    /// The buffer is cleared before use. Returns the number of elements
+    /// decoded, or `None` if `index >= num_sequences()`.
+    ///
+    /// This method is more efficient than [`decode_vec`](Self::decode_vec) when
+    /// reusing a buffer across multiple calls.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// let mut buf = Vec::new();
+    /// assert_eq!(vec.decode_into(0, &mut buf), Some(2));
+    /// assert_eq!(buf, vec![1, 2]);
+    ///
+    /// // Buffer is reused (cleared internally).
+    /// assert_eq!(vec.decode_into(1, &mut buf), Some(3));
+    /// assert_eq!(buf, vec![3, 4, 5]);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn decode_into(&self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
+        if index >= self.num_sequences() {
+            return None;
+        }
+
+        // SAFETY: Bounds check has been performed.
+        Some(unsafe { self.decode_into_unchecked(index, buf) })
+    }
+
+    /// Decodes sequence `index` into the provided buffer without bounds checking.
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with `index >= num_sequences()` is undefined behavior.
+    #[inline(always)]
+    pub unsafe fn decode_into_unchecked(&self, index: usize, buf: &mut Vec<T>) -> usize {
+        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
+
+        buf.clear();
+
+        // Create reader and codec dispatcher once, then decode all elements
+        // directly into the buffer without creating an intermediate SeqIter.
+        // This avoids iterator overhead and enables better compiler optimization.
+        let mut reader =
+            SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()));
+        let _ = reader.set_bit_pos(start_bit);
+        let code_reader = CodecReader::new(self.encoding);
+
+        if let Some(lengths) = &self.seq_lengths {
+            let count = unsafe { lengths.get_unchecked(index) as usize };
+            self.decode_counted(&mut reader, &code_reader, buf, count);
+        } else {
+            let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
+            self.decode_until(&mut reader, &code_reader, buf, end_bit);
+        }
+
+        buf.len()
+    }
+
+    /// Decodes a known number of elements into `buf`.
+    #[inline(always)]
+    fn decode_counted<'a>(
+        &self,
+        reader: &mut SeqVecBitReader<'a, E>,
+        code_reader: &CodecReader<'a, E>,
+        buf: &mut Vec<T>,
+        count: usize,
+    ) {
+        buf.reserve(count);
+        for _ in 0..count {
+            let word = code_reader.read(reader).unwrap();
+            buf.push(T::from_word(word));
+        }
+    }
+
+    /// Decodes elements until the reader reaches `end_bit`.
+    #[inline(always)]
+    fn decode_until<'a>(
+        &self,
+        reader: &mut SeqVecBitReader<'a, E>,
+        code_reader: &CodecReader<'a, E>,
+        buf: &mut Vec<T>,
+        end_bit: u64,
+    ) {
+        while reader.bit_pos().unwrap() < end_bit {
+            let word = code_reader.read(reader).unwrap();
+            buf.push(T::from_word(word));
+        }
+    }
+
+    /// Returns an iterator over all sequences.
+    ///
+    /// Each element of the returned iterator is a [`SeqIter`] for the
+    /// corresponding sequence.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3], &[4, 5, 6]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// for (i, seq) in vec.iter().enumerate() {
+    ///     println!("Sequence {}: {:?}", i, seq.collect::<Vec<_>>());
+    /// }
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn iter(&self) -> SeqVecIter<'_, T, E, B> {
+        SeqVecIter::new(
+            self.data.as_ref(),
+            &self.bit_offsets,
+            self.seq_lengths.as_ref(),
+            self.encoding,
+            self.num_sequences(),
+        )
+    }
+
+    /// Creates a reusable reader for convenient random access to sequences.
+    ///
+    /// The returned [`SeqVecReader`] provides a convenient interface for
+    /// performing multiple sequence retrievals. While the current implementation
+    /// is a thin wrapper, it serves as a natural extension point for future
+    /// optimizations such as position tracking or caching.
+    ///
+    /// ## Performance Considerations
+    ///
+    /// - **Zero-copy iteration**: Returned iterators borrow directly from the
+    ///   compressed data without intermediate allocations.
+    /// - **Stateless operation**: Each call to [`get`](Self::get) is independent and creates a fresh [`SeqIter`].
+    /// - **Convenience methods**: The reader provides [`decode_vec`](SeqVecReader::decode_vec)
+    ///   and [`decode_into`](SeqVecReader::decode_into) for common patterns.
+    ///
+    /// ## When to Use
+    ///
+    /// Use a reader when:
+    /// - You prefer a consistent interface for multiple accesses.
+    /// - You want to use convenience methods like `decode_vec` or `decode_into`.
+    /// - Future stateful optimizations would benefit your access pattern.
+    ///
+    /// For single queries or simple iteration, direct calls to [`get`](Self::get)
+    /// or [`iter`](Self::iter) are equally efficient.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// let mut reader = vec.reader();
+    ///
+    /// // Perform multiple random accesses efficiently
+    /// assert_eq!(reader.decode_vec(2), Some(vec![6]));
+    /// assert_eq!(reader.decode_vec(0), Some(vec![1, 2]));
+    /// if let Some(seq) = reader.decode_vec(1) {
+    ///     for value in seq {
+    ///         assert!(value <= 5);
+    ///     }
+    /// }
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[inline(always)]
+    pub fn reader(&self) -> SeqVecReader<'_, T, E, B> {
+        SeqVecReader::new(self)
+    }
+
+    /// Creates a zero-copy slice of a contiguous range of sequences.
+    ///
+    /// The slice provides a view into `len` sequences starting at `start`,
+    /// without copying the underlying compressed data.
+    ///
+    /// # Arguments
+    ///
+    /// * `start` - The index of the first sequence in the slice.
+    /// * `len` - The number of sequences to include in the slice.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some(SeqVecSlice)` if the range is valid, or `None` if
+    /// `start + len` exceeds the number of sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6], &[7, 8]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// // Create a slice of sequences 1 and 2
+    /// let slice = vec.slice(1, 2).unwrap();
+    /// assert_eq!(slice.len(), 2);
+    ///
+    /// // Index 0 of the slice refers to sequence 1 of the original vector
+    /// let seq: Vec<u32> = slice.get(0).unwrap().collect();
+    /// assert_eq!(seq, vec![3, 4, 5]);
+    /// #     Ok(())
+    /// # }
+    /// ```
+    pub fn slice(&self, start: usize, len: usize) -> Option<slice::SeqVecSlice<'_, T, E, B>> {
+        if start.saturating_add(len) > self.num_sequences() {
+            return None;
+        }
+        Some(slice::SeqVecSlice::new(self, start..start + len))
+    }
+
+    /// Splits the vector into two slices at the specified index.
+    ///
+    /// Returns a tuple of two slices: the first contains sequences `[0, mid)`
+    /// and the second contains sequences `[mid, len)`.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Some((left_slice, right_slice))` if `mid <= num_sequences()`,
+    /// or `None` if `mid` is out of bounds.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
+    ///
+    /// let sequences: &[&[u32]] = &[&[1], &[2], &[3], &[4]];
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
+    ///
+    /// let (left, right) = vec.split_at(2).unwrap();
+    /// assert_eq!(left.len(), 2);
+    /// assert_eq!(right.len(), 2);
+    ///
+    /// assert_eq!(left.decode_vec(0), Some(vec![1]));
+    /// assert_eq!(right.decode_vec(0), Some(vec![3]));
+    /// #     Ok(())
+    /// # }
+    /// ```
+    pub fn split_at(&self, mid: usize) -> Option<SeqVecSlicePair<'_, T, E, B>> {
+        if mid > self.num_sequences() {
+            return None;
+        }
+        Some((
+            slice::SeqVecSlice::new(self, 0..mid),
+            slice::SeqVecSlice::new(self, mid..self.num_sequences()),
+        ))
+    }
+}
 
 // --- MemSize Implementation ---
 
@@ -451,751 +1243,6 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
     }
 }
 
-// --- Construction (Owned) ---
-
-impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
-    /// Creates a [`SeqVec`] from a slice of slices using default settings.
-    ///
-    /// This method uses [`Codec::Auto`] to select an optimal codec
-    /// based on the data distribution.
-    ///
-    /// # Errors
-    ///
-    /// Returns a [`SeqVecError`] if codec resolution or encoding fails.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// assert_eq!(vec.num_sequences(), 3);
-    /// ```
-    pub fn from_slices<S: AsRef<[T]>>(sequences: &[S]) -> Result<Self, SeqVecError>
-    where
-        SeqVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
-    {
-        Self::builder().codec(Codec::Auto).build(sequences)
-    }
-
-    /// Consumes the [`SeqVec`] and returns all sequences as a `Vec<Vec<T>>`.
-    ///
-    /// This method decodes the entire compressed data, allocating a separate
-    /// vector for each sequence. The operation requires time proportional to the
-    /// total number of elements across all sequences.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[10, 20, 30]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let decoded: Vec<Vec<u32>> = vec.into_vecs();
-    /// assert_eq!(decoded, vec![vec![1, 2], vec![10, 20, 30]]);
-    /// ```
-    pub fn into_vecs(self) -> Vec<Vec<T>>
-    where
-        for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-            + CodesRead<E>
-            + BitSeek<Error = core::convert::Infallible>,
-    {
-        self.iter().map(|seq_iter| seq_iter.collect()).collect()
-    }
-}
-
-// --- Construction (Generic Buffer) ---
-
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
-    /// Creates a [`SeqVec`] from raw components for zero-copy views.
-    ///
-    /// This constructor is intended for advanced use cases such as memory-mapping
-    /// a pre-built [`SeqVec`] from disk or creating a borrowed view.
-    ///
-    /// # Arguments
-    ///
-    /// * `data` - The compressed bitstream buffer.
-    /// * `bit_offsets_data` - The buffer containing the bit offsets index.
-    /// * `bit_offsets_len` - Number of entries in the bit offsets index (N+1).
-    /// * `bit_offsets_num_bits` - Bit width of each entry in the offsets index.
-    /// * `encoding` - The codec used for compression.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SeqVecError::InvalidParameters`] if:
-    /// * `bit_offsets_len` is zero (must have at least the sentinel entry).
-    /// * The underlying [`FixedVec`] construction fails.
-    ///
-    /// # Safety Considerations
-    ///
-    /// The caller must ensure that:
-    /// * `data` contains valid compressed data encoded with `encoding`.
-    ///   Invalid data will cause panics or incorrect results during decoding.
-    /// * `bit_offsets_data` contains monotonically increasing bit positions.
-    ///   Unsorted offsets will cause out-of-order or corrupted sequence retrieval.
-    /// * The sentinel value (final bit offset) does not exceed the total bits
-    ///   in `data`. Violations cause panics during decoding.
-    /// * All bit positions fall within valid boundaries of the bitstream.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    /// use compressed_intvec::fixed::FixedVec;
-    /// use dsi_bitstream::prelude::LE;
-    /// use dsi_bitstream::impls::{BufBitWriter, MemWordWriterVec};
-    /// use dsi_bitstream::prelude::{BitWrite, CodesWrite};
-    ///
-    /// // Create a simple vector using high-level API
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// // In a real zero-copy scenario, these would come from disk/memory-map
-    /// let data = vec.as_limbs().to_vec();
-    /// let offsets_ref = vec.bit_offsets_ref();
-    ///
-    /// // Verify structure is sound before reconstruction
-    /// assert_eq!(vec.num_sequences(), 2);
-    /// ```
-    pub fn from_parts(
-        data: B,
-        bit_offsets_data: B,
-        bit_offsets_len: usize,
-        bit_offsets_num_bits: usize,
-        encoding: Codes,
-    ) -> Result<Self, SeqVecError> {
-        if bit_offsets_len == 0 {
-            return Err(SeqVecError::InvalidParameters(
-                "bit_offsets must have at least one entry (the sentinel)".to_string(),
-            ));
-        }
-
-        let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
-            bit_offsets_data,
-            bit_offsets_len,
-            bit_offsets_num_bits,
-        )?;
-
-        Ok(Self {
-            data,
-            bit_offsets,
-            seq_lengths: None,
-            encoding,
-            _markers: PhantomData,
-        })
-    }
-
-    /// Creates a [`SeqVec`] from raw components with optional stored lengths.
-    ///
-    /// Use this variant when you have pre-computed sequence lengths from an
-    /// earlier encoding. The `seq_lengths` parameter must be consistent with
-    /// `bit_offsets` when provided (element count must equal `num_sequences()`).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SeqVecError::InvalidParameters`] if the number of lengths does
-    /// not equal the number of sequences.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// // Typical usage: start with high-level API
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// // Verify structure
-    /// assert!(!vec.has_stored_lengths());
-    /// assert_eq!(vec.num_sequences(), 2);
-    /// ```
-    pub fn from_parts_with_lengths(
-        data: B,
-        bit_offsets_data: B,
-        bit_offsets_len: usize,
-        bit_offsets_num_bits: usize,
-        seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
-        encoding: Codes,
-    ) -> Result<Self, SeqVecError> {
-        if bit_offsets_len == 0 {
-            return Err(SeqVecError::InvalidParameters(
-                "bit_offsets must have at least one entry (the sentinel)".to_string(),
-            ));
-        }
-
-        if let Some(lengths) = &seq_lengths
-            && lengths.len() + 1 != bit_offsets_len
-        {
-            return Err(SeqVecError::InvalidParameters(
-                "seq_lengths length must match number of sequences".to_string(),
-            ));
-        }
-
-        let bit_offsets = FixedVec::<u64, u64, E, B>::from_parts(
-            bit_offsets_data,
-            bit_offsets_len,
-            bit_offsets_num_bits,
-        )?;
-
-        Ok(Self {
-            data,
-            bit_offsets,
-            seq_lengths,
-            encoding,
-            _markers: PhantomData,
-        })
-    }
-
-    /// Creates a [`SeqVec`] from pre-built components without validation.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure all components are consistent and valid. Mismatched
-    /// parameters will lead to panics or incorrect data retrieval.
-    #[inline]
-    pub unsafe fn from_parts_unchecked(
-        data: B,
-        bit_offsets: FixedVec<u64, u64, E, B>,
-        encoding: Codes,
-    ) -> Self {
-        Self {
-            data,
-            bit_offsets,
-            seq_lengths: None,
-            encoding,
-            _markers: PhantomData,
-        }
-    }
-
-    /// Creates a [`SeqVec`] from pre-built components with optional lengths
-    /// without validation.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure all components are consistent and valid.
-    #[inline]
-    pub unsafe fn from_parts_with_lengths_unchecked(
-        data: B,
-        bit_offsets: FixedVec<u64, u64, E, B>,
-        seq_lengths: Option<FixedVec<u64, u64, E, Vec<u64>>>,
-        encoding: Codes,
-    ) -> Self {
-        Self {
-            data,
-            bit_offsets,
-            seq_lengths,
-            encoding,
-            _markers: PhantomData,
-        }
-    }
-}
-
-// --- Query Methods ---
-
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
-    /// Returns the number of sequences stored.
-    ///
-    /// This is O(1) as it is derived from the bit offsets index length.
-    #[inline(always)]
-    pub fn num_sequences(&self) -> usize {
-        // bit_offsets has N+1 entries for N sequences (always at least the sentinel).
-        self.bit_offsets.len() - 1
-    }
-
-    /// Returns `true` if there are no sequences stored.
-    #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.num_sequences() == 0
-    }
-
-    /// Returns the compression codec used for encoding.
-    #[inline(always)]
-    pub fn encoding(&self) -> Codes {
-        self.encoding
-    }
-
-    /// Returns a reference to the underlying compressed data buffer.
-    #[inline(always)]
-    pub fn as_limbs(&self) -> &[u64] {
-        self.data.as_ref()
-    }
-
-    /// Returns a reference to the bit offsets index.
-    #[inline(always)]
-    pub fn bit_offsets_ref(&self) -> &FixedVec<u64, u64, E, B> {
-        &self.bit_offsets
-    }
-
-    /// Returns `true` if explicit sequence lengths were stored at construction time.
-    #[inline(always)]
-    pub fn has_stored_lengths(&self) -> bool {
-        self.seq_lengths.is_some()
-    }
-
-    /// Returns the length of sequence `index` if explicit lengths are stored.
-    ///
-    /// Returns `None` if `index` is out of bounds or if lengths were not
-    /// stored at construction time. Use [`has_stored_lengths`](Self::has_stored_lengths)
-    /// to distinguish between these cases.
-    ///
-    /// If lengths are stored, this query completes in O(1) time. Otherwise,
-    /// determining sequence length requires full iteration. Store lengths at
-    /// construction time via [`SeqVecBuilder::store_lengths`](crate::seq::SeqVecBuilder::store_lengths)
-    /// when O(1) length queries are needed.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// // Without storing lengths, returns None
-    /// assert_eq!(vec.sequence_len(0), None);
-    /// assert!(!vec.has_stored_lengths());
-    /// ```
-    #[inline(always)]
-    pub fn sequence_len(&self, index: usize) -> Option<usize> {
-        if index >= self.num_sequences() {
-            return None;
-        }
-
-        self.seq_lengths
-            .as_ref()
-            .map(|lengths| unsafe { lengths.get_unchecked(index) as usize })
-    }
-
-    /// Returns the total number of bits in the compressed data.
-    ///
-    /// This is the sentinel value at the end of the bit offsets index.
-    #[inline(always)]
-    pub fn total_bits(&self) -> u64 {
-        // bit_offsets always has at least one sentinel entry by construction invariant.
-        unsafe { self.bit_offsets.get_unchecked(self.bit_offsets.len() - 1) }
-    }
-
-    /// Returns the bit offset where sequence `index` starts in the compressed data.
-    ///
-    /// Returns `None` if `index >= num_sequences()`. This is useful for
-    /// understanding the compression footprint or verifying sequence boundaries.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// // First sequence always starts at bit 0
-    /// assert_eq!(vec.sequence_start_bit(0), Some(0));
-    /// // Second sequence starts after the first
-    /// assert!(vec.sequence_start_bit(1).is_some());
-    /// // Out of bounds
-    /// assert_eq!(vec.sequence_start_bit(2), None);
-    /// ```
-    #[inline(always)]
-    pub fn sequence_start_bit(&self, index: usize) -> Option<u64> {
-        if index >= self.num_sequences() {
-            return None;
-        }
-        // SAFETY: bounds checked above.
-        Some(unsafe { self.bit_offsets.get_unchecked(index) })
-    }
-
-    /// Returns the bit offset where sequence `index` starts, without bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure `index < num_sequences()`.
-    #[inline(always)]
-    pub unsafe fn sequence_start_bit_unchecked(&self, index: usize) -> u64 {
-        debug_assert!(
-            index < self.num_sequences(),
-            "index {} out of bounds for {} sequences",
-            index,
-            self.num_sequences()
-        );
-        unsafe { self.bit_offsets.get_unchecked(index) }
-    }
-
-    /// Returns the bit offset immediately after sequence `index` ends.
-    ///
-    /// This is equivalent to the start bit of the next sequence, or the total
-    /// bit length for the final sequence. Useful for calculating per-sequence
-    /// compression footprint.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let start = vec.sequence_start_bit(0).unwrap();
-    /// let end = unsafe { vec.sequence_end_bit_unchecked(0) };
-    /// println!("Sequence 0 occupies {} bits", end - start);
-    /// ```
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure `index < num_sequences()`.
-    #[inline]
-    pub unsafe fn sequence_end_bit_unchecked(&self, index: usize) -> u64 {
-        debug_assert!(
-            index < self.num_sequences(),
-            "index {} out of bounds for {} sequences",
-            index,
-            self.num_sequences()
-        );
-        unsafe { self.bit_offsets.get_unchecked(index + 1) }
-    }
-}
-
-// --- Access Methods ---
-
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B>
-where
-    for<'a> SeqVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// Returns an iterator over the elements of sequence `index`.
-    ///
-    /// Returns `None` if `index >= num_sequences()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let first: Vec<u32> = vec.get(0).unwrap().collect();
-    /// assert_eq!(first, vec![1, 2, 3]);
-    /// ```
-    #[inline(always)]
-    pub fn get(&self, index: usize) -> Option<SeqIter<'_, T, E>> {
-        if index >= self.num_sequences() {
-            return None;
-        }
-        // SAFETY: bounds checked above.
-        Some(unsafe { self.get_unchecked(index) })
-    }
-
-    /// Returns an iterator over the elements of sequence `index` without
-    /// bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with `index >= num_sequences()` is undefined behavior.
-    #[inline(always)]
-    pub unsafe fn get_unchecked(&self, index: usize) -> SeqIter<'_, T, E> {
-        debug_assert!(
-            index < self.num_sequences(),
-            "index {} out of bounds for {} sequences",
-            index,
-            self.num_sequences()
-        );
-
-        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
-        let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
-        let len = self
-            .seq_lengths
-            .as_ref()
-            .map(|lengths| unsafe { lengths.get_unchecked(index) as usize });
-
-        SeqIter::new_with_len(self.data.as_ref(), start_bit, end_bit, self.encoding, len)
-    }
-
-    /// Returns the elements of sequence `index` as a newly allocated `Vec`.
-    ///
-    /// Returns `None` if `index >= num_sequences()`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[10, 20, 30]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// assert_eq!(vec.decode_vec(0), Some(vec![10, 20, 30]));
-    /// assert_eq!(vec.decode_vec(1), None);
-    /// ```
-    #[inline(always)]
-    pub fn decode_vec(&self, index: usize) -> Option<Vec<T>> {
-        if index >= self.num_sequences() {
-            return None;
-        }
-
-        // SAFETY: Bounds check has been performed.
-        Some(unsafe { self.decode_vec_unchecked(index) })
-    }
-
-    /// Returns the elements of sequence `index` as a newly allocated `Vec`
-    /// without bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with `index >= num_sequences()` is undefined behavior.
-    #[inline(always)]
-    pub unsafe fn decode_vec_unchecked(&self, index: usize) -> Vec<T> {
-        unsafe { self.get_unchecked(index).collect() }
-    }
-
-    /// Decodes sequence `index` into the provided buffer.
-    ///
-    /// The buffer is cleared before use. Returns the number of elements
-    /// decoded, or `None` if `index >= num_sequences()`.
-    ///
-    /// This method is more efficient than [`decode_vec`](Self::decode_vec) when
-    /// reusing a buffer across multiple calls.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let mut buf = Vec::new();
-    /// assert_eq!(vec.decode_into(0, &mut buf), Some(2));
-    /// assert_eq!(buf, vec![1, 2]);
-    ///
-    /// // Buffer is reused (cleared internally).
-    /// assert_eq!(vec.decode_into(1, &mut buf), Some(3));
-    /// assert_eq!(buf, vec![3, 4, 5]);
-    /// ```
-    #[inline(always)]
-    pub fn decode_into(&self, index: usize, buf: &mut Vec<T>) -> Option<usize> {
-        if index >= self.num_sequences() {
-            return None;
-        }
-
-        // SAFETY: Bounds check has been performed.
-        Some(unsafe { self.decode_into_unchecked(index, buf) })
-    }
-
-    /// Decodes sequence `index` into the provided buffer without bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with `index >= num_sequences()` is undefined behavior.
-    #[inline(always)]
-    pub unsafe fn decode_into_unchecked(&self, index: usize, buf: &mut Vec<T>) -> usize {
-        let start_bit = unsafe { self.sequence_start_bit_unchecked(index) };
-
-        buf.clear();
-
-        // Create reader and codec dispatcher once, then decode all elements
-        // directly into the buffer without creating an intermediate SeqIter.
-        // This avoids iterator overhead and enables better compiler optimization.
-        let mut reader =
-            SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()));
-        let _ = reader.set_bit_pos(start_bit);
-        let code_reader = CodecReader::new(self.encoding);
-
-        if let Some(lengths) = &self.seq_lengths {
-            let count = unsafe { lengths.get_unchecked(index) as usize };
-            self.decode_counted(&mut reader, &code_reader, buf, count);
-        } else {
-            let end_bit = unsafe { self.sequence_end_bit_unchecked(index) };
-            self.decode_until(&mut reader, &code_reader, buf, end_bit);
-        }
-
-        buf.len()
-    }
-
-    /// Decodes a known number of elements into `buf`.
-    #[inline(always)]
-    fn decode_counted<'a>(
-        &self,
-        reader: &mut SeqVecBitReader<'a, E>,
-        code_reader: &CodecReader<'a, E>,
-        buf: &mut Vec<T>,
-        count: usize,
-    ) {
-        buf.reserve(count);
-        for _ in 0..count {
-            let word = code_reader.read(reader).unwrap();
-            buf.push(T::from_word(word));
-        }
-    }
-
-    /// Decodes elements until the reader reaches `end_bit`.
-    #[inline(always)]
-    fn decode_until<'a>(
-        &self,
-        reader: &mut SeqVecBitReader<'a, E>,
-        code_reader: &CodecReader<'a, E>,
-        buf: &mut Vec<T>,
-        end_bit: u64,
-    ) {
-        while reader.bit_pos().unwrap() < end_bit {
-            let word = code_reader.read(reader).unwrap();
-            buf.push(T::from_word(word));
-        }
-    }
-
-    /// Returns an iterator over all sequences.
-    ///
-    /// Each element of the returned iterator is a [`SeqIter`] for the
-    /// corresponding sequence.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3], &[4, 5, 6]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// for (i, seq) in vec.iter().enumerate() {
-    ///     println!("Sequence {}: {:?}", i, seq.collect::<Vec<_>>());
-    /// }
-    /// ```
-    #[inline(always)]
-    pub fn iter(&self) -> SeqVecIter<'_, T, E, B> {
-        SeqVecIter::new(
-            self.data.as_ref(),
-            &self.bit_offsets,
-            self.seq_lengths.as_ref(),
-            self.encoding,
-            self.num_sequences(),
-        )
-    }
-
-    /// Creates a reusable reader for convenient random access to sequences.
-    ///
-    /// The returned [`SeqVecReader`] provides a convenient interface for
-    /// performing multiple sequence retrievals. While the current implementation
-    /// is a thin wrapper, it serves as a natural extension point for future
-    /// optimizations such as position tracking or caching.
-    ///
-    /// ## Performance Considerations
-    ///
-    /// - **Zero-copy iteration**: Returned iterators borrow directly from the
-    ///   compressed data without intermediate allocations.
-    /// - **Stateless operation**: Each call to [`get`](Self::get) is independent and creates a fresh [`SeqIter`].
-    /// - **Convenience methods**: The reader provides [`decode_vec`](SeqVecReader::decode_vec)
-    ///   and [`decode_into`](SeqVecReader::decode_into) for common patterns.
-    ///
-    /// ## When to Use
-    ///
-    /// Use a reader when:
-    /// - You prefer a consistent interface for multiple accesses.
-    /// - You want to use convenience methods like `decode_vec` or `decode_into`.
-    /// - Future stateful optimizations would benefit your access pattern.
-    ///
-    /// For single queries or simple iteration, direct calls to [`get`](Self::get)
-    /// or [`iter`](Self::iter) are equally efficient.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let mut reader = vec.reader();
-    ///
-    /// // Perform multiple random accesses efficiently
-    /// assert_eq!(reader.decode_vec(2), Some(vec![6]));
-    /// assert_eq!(reader.decode_vec(0), Some(vec![1, 2]));
-    /// if let Some(seq) = reader.decode_vec(1) {
-    ///     for value in seq {
-    ///         assert!(value <= 5);
-    ///     }
-    /// }
-    /// ```
-    #[inline(always)]
-    pub fn reader(&self) -> SeqVecReader<'_, T, E, B> {
-        SeqVecReader::new(self)
-    }
-
-    /// Creates a zero-copy slice of a contiguous range of sequences.
-    ///
-    /// The slice provides a view into `len` sequences starting at `start`,
-    /// without copying the underlying compressed data.
-    ///
-    /// # Arguments
-    ///
-    /// * `start` - The index of the first sequence in the slice.
-    /// * `len` - The number of sequences to include in the slice.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some(SeqVecSlice)` if the range is valid, or `None` if
-    /// `start + len` exceeds the number of sequences.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5], &[6], &[7, 8]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// // Create a slice of sequences 1 and 2
-    /// let slice = vec.slice(1, 2).unwrap();
-    /// assert_eq!(slice.len(), 2);
-    ///
-    /// // Index 0 of the slice refers to sequence 1 of the original vector
-    /// let seq: Vec<u32> = slice.get(0).unwrap().collect();
-    /// assert_eq!(seq, vec![3, 4, 5]);
-    /// ```
-    pub fn slice(&self, start: usize, len: usize) -> Option<slice::SeqVecSlice<'_, T, E, B>> {
-        if start.saturating_add(len) > self.num_sequences() {
-            return None;
-        }
-        Some(slice::SeqVecSlice::new(self, start..start + len))
-    }
-
-    /// Splits the vector into two slices at the specified index.
-    ///
-    /// Returns a tuple of two slices: the first contains sequences `[0, mid)`
-    /// and the second contains sequences `[mid, len)`.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Some((left_slice, right_slice))` if `mid <= num_sequences()`,
-    /// or `None` if `mid` is out of bounds.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use compressed_intvec::seq::{SeqVec, LESeqVec};
-    ///
-    /// let sequences: &[&[u32]] = &[&[1], &[2], &[3], &[4]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-    ///
-    /// let (left, right) = vec.split_at(2).unwrap();
-    /// assert_eq!(left.len(), 2);
-    /// assert_eq!(right.len(), 2);
-    ///
-    /// assert_eq!(left.decode_vec(0), Some(vec![1]));
-    /// assert_eq!(right.decode_vec(0), Some(vec![3]));
-    /// ```
-    pub fn split_at(&self, mid: usize) -> Option<SeqVecSlicePair<'_, T, E, B>> {
-        if mid > self.num_sequences() {
-            return None;
-        }
-        Some((
-            slice::SeqVecSlice::new(self, 0..mid),
-            slice::SeqVecSlice::new(self, mid..self.num_sequences()),
-        ))
-    }
-}
-
 // --- PartialEq Implementation ---
 
 impl<T: Storable + PartialEq, E: Endianness, B: AsRef<[u64]>> PartialEq for SeqVec<T, E, B>
@@ -1251,6 +1298,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[
@@ -1259,15 +1307,17 @@ where
     ///     &[100, 200, 300],
     ///     &[1000],
     /// ];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let indices = [3, 0, 2];
-    /// let sequences = vec.decode_many(&indices).unwrap();
+    /// let sequences = vec.decode_many(&indices)?;
     /// assert_eq!(sequences, vec![
     ///     vec![1000],
     ///     vec![1, 2, 3],
     ///     vec![100, 200, 300],
     /// ]);
+    /// #     Ok(())
+    /// # }
     /// ```
     pub fn decode_many(&self, indices: &[usize]) -> Result<Vec<Vec<T>>, SeqVecError> {
         if indices.is_empty() {
@@ -1344,6 +1394,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[
@@ -1351,17 +1402,19 @@ where
     ///     &[10, 20],
     ///     &[100, 200, 300],
     /// ];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let indices = [2, 0, 1];
     /// let mut output = Vec::new();
-    /// vec.decode_many_into(&indices, &mut output).unwrap();
+    /// vec.decode_many_into(&indices, &mut output)?;
     ///
     /// assert_eq!(output, vec![
     ///     vec![100, 200, 300],
     ///     vec![1, 2],
     ///     vec![10, 20],
     /// ]);
+    /// #     Ok(())
+    /// # }
     /// ```
     pub fn decode_many_into(
         &self,

@@ -30,6 +30,7 @@ use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
+use std::fmt;
 
 /// A stateful, sequential reader for an [`VarVec`] optimized for forward access.
 ///
@@ -57,18 +58,21 @@ use dsi_bitstream::{
 /// # Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::variable::{VarVec, UVarVec};
 ///
 /// let data: Vec<u32> = (0..100).collect();
-/// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
+/// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
 ///
 /// // Create a reader optimized for sequential access
 /// let mut seq_reader = vec.seq_reader();
 ///
 /// // Accessing indices in increasing order is very efficient
-/// assert_eq!(seq_reader.get(10).unwrap(), Some(10));
-/// assert_eq!(seq_reader.get(15).unwrap(), Some(15)); // Decodes forward from index 10
-/// assert_eq!(seq_reader.get(90).unwrap(), Some(90)); // Jumps to a new sample
+/// assert_eq!(seq_reader.get(10)?, Some(10));
+/// assert_eq!(seq_reader.get(15)?, Some(15)); // Decodes forward from index 10
+/// assert_eq!(seq_reader.get(90)?, Some(90)); // Jumps to a new sample
+/// # Ok(())
+/// # }
 /// ```
 pub struct VarVecSeqReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
@@ -182,5 +186,16 @@ where
         // Update the current index to the next position.
         self.current_index = index + 1;
         Storable::from_word(word)
+    }
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for VarVecSeqReader<'_, T, E, B>
+where
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VarVecSeqReader").finish_non_exhaustive()
     }
 }

@@ -51,6 +51,7 @@
 //! ## Basic Usage
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::prelude::*;
 //! use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec};
 //! use std::sync::Arc;
@@ -61,8 +62,7 @@
 //! let initial_data: Vec<u32> = vec![10, 20, 30, 40];
 //! let atomic_vec: Arc<UAtomicFixedVec<u32>> = Arc::new(
 //!     AtomicFixedVec::builder()
-//!         .build(&initial_data)
-//!         .unwrap()
+//!         .build(&initial_data)?
 //! );
 //!
 //! // Share the vector across threads.
@@ -78,6 +78,8 @@
 //!     handle.join().unwrap();
 //! }
 //! assert_eq!(atomic_vec.load(3, Ordering::SeqCst), 63);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Storing Signed Integers
@@ -87,6 +89,7 @@
 //! small negative numbers require few bits, just like small positive numbers.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::prelude::*;
 //! use compressed_intvec::fixed::{AtomicFixedVec, SAtomicFixedVec};
 //! use std::sync::Arc;
@@ -97,8 +100,7 @@
 //! let atomic_vec: Arc<SAtomicFixedVec<i16>> = Arc::new(
 //!     AtomicFixedVec::builder()
 //!         .bit_width(BitWidth::Explicit(3)) // Explicitly set bit width
-//!         .build(&initial_data)
-//!         .unwrap()
+//!         .build(&initial_data)?
 //! );
 //!
 //! assert_eq!(atomic_vec.bit_width(), 3);
@@ -107,6 +109,8 @@
 //! // Atomically update a value.
 //! atomic_vec.store(0, -3, Ordering::SeqCst);
 //! assert_eq!(atomic_vec.load(0, Ordering::SeqCst), -3);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! //! ## Parallel Iteration
@@ -165,6 +169,7 @@ use crate::fixed::{BitWidth, Error, FixedVec};
 use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
 use num_traits::{Bounded, ToPrimitive, WrappingAdd, WrappingSub};
 use parking_lot::Mutex;
+use std::fmt;
 use std::marker::PhantomData;
 use std::ops::{BitAnd, BitOr, BitXor, Deref, DerefMut};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -199,6 +204,18 @@ where
     vec: &'a AtomicFixedVec<T>,
     index: usize,
     value: T,
+}
+
+#[cfg(feature = "parallel")]
+impl<T> fmt::Debug for AtomicMutProxy<'_, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AtomicMutProxy")
+            .field("value", &self.value)
+            .finish()
+    }
 }
 
 #[cfg(feature = "parallel")]
@@ -293,17 +310,19 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
     ///
     /// let data: &[i16] = &[-100, 0, 100, 200];
     /// let vec: UAtomicFixedVec<i16> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::PowerOfTwo) // Force 16 bits for signed values
-    ///     .build(data)
-    ///     .unwrap();
+    ///     .build(data)?;
     ///
     /// assert_eq!(vec.len(), 4);
     /// assert_eq!(vec.bit_width(), 16);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn builder() -> builder::AtomicFixedVecBuilder<T> {
@@ -602,6 +621,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -609,13 +629,14 @@ where
     /// let data = vec![10u32, 20];
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(5))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// let previous = vec.fetch_add(0, 5, Ordering::SeqCst);
     ///
     /// assert_eq!(previous, 10);
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 15);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn fetch_add(&self, index: usize, val: T, order: Ordering) -> T
@@ -636,6 +657,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -643,13 +665,14 @@ where
     /// let data = vec![10u32, 20];
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(5))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// let previous = vec.fetch_sub(0, 5, Ordering::SeqCst);
     ///
     /// assert_eq!(previous, 10);
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 5);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn fetch_sub(&self, index: usize, val: T, order: Ordering) -> T
@@ -670,6 +693,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -677,8 +701,7 @@ where
     /// let data = vec![12u32];
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(4))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// // 0b1010 = 10
     /// let previous = vec.fetch_and(0, 10, Ordering::SeqCst);
@@ -686,6 +709,8 @@ where
     /// assert_eq!(previous, 12);
     /// // 0b1100 & 0b1010 = 0b1000 = 8
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 8);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn fetch_and(&self, index: usize, val: T, order: Ordering) -> T
@@ -706,6 +731,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -713,8 +739,7 @@ where
     /// let data = vec![12u32];
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(4))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// // 0b1010 = 10
     /// let previous = vec.fetch_or(0, 10, Ordering::SeqCst);
@@ -722,6 +747,8 @@ where
     /// assert_eq!(previous, 12);
     /// // 0b1100 | 0b1010 = 0b1110 = 14
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 14);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn fetch_or(&self, index: usize, val: T, order: Ordering) -> T
@@ -742,6 +769,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -749,8 +777,7 @@ where
     /// let data = vec![12u32];
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(4))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// // 0b1010 = 10
     /// let previous = vec.fetch_xor(0, 10, Ordering::SeqCst);
@@ -758,6 +785,8 @@ where
     /// assert_eq!(previous, 12);
     /// // 0b1100 ^ 0b1010 = 0b0110 = 6
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 6);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn fetch_xor(&self, index: usize, val: T, order: Ordering) -> T
@@ -778,6 +807,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -785,8 +815,7 @@ where
     /// let data = vec![10i32];
     /// let vec: SAtomicFixedVec<i32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(6))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// // Attempt to store a larger value
     /// let previous = vec.fetch_max(0, 20, Ordering::SeqCst);
@@ -797,6 +826,8 @@ where
     /// let previous2 = vec.fetch_max(0, 5, Ordering::SeqCst);
     /// assert_eq!(previous2, 20);
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 20); // Value is unchanged
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn fetch_max(&self, index: usize, val: T, order: Ordering) -> T
@@ -817,6 +848,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -824,8 +856,7 @@ where
     /// let data = vec![10i32];
     /// let vec: SAtomicFixedVec<i32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(5))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// // Attempt to store a smaller value
     /// let previous = vec.fetch_min(0, 5, Ordering::SeqCst);
@@ -836,6 +867,8 @@ where
     /// let previous2 = vec.fetch_min(0, 20, Ordering::SeqCst);
     /// assert_eq!(previous2, 5);
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 5); // Value is unchanged
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn fetch_min(&self, index: usize, val: T, order: Ordering) -> T
@@ -860,6 +893,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::prelude::*;
     /// use std::sync::atomic::Ordering;
     ///
@@ -867,8 +901,7 @@ where
     /// let data = vec![10u32];
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(5))
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// // Successfully update the value
     /// let result = vec.fetch_update(0, Ordering::SeqCst, Ordering::Relaxed, |val| {
@@ -887,6 +920,8 @@ where
     /// });
     /// assert_eq!(result_aborted, Err(20));
     /// assert_eq!(vec.load(0, Ordering::SeqCst), 20); // Value remains unchanged
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn fetch_update<F>(
         &self,

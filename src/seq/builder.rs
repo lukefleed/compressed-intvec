@@ -49,6 +49,7 @@ use std::marker::PhantomData;
 /// ## Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
 ///
 /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
@@ -56,14 +57,14 @@ use std::marker::PhantomData;
 /// // Automatic codec selection (two-pass)
 /// let vec_auto: LESeqVec<u32> = SeqVec::builder()
 ///     .codec(Codec::Auto)
-///     .build(sequences)
-///     .unwrap();
+///     .build(sequences)?;
 ///
 /// // Explicit codec (single-pass, more efficient)
 /// let vec_gamma: LESeqVec<u32> = SeqVec::builder()
 ///     .codec(Codec::Gamma)
-///     .build(sequences)
-///     .unwrap();
+///     .build(sequences)?;
+/// #     Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct SeqVecBuilder<T: Storable, E: Endianness> {
@@ -138,15 +139,18 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     /// ## Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// // From slice of slices
     /// let data: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::builder().build(data).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::builder().build(data)?;
     ///
     /// // From Vec of Vecs
     /// let data: Vec<Vec<u32>> = vec![vec![1, 2], vec![3, 4, 5]];
-    /// let vec: LESeqVec<u32> = SeqVec::builder().build(&data).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::builder().build(&data)?;
+    /// #     Ok(())
+    /// # }
     /// ```
     pub fn build<S: AsRef<[T]>>(
         self,
@@ -313,6 +317,7 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 /// ## Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
 ///
 /// // Generate sequences on the fly
@@ -320,10 +325,11 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
 ///
 /// let vec: LESeqVec<u32> = SeqVec::from_iter_builder(sequences_iter)
 ///     .codec(Codec::Gamma) // Must be specified
-///     .build()
-///     .unwrap();
+///     .build()?;
 ///
 /// assert_eq!(vec.num_sequences(), 100);
+/// #     Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct SeqVecFromIterBuilder<T: Storable, E: Endianness, I> {
@@ -400,14 +406,16 @@ where
     /// ## Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
     ///
     /// let sequences: Vec<Vec<u32>> = vec![vec![1, 2], vec![3, 4, 5]];
     ///
     /// let vec: LESeqVec<u32> = SeqVec::from_iter_builder(sequences.into_iter())
     ///     .codec(Codec::Delta)
-    ///     .build()
-    ///     .unwrap();
+    ///     .build()?;
+    /// #     Ok(())
+    /// # }
     /// ```
     pub fn build(self) -> Result<SeqVec<T, E, Vec<u64>>, SeqVecError>
     where
@@ -601,14 +609,16 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
     ///
     /// let vec: LESeqVec<u32> = SeqVec::builder()
     ///     .codec(Codec::Zeta { k: Some(3) })
-    ///     .build(sequences)
-    ///     .unwrap();
+    ///     .build(sequences)?;
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn builder() -> SeqVecBuilder<T, E> {
@@ -624,6 +634,7 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
     ///
     /// // Generate sequences programmatically
@@ -631,10 +642,11 @@ impl<T: Storable + 'static, E: Endianness> SeqVec<T, E, Vec<u64>> {
     ///
     /// let vec: LESeqVec<u32> = SeqVec::from_iter_builder(sequences)
     ///     .codec(Codec::Gamma)
-    ///     .build()
-    ///     .unwrap();
+    ///     .build()?;
     ///
     /// assert_eq!(vec.num_sequences(), 50);
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn from_iter_builder<I, S>(iter: I) -> SeqVecFromIterBuilder<T, E, I>

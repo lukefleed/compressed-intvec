@@ -1041,7 +1041,7 @@ where
     E: Endianness,
 {
     type Item = T;
-    type IntoIter = iter::FixedVecIntoIter<'static, T, W, E>;
+    type IntoIter = iter::FixedVecIntoIter<T, W, E>;
 
     /// Consumes the vector and returns an iterator over its elements.
     fn into_iter(self) -> Self::IntoIter {

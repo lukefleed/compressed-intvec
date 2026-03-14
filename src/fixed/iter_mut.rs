@@ -16,10 +16,11 @@
 //! non-overlapping chunks.
 //!
 //! ```rust
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
 //!
 //! let data: Vec<u32> = (0..100).collect();
-//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(8)).build(&data).unwrap();
+//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(8)).build(&data)?;
 //!
 //! // Process each chunk sequentially.
 //! for mut chunk in vec.chunks_mut(10) {
@@ -33,6 +34,8 @@
 //!
 //! assert_eq!(vec.get(10), Some(20));
 //! assert_eq!(vec.get(99), Some(198));
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::fixed::{
@@ -42,7 +45,7 @@ use crate::fixed::{
     traits::{Storable, Word},
 };
 use dsi_bitstream::prelude::Endianness;
-use std::{cmp::min, marker::PhantomData};
+use std::{cmp::min, fmt, iter::FusedIterator, marker::PhantomData};
 
 /// An iterator over non-overlapping, mutable chunks of a [`FixedVec`].
 ///
@@ -118,6 +121,15 @@ where
     }
 }
 
+impl<T, W, E, B> FusedIterator for ChunksMut<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+}
+
 /// A mutable iterator over the elements of a [`FixedVec`].
 ///
 /// This struct is created by the [`iter_mut`](super::FixedVec::iter_mut)
@@ -131,8 +143,8 @@ where
 {
     // A raw pointer is used to allow creating proxies without consuming the iterator.
     vec_ptr: *mut FixedVec<T, W, E, B>,
-    current_index: usize,
-    end_index: usize,
+    pub(super) current_index: usize,
+    pub(super) end_index: usize,
     _phantom: PhantomData<&'a mut FixedVec<T, W, E, B>>,
 }
 
@@ -179,6 +191,29 @@ where
     }
 }
 
+impl<T, W, E, B> FusedIterator for IterMut<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+}
+
+impl<T, W, E, B> fmt::Debug for IterMut<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IterMut")
+            .field("remaining", &(self.end_index - self.current_index))
+            .finish()
+    }
+}
+
 /// An unchecked mutable iterator over the elements of a [`FixedVec`].
 ///
 /// This struct is created by the [`iter_mut_unchecked`](super::FixedVec::iter_mut_unchecked)
@@ -220,5 +255,19 @@ where
     #[inline]
     pub unsafe fn next_unchecked(&mut self) -> MutProxy<'a, T, W, E, B> {
         unsafe { self.iter.next().unwrap_unchecked() }
+    }
+}
+
+impl<T, W, E, B> fmt::Debug for IterMutUnchecked<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("IterMutUnchecked")
+            .field("remaining", &(self.iter.end_index - self.iter.current_index))
+            .finish()
     }
 }

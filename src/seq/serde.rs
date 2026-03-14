@@ -15,21 +15,25 @@
 //! Serializing and deserializing a `SeqVec` using `serde_json`:
 //!
 //! ```
-//! # #[cfg(feature = "serde")] {
+//! # #[cfg(feature = "serde")]
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::seq::{SeqVec, LESeqVec};
 //!
 //! let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
-//! let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+//! let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
 //!
 //! // Serialize the vector to a JSON string
-//! let serialized = serde_json::to_string(&vec).unwrap();
+//! let serialized = serde_json::to_string(&vec)?;
 //!
 //! // Deserialize the JSON string back into a SeqVec of the same type.
-//! let deserialized: LESeqVec<u32> = serde_json::from_str(&serialized).unwrap();
+//! let deserialized: LESeqVec<u32> = serde_json::from_str(&serialized)?;
 //!
 //! // Verify equality
 //! assert_eq!(vec, deserialized);
+//! #     Ok(())
 //! # }
+//! # #[cfg(not(feature = "serde"))]
+//! # fn main() {}
 //! ```
 //!
 //! [`serde`]: https://serde.rs/

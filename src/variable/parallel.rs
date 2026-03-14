@@ -45,17 +45,20 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # #[cfg(feature = "parallel")] {
     /// use compressed_intvec::variable::{VarVec, UVarVec};
     /// use rayon::prelude::*;
     ///
     /// let data: Vec<u32> = (0..1000).collect();
-    /// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
+    /// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
     ///
     /// // Use the parallel iterator to compute the sum in parallel
     /// let sum: u32 = vec.par_iter().sum();
     ///
     /// assert_eq!(sum, (0..1000).sum());
+    /// # }
+    /// # Ok(())
     /// # }
     /// ```
     pub fn par_iter(&self) -> impl ParallelIterator<Item = T> + '_ {
@@ -117,16 +120,19 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # #[cfg(feature = "parallel")] {
     /// use compressed_intvec::variable::{VarVec, SVarVec};
     ///
     /// let data: Vec<i64> = (0..1000).map(|x| x * -1).collect();
-    /// let vec: SVarVec<i64> = VarVec::from_slice(&data).unwrap();
+    /// let vec: SVarVec<i64> = VarVec::from_slice(&data)?;
     ///
     /// let indices = [500, 10, 999, 0, 250];
-    /// let values = vec.par_get_many(&indices).unwrap();
+    /// let values = vec.par_get_many(&indices)?;
     ///
     /// assert_eq!(values, vec![-500, -10, -999, 0, -250]);
+    /// # }
+    /// # Ok(())
     /// # }
     /// ```
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<T>, VarVecError> {

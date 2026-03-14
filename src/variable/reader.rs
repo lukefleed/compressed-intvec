@@ -26,6 +26,7 @@ use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
+use std::fmt;
 
 /// A stateful reader for an `VarVec` that provides fast random access.
 ///
@@ -37,18 +38,21 @@ use dsi_bitstream::{
 /// # Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::variable::{VarVec, UVarVec};
 ///
 /// let data: Vec<u32> = (0..100).rev().collect(); // Data is not sequential
-/// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
+/// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
 ///
 /// // Create a reusable reader
 /// let mut reader = vec.reader();
 ///
 /// // Perform multiple random reads efficiently
-/// assert_eq!(reader.get(99).unwrap(), Some(0));
-/// assert_eq!(reader.get(0).unwrap(), Some(99));
-/// assert_eq!(reader.get(50).unwrap(), Some(49));
+/// assert_eq!(reader.get(99)?, Some(0));
+/// assert_eq!(reader.get(0)?, Some(99));
+/// assert_eq!(reader.get(50)?, Some(49));
+/// # Ok(())
+/// # }
 /// ```
 pub struct VarVecReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
@@ -139,5 +143,16 @@ where
         // Read the target value.
         let word = self.code_reader.read(&mut self.reader).unwrap();
         Storable::from_word(word)
+    }
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for VarVecReader<'_, T, E, B>
+where
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VarVecReader").finish_non_exhaustive()
     }
 }

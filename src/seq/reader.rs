@@ -22,6 +22,7 @@ use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
+use std::fmt;
 
 /// A stateful reader for a `SeqVec` that provides convenient random sequence
 /// access with optimized reader reuse.
@@ -44,6 +45,7 @@ use dsi_bitstream::{
 /// # Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::seq::{SeqVec, USeqVec};
 ///
 /// let sequences: &[&[u32]] = &[
@@ -51,7 +53,7 @@ use dsi_bitstream::{
 ///     &[100, 200],
 ///     &[1000, 2000, 3000, 4000],
 /// ];
-/// let vec: USeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+/// let vec: USeqVec<u32> = SeqVec::from_slices(sequences)?;
 ///
 /// // Create a reusable reader
 /// let mut reader = vec.reader();
@@ -64,6 +66,8 @@ use dsi_bitstream::{
 /// // Or use SeqVec::get() for lazy iteration
 /// let seq0: Vec<u32> = vec.get(0).unwrap().collect();
 /// assert_eq!(seq0, vec![10, 20, 30]);
+/// #     Ok(())
+/// # }
 /// ```
 pub struct SeqVecReader<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
@@ -77,6 +81,17 @@ where
     reader: VarVecBitReader<'a, E>,
     /// The hybrid codec reader for efficient element decoding.
     code_reader: CodecReader<'a, E>,
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for SeqVecReader<'_, T, E, B>
+where
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SeqVecReader").finish_non_exhaustive()
+    }
 }
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecReader<'a, T, E, B>
@@ -111,14 +126,17 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let mut reader = vec.reader();
     /// assert_eq!(reader.decode_vec(0), Some(vec![1, 2, 3]));
     /// assert_eq!(reader.decode_vec(2), None);
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn decode_vec(&mut self, index: usize) -> Option<Vec<T>> {
@@ -140,10 +158,11 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::seq::{SeqVec, LESeqVec};
     ///
     /// let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20, 30, 40]];
-    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+    /// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
     ///
     /// let mut reader = vec.reader();
     /// let mut buffer = Vec::new();
@@ -157,6 +176,8 @@ where
     /// let count = reader.decode_into(1, &mut buffer).unwrap();
     /// assert_eq!(count, 4);
     /// assert_eq!(buffer, vec![10, 20, 30, 40]);
+    /// #     Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn decode_into(&mut self, index: usize, buf: &mut Vec<T>) -> Option<usize> {

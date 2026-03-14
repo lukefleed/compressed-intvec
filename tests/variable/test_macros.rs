@@ -89,12 +89,12 @@ fn test_from_slice_method() {
     // Test VarVec::from_slice
     let data_u64: &[u64] = &[10, 20, 30, 1000];
     let vec_u64 = LEVarVec::from_slice(data_u64).unwrap();
-    assert_eq!(vec_u64.get_sampling_rate(), 16);
+    assert_eq!(vec_u64.sampling_rate(), 16);
     assert_eq!(vec_u64, data_u64);
 
     // Test SVarVec::from_slice
     let data_i64: &[i64] = &[-10, 20, -300];
     let vec_i64 = LESVarVec::from_slice(data_i64).unwrap();
-    assert_eq!(vec_i64.get_sampling_rate(), 16);
+    assert_eq!(vec_i64.sampling_rate(), 16);
     assert_eq!(vec_i64, data_i64);
 }

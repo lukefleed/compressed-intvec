@@ -350,48 +350,56 @@ where
 /// An iterator that consumes an owned [`FixedVec`] and yields its elements.
 ///
 /// This struct is created by the `into_iter` method on `FixedVec`.
-pub struct FixedVecIntoIter<'a, T, W, E, B = Vec<W>>
+///
+/// # Implementation
+///
+/// This is a self-referential struct: the [`FixedVecIter`] borrows from the
+/// heap-allocated [`FixedVec`] stored in `_vec_owner`. The `Box` ensures a
+/// stable address that won't move, making the `'static` transmute sound.
+/// The `iter` field is declared before `_vec_owner` so it is dropped first,
+/// though neither type has a custom `Drop` that accesses borrowed data.
+pub struct FixedVecIntoIter<T, W, E>
 where
-    T: Storable<W>,
+    T: Storable<W> + 'static,
     W: Word,
     E: Endianness,
-    B: AsRef<[W]>,
 {
-    _vec_owner: B,
-    iter: FixedVecIter<'a, T, W, E, B>,
-    _phantom: PhantomData<T>,
+    iter: FixedVecIter<'static, T, W, E, Vec<W>>,
+    /// Owns the `FixedVec` on the heap. Must outlive `iter`.
+    _vec_owner: Box<FixedVec<T, W, E, Vec<W>>>,
 }
 
-impl<T, W, E> FixedVecIntoIter<'static, T, W, E, Vec<W>>
+impl<T, W, E> FixedVecIntoIter<T, W, E>
 where
-    T: Storable<W>,
+    T: Storable<W> + 'static,
     W: Word,
     E: Endianness,
 {
     /// Creates a new consuming iterator from an owned `FixedVec`.
     pub(super) fn new(vec: FixedVec<T, W, E, Vec<W>>) -> Self {
-        // SAFETY: This is a standard pattern for creating a self-referential
-        // struct. We are moving `vec` but immediately borrowing it. The borrow
-        // is valid for 'static because the data is now owned by this struct.
+        // Move the FixedVec to the heap so it has a stable address.
+        let boxed = Box::new(vec);
+        // SAFETY: `boxed` is heap-allocated and will not move. The reference
+        // is valid for the lifetime of this struct because `_vec_owner` holds
+        // the Box. We transmute to 'static to express this self-referential
+        // borrow, which cannot be expressed with Rust lifetimes.
         let iter = unsafe {
             let vec_ref: &'static FixedVec<T, W, E, Vec<W>> =
-                std::mem::transmute(&vec as &FixedVec<T, W, E, Vec<W>>);
+                std::mem::transmute(&*boxed as &FixedVec<T, W, E, Vec<W>>);
             FixedVecIter::new(vec_ref)
         };
         Self {
-            _vec_owner: vec.bits,
             iter,
-            _phantom: PhantomData,
+            _vec_owner: boxed,
         }
     }
 }
 
-impl<T, W, E, B> Iterator for FixedVecIntoIter<'_, T, W, E, B>
+impl<T, W, E> Iterator for FixedVecIntoIter<T, W, E>
 where
-    T: Storable<W>,
+    T: Storable<W> + 'static,
     W: Word,
     E: Endianness,
-    B: AsRef<[W]>,
 {
     type Item = T;
 
@@ -405,12 +413,11 @@ where
     }
 }
 
-impl<T, W, E, B> DoubleEndedIterator for FixedVecIntoIter<'_, T, W, E, B>
+impl<T, W, E> DoubleEndedIterator for FixedVecIntoIter<T, W, E>
 where
-    T: Storable<W>,
+    T: Storable<W> + 'static,
     W: Word,
     E: Endianness,
-    B: AsRef<[W]>,
 {
     #[inline]
     fn next_back(&mut self) -> Option<Self::Item> {
@@ -418,12 +425,11 @@ where
     }
 }
 
-impl<T, W, E, B> ExactSizeIterator for FixedVecIntoIter<'_, T, W, E, B>
+impl<T, W, E> ExactSizeIterator for FixedVecIntoIter<T, W, E>
 where
-    T: Storable<W>,
+    T: Storable<W> + 'static,
     W: Word,
     E: Endianness,
-    B: AsRef<[W]>,
 {
     fn len(&self) -> usize {
         self.iter.len()

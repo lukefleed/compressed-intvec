@@ -1,6 +1,6 @@
 //! Integration tests for the `seq_vec!` and `sseq_vec!` macros.
 
-use compressed_intvec::seq::{BESEqVec, BESeqVec, LESeqVec, SSeqVec};
+use compressed_intvec::seq::{BESSeqVec, BESeqVec, LESeqVec, SSeqVec};
 use compressed_intvec::{seq_vec, sseq_vec};
 
 // --- Tests for seq_vec! macro (unsigned) ---
@@ -30,7 +30,7 @@ fn test_seq_vec_macro_basic() {
 #[test]
 fn test_seq_vec_macro_empty() {
     let v: LESeqVec<u32> = seq_vec![];
-    assert!(v.is_empty(), "seq_vec![] should be empty");
+    assert_eq!(v.num_sequences(), 0, "seq_vec![] should have 0 sequences");
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn test_sseq_vec_macro_basic() {
 #[test]
 fn test_sseq_vec_macro_empty() {
     let v: SSeqVec<i64> = sseq_vec![];
-    assert!(v.is_empty(), "sseq_vec![] should be empty");
+    assert_eq!(v.num_sequences(), 0, "sseq_vec![] should have 0 sequences");
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn test_sseq_vec_macro_mixed_values() {
 
 #[test]
 fn test_seq_vec_signed_macro_single_sequence() {
-    let v: LESEqVec<i32> = seq_vec_signed![[-42, -21, 0, 21, 42]];
+    let v: LESSeqVec<i32> = seq_vec_signed![[-42, -21, 0, 21, 42]];
     assert_eq!(v.len(), 1, "Single signed sequence length");
     assert_eq!(
         v.get(0).unwrap().collect::<Vec<_>>(),
@@ -131,7 +131,7 @@ fn test_seq_vec_signed_macro_single_sequence() {
 
 #[test]
 fn test_seq_vec_signed_macro_extreme_values() {
-    let v: BESEqVec<i64> = seq_vec_signed![[i64::MIN, i64::MIN + 1], [i64::MAX - 1, i64::MAX]];
+    let v: BESSeqVec<i64> = seq_vec_signed![[i64::MIN, i64::MIN + 1], [i64::MAX - 1, i64::MAX]];
 
     assert_eq!(v.len(), 2, "Extreme values length");
     let first = v.get(0).unwrap().collect::<Vec<_>>();
@@ -140,7 +140,7 @@ fn test_seq_vec_signed_macro_extreme_values() {
 
 #[test]
 fn test_seq_vec_signed_macro_with_trailing_comma() {
-    let v: LESEqVec<i16> = seq_vec_signed![[-10, -5], [5, 10],];
+    let v: LESSeqVec<i16> = seq_vec_signed![[-10, -5], [5, 10],];
     assert_eq!(v.len(), 2, "Trailing comma should not affect length");
 }
 

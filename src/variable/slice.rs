@@ -9,6 +9,8 @@
 use super::{traits::Storable, VarVec, VarVecBitReader};
 use dsi_bitstream::prelude::{BitRead, BitSeek, CodesRead, Endianness};
 use std::cmp::Ordering;
+use std::fmt;
+use std::iter::FusedIterator;
 use std::ops::Range;
 
 /// An immutable, zero-copy slice of an [`VarVec`].
@@ -24,13 +26,14 @@ use std::ops::Range;
 /// # Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::variable::{VarVec, UVarVec};
 ///
 /// let data: Vec<u32> = (0..100).collect();
-/// let vec: UVarVec<u32> = VarVec::from_slice(&data).unwrap();
+/// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
 ///
 /// // Create a slice of the elements from index 20 to 49
-/// let slice = vec.slice(20, 30).unwrap();
+/// let slice = vec.slice(20, 30).expect("valid slice range");
 ///
 /// assert_eq!(slice.len(), 30);
 ///
@@ -44,6 +47,8 @@ use std::ops::Range;
 ///     slice_sum += value;
 /// }
 /// assert_eq!(slice_sum, (20..50).sum());
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct VarVecSlice<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
@@ -235,5 +240,24 @@ where
 {
     fn len(&self) -> usize {
         self.slice.len().saturating_sub(self.current_index)
+    }
+}
+
+impl<T, E, B> FusedIterator for VarVecSliceIter<'_, T, E, B>
+where
+    T: Storable,
+    E: Endianness,
+    B: AsRef<[u64]>,
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for VarVecSliceIter<'_, T, E, B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VarVecSliceIter")
+            .field("remaining", &self.slice.len().saturating_sub(self.current_index))
+            .finish()
     }
 }

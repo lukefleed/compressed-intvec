@@ -24,7 +24,7 @@ fn test_intvec_owned_to_borrowed_conversion() {
     let samples_limbs = samples_vec.as_limbs();
     let samples_len = samples_vec.len();
     let samples_num_bits = samples_vec.bit_width();
-    let k = owned_vec.get_sampling_rate();
+    let k = owned_vec.sampling_rate();
     let len = owned_vec.len();
     let encoding = owned_vec.encoding();
 
@@ -43,8 +43,8 @@ fn test_intvec_owned_to_borrowed_conversion() {
     // 4. Assert that the borrowed view is functionally identical to the owned one.
     assert_eq!(borrowed_vec.len(), owned_vec.len());
     assert_eq!(
-        borrowed_vec.get_sampling_rate(),
-        owned_vec.get_sampling_rate()
+        borrowed_vec.sampling_rate(),
+        owned_vec.sampling_rate()
     );
     assert_eq!(
         borrowed_vec.iter().collect::<Vec<_>>(),
@@ -109,7 +109,7 @@ fn test_sintvec_owned_to_borrowed_conversion() {
     let samples_limbs = samples_vec.as_limbs();
     let samples_len = samples_vec.len();
     let samples_num_bits = samples_vec.bit_width();
-    let k = owned_svec.get_sampling_rate();
+    let k = owned_svec.sampling_rate();
     let len = owned_svec.len();
     let encoding = owned_svec.encoding();
 

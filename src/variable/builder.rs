@@ -86,6 +86,7 @@ impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::variable::{VarVec, SVarVec, Codec};
     ///
     /// let data: &[i16] = &[-100, 0, 50, -2, 1000];
@@ -93,11 +94,12 @@ impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
     /// let vec: SVarVec<i16> = VarVec::builder()
     ///     .k(2) // Smaller `k` for faster access
     ///     .codec(Codec::Delta) // Explicitly choose Delta coding
-    ///     .build(data)
-    ///     .unwrap();
+    ///     .build(data)?;
     ///
     /// assert_eq!(vec.len(), 5);
     /// assert_eq!(vec.get(0), Some(-100));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn build(self, input: &[T]) -> Result<VarVec<T, E, Vec<u64>>, VarVecError>
     where
@@ -227,6 +229,7 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilde
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::variable::{VarVec, UVarVec, Codec};
     ///
     /// // Create a vector from a range iterator
@@ -235,11 +238,12 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilde
     /// let vec: UVarVec<u32> = VarVec::from_iter_builder(data_iter)
     ///     .k(64)
     ///     .codec(Codec::Gamma) // Must be specified
-    ///     .build()
-    ///     .unwrap();
+    ///     .build()?;
     ///
     /// assert_eq!(vec.len(), 1000);
     /// assert_eq!(vec.get(999), Some(999));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn build(self) -> Result<VarVec<T, E, Vec<u64>>, VarVecError>
     where

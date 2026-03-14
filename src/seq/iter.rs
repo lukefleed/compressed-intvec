@@ -9,7 +9,7 @@
 //! - [`SeqIter`]: Iterator over the elements of a single sequence.
 //! - [`SeqVecIter`]: Iterator over all sequences in a [`SeqVec`].
 //!
-//! [`SeqVec']: crate::seq::SeqVec
+//! [`SeqVec`]: crate::seq::SeqVec
 
 use crate::common::codec_reader::CodecReader;
 use crate::fixed::FixedVec;
@@ -65,10 +65,11 @@ pub(crate) type SeqVecBitReader<'a, E> =
 /// ## Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::seq::{SeqVec, LESeqVec};
 ///
 /// let sequences: &[&[u32]] = &[&[10, 20, 30], &[100, 200]];
-/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
 ///
 /// // Iterate over the first sequence
 /// let mut sum = 0u32;
@@ -76,6 +77,8 @@ pub(crate) type SeqVecBitReader<'a, E> =
 ///     sum += value;
 /// }
 /// assert_eq!(sum, 60);
+/// #     Ok(())
+/// # }
 /// ```
 pub struct SeqIter<'a, T: Storable, E: Endianness>
 where
@@ -265,14 +268,17 @@ where
 /// ## Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::seq::{SeqVec, LESeqVec};
 ///
 /// let sequences: &[&[u32]] = &[&[1, 2], &[3], &[4, 5, 6]];
-/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
 ///
 /// // Collect all sequences into vectors
 /// let all: Vec<Vec<u32>> = vec.iter().map(|s| s.collect()).collect();
 /// assert_eq!(all, vec![vec![1, 2], vec![3], vec![4, 5, 6]]);
+/// #     Ok(())
+/// # }
 /// ```
 ///
 /// [`SeqVec`]: crate::seq::SeqVec
@@ -483,10 +489,11 @@ where
 /// ## Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::seq::{SeqVec, LESeqVec};
 ///
 /// let sequences: &[&[u32]] = &[&[1, 2], &[3, 4, 5]];
-/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
+/// let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
 ///
 /// // Consume the vec and iterate over sequences
 /// let mut count = 0;
@@ -495,6 +502,8 @@ where
 ///     let _ = seq.collect::<Vec<_>>();
 /// }
 /// assert_eq!(count, 2);
+/// #     Ok(())
+/// # }
 /// ```
 pub struct SeqVecIntoIter<T, E>
 where
@@ -522,8 +531,6 @@ where
     _data_owner: Vec<u64>,
     /// This field owns the bit offsets buffer.
     _bit_offsets_owner: Vec<u64>,
-    /// Phantom data to hold the generic types.
-    _markers: PhantomData<(T, E)>,
 
     // Mutable fields (iteration state)
     /// The number of sequences remaining in the iterator.
@@ -533,6 +540,10 @@ where
     /// Cached end_bit from previous iteration to avoid redundant offset decoding.
     /// For sequential access, the end_bit of iteration i becomes start_bit of iteration i+1.
     last_end_bit: u64,
+
+    // Marker fields
+    /// Phantom data to hold the generic types.
+    _markers: PhantomData<(T, E)>,
 }
 
 impl<T, E> SeqVecIntoIter<T, E>
@@ -566,8 +577,6 @@ where
             unsafe { std::mem::transmute(_bit_offsets_owner.as_slice()) };
 
         Self {
-            num_sequences,
-            current_index: 0,
             data: data_ref,
             encoding,
             bit_offsets_data: bit_offsets_ref,
@@ -576,8 +585,10 @@ where
             seq_lengths,
             _data_owner,
             _bit_offsets_owner,
-            _markers: PhantomData,
+            num_sequences,
+            current_index: 0,
             last_end_bit: 0,
+            _markers: PhantomData,
         }
     }
 

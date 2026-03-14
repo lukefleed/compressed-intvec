@@ -10,7 +10,7 @@
 //! Codec selection is performed by a statistical analysis of the entire
 //! input dataset at construction time.
 //!
-//! The [`VariableCodecSpec`] enum provides several ways to specify the compression method:
+//! The [`Codec`] enum provides several ways to specify the compression method:
 //!
 //! 1.  **Explicit Specification**: A specific codec and all its parameters are
 //!     provided. This is suitable when the data characteristics are known in
@@ -19,6 +19,7 @@
 //!     - Parametric example: `Zeta { k: Some(3) }`.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::prelude::*;
 //!
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
@@ -27,14 +28,14 @@
 //! let delta_vec: UVarVec<u32> = VarVec::builder()
 //!     .codec(Codec::Delta)
 //!     .k(16)
-//!     .build(&data)
-//!     .unwrap();
+//!     .build(&data)?;
 //!
 //! // Explicitly specify a parametric codec with a fixed parameter
 //! let zeta_vec: UVarVec<u32> = VarVec::builder()
 //!     .codec(Codec::Zeta { k: Some(3) })
-//!     .build(&data)
-//!     .unwrap();
+//!     .build(&data)?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! 2.  **Automatic Parameter Estimation**: A specific codec family is chosen, but
@@ -44,6 +45,7 @@
 //!       given data.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::prelude::*;
 //!
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
@@ -51,23 +53,26 @@
 //! // Automatically select the best Rice parameter
 //! let rice_vec: UVarVec<u32> = VarVec::builder()
 //!     .codec(Codec::Rice { log2_b: None })
-//!     .build(&data)
-//!     .unwrap();
+//!     .build(&data)?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! 3.  **Fully Automatic Selection**: The builder analyzes the data against all
 //!     available codecs and their standard parameter ranges to find the single
-//!     best configuration. This is activated by using [`VariableCodecSpec::Auto`].
+//!     best configuration. This is activated by using [`Codec::Auto`].
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::prelude::*;
 //!
 //! let data: &[u32] = &(0..1000).collect::<Vec<_>>();
 //! // Automatically select the best codec and parameters for the data
 //! let auto_vec: UVarVec<u32> = VarVec::builder()
 //!    .codec(Codec::Auto)
-//!    .build(&data)
-//!    .unwrap();
+//!    .build(&data)?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //!
@@ -95,7 +100,7 @@
 //!   values cover common and effective parameter ranges.
 //! - If a data distribution benefits from a parameter outside of the tested
 //!   range (e.g., Zeta with `k=20`), it must be specified explicitly in the
-//!   builder via `.codec(VariableCodecSpec::Zeta { k: Some(20) })`.
+//!   builder via `.codec(Codec::Zeta { k: Some(20) })`.
 //!
 //! [`VarVec`]: crate::variable::VarVec
 //! [`VarVecBuilder`]: crate::variable::builder::VarVecBuilder

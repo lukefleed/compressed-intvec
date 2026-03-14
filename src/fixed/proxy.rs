@@ -13,10 +13,11 @@
 //! # Examples
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
 //!
 //! let data: &[u32] = &[10, 20, 30];
-//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(data).unwrap();
+//! let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(data)?;
 //!
 //! // Get a mutable proxy for the element at index 1.
 //! if let Some(mut proxy) = vec.at_mut(1) {
@@ -25,6 +26,8 @@
 //! } // The proxy is dropped here, and the new value is written back.
 //!
 //! assert_eq!(vec.get(1), Some(99));
+//! # Ok(())
+//! # }
 //! ```
 
 use super::{
@@ -33,6 +36,7 @@ use super::{
 };
 use dsi_bitstream::prelude::Endianness;
 use std::{
+    fmt,
     mem,
     ops::{Deref, DerefMut},
 };
@@ -57,6 +61,21 @@ where
     index: usize,
     /// A temporary, decoded copy of the element's value.
     value: T,
+}
+
+impl<T, W, E, B> fmt::Debug for MutProxy<'_, T, W, E, B>
+where
+    T: Storable<W> + fmt::Debug,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]> + AsMut<[W]>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MutProxy")
+            .field("index", &self.index)
+            .field("value", &self.value)
+            .finish()
+    }
 }
 
 impl<'a, T, W, E, B> MutProxy<'a, T, W, E, B>

@@ -12,6 +12,8 @@ use dsi_bitstream::{
     dispatch::{CodesRead, StaticCodeRead},
     prelude::{BitRead, BitSeek, Endianness},
 };
+use std::fmt;
+use std::iter::FusedIterator;
 use std::marker::PhantomData;
 
 /// A borrowing iterator over the values of an [`VarVec`].
@@ -23,10 +25,11 @@ use std::marker::PhantomData;
 /// # Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::variable::{VarVec, UVarVec};
 ///
 /// let data: &[u32] = &[10, 20, 30, 40, 50];
-/// let vec: UVarVec<u32> = VarVec::from_slice(data).unwrap();
+/// let vec: UVarVec<u32> = VarVec::from_slice(data)?;
 ///
 /// let mut sum = 0;
 /// for value in vec.iter() {
@@ -34,6 +37,8 @@ use std::marker::PhantomData;
 /// }
 ///
 /// assert_eq!(sum, 150);
+/// # Ok(())
+/// # }
 /// ```
 pub struct VarVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
 where
@@ -109,6 +114,26 @@ where
     }
 }
 
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> FusedIterator for VarVecIter<'_, T, E, B> where
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>
+{
+}
+
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for VarVecIter<'_, T, E, B>
+where
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VarVecIter")
+            .field("remaining", &self.len.saturating_sub(self.current_index))
+            .finish()
+    }
+}
+
 /// An owning iterator over the values of an [`VarVec`].
 ///
 /// This struct is created by the [`into_iter`](VarVec::into_iter) method on
@@ -118,16 +143,19 @@ where
 /// # Examples
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::variable::{VarVec, SVarVec};
 ///
 /// let data: &[i16] = &[-1, -2, -3, -4];
-/// let vec: SVarVec<i16> = VarVec::from_slice(data).unwrap();
+/// let vec: SVarVec<i16> = VarVec::from_slice(data)?;
 ///
 /// // The `into_iter` call is implicit in the for loop.
 /// // This loop consumes `vec`.
 /// let collected: Vec<i16> = vec.into_iter().map(|v| v * 2).collect();
 ///
 /// assert_eq!(collected, &[-2, -4, -6, -8]);
+/// # Ok(())
+/// # }
 /// ```
 pub struct VarVecIntoIter<T, E>
 where
@@ -217,5 +245,30 @@ where
 {
     fn len(&self) -> usize {
         self.len.saturating_sub(self.current_index)
+    }
+}
+
+impl<T, E> FusedIterator for VarVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+}
+
+impl<T, E> fmt::Debug for VarVecIntoIter<T, E>
+where
+    T: Storable + 'static,
+    E: Endianness + 'static,
+    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VarVecIntoIter")
+            .field("remaining", &self.len.saturating_sub(self.current_index))
+            .finish()
     }
 }
