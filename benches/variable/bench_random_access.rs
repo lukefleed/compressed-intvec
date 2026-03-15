@@ -1,5 +1,5 @@
 use compressed_intvec::prelude::*;
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
@@ -7,7 +7,8 @@ use dsi_bitstream::{
 use rand::{Rng, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector as SuccinctIntVector};
-use sux::prelude::{BitFieldSlice, BitFieldVec};
+use sux::prelude::BitFieldVec;
+use value_traits::slices::SliceByValue;
 
 /// Enum to define the data distributions for testing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,6 +92,7 @@ fn benchmark_random_access(c: &mut Criterion) {
 
     for distribution in distributions {
         let mut group = c.benchmark_group(format!("RandomAccess/{}", distribution.name()));
+        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
         let data = distribution.generate(VECTOR_SIZE);
 
         // --- Baseline benchmark on the original Vec<u64> ---
@@ -123,7 +125,7 @@ fn benchmark_random_access(c: &mut Criterion) {
             group.bench_function("sux::BitFieldVec/get_unchecked", |b| {
                 b.iter(|| {
                     for &index in black_box(&access_indices) {
-                        black_box(unsafe { sux_bfv.get_unchecked(index) });
+                        black_box(unsafe { sux_bfv.get_value_unchecked(index) });
                     }
                 })
             });

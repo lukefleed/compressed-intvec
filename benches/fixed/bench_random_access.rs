@@ -2,11 +2,12 @@
 use std::time::Duration;
 
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use simple_sds_sbwt::{int_vector::IntVector as SdsIntVector, ops::Access};
 use succinct::int_vec::{IntVec, IntVector as SuccinctIntVector};
-use sux::prelude::{BitFieldSlice, BitFieldVec};
+use sux::prelude::BitFieldVec;
+use value_traits::slices::SliceByValue;
 
 /// Generates a vector with uniformly random values up to a given maximum.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {
@@ -31,6 +32,7 @@ fn benchmark_random_access(c: &mut Criterion) {
 
     for &bit_width in &bit_widths_to_test {
         let mut group = c.benchmark_group(format!("RandomAccess/{}bit", bit_width));
+        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
 
         let data = if bit_width == 64 {
             let mut rng = SmallRng::seed_from_u64(42);
@@ -123,7 +125,7 @@ fn benchmark_random_access(c: &mut Criterion) {
         group.bench_function("sux::BitFieldVec/Unchecked", |b| {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
-                    black_box(unsafe { sux_bfv.get_unchecked(index) });
+                    black_box(unsafe { sux_bfv.get_value_unchecked(index) });
                 }
             })
         });

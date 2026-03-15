@@ -1,12 +1,12 @@
 use compressed_intvec::fixed::atomic::UAtomicFixedVec;
 use compressed_intvec::fixed::BitWidth;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
-use sux::prelude::AtomicBitFieldSlice;
+use sux::prelude::bit_field_slice::AtomicBitFieldSlice;
 
 const VECTOR_SIZE: usize = 1_000_000;
 const NUM_ACCESSES: usize = 100_000;
@@ -79,6 +79,7 @@ fn register_single_thread_benches(
             bit_width,
             ordering_to_str(order)
         ));
+        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
 
         // Baseline: std::sync::atomic, initialized with random data.
         let std_vec: Vec<AtomicU64> = initial_data
@@ -209,6 +210,7 @@ fn register_multi_thread_benches(
                 contention.name(),
                 ordering_to_str(order)
             ));
+            group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
 
             // Baseline: std::sync::atomic, initialized with shared random data.
             let std_vec = Arc::new(
@@ -381,7 +383,7 @@ fn register_multi_thread_benches(
             // --- Benchmark Compare-Exchange (High Contention Stress Test) ---
             if matches!(contention, Contention::High) {
                 group.bench_function("AtomicFixedVec/cas_increment", |b| {
-                    b.iter_with_setup(
+                    b.iter_batched(
                         || vec.store(high_contention_index, 0, Ordering::Relaxed),
                         |_| {
                             let barrier = Arc::new(Barrier::new(num_threads));
@@ -411,6 +413,7 @@ fn register_multi_thread_benches(
                                 }
                             });
                         },
+                        criterion::BatchSize::SmallInput,
                     )
                 });
             }
@@ -449,9 +452,9 @@ fn benchmark_atomic_ops(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(20)
         .warm_up_time(Duration::from_millis(10))
-        .measurement_time(Duration::from_secs(1));
+        .measurement_time(Duration::from_secs(2));
 
     targets = benchmark_atomic_ops
 }

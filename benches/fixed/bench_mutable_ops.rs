@@ -1,9 +1,10 @@
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::time::Duration;
 use succinct::int_vec::{IntVecMut, IntVector};
-use sux::prelude::{BitFieldSliceMut, BitFieldVec};
+use sux::prelude::BitFieldVec;
+use value_traits::slices::SliceByValueMut;
 
 /// Generates a vector with uniformly random values up to a given maximum.
 ///
@@ -27,7 +28,8 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
     const BIT_WIDTH: u32 = 16; // A power-of-two width.
 
     let mut group = c.benchmark_group(format!("MutableOps/{}bit", BIT_WIDTH));
-    group.sample_size(10);
+    group.throughput(Throughput::Elements(VECTOR_SIZE as u64));
+    group.sample_size(20);
 
     let data = generate_random_vec(VECTOR_SIZE, 1u64 << BIT_WIDTH);
 
@@ -96,17 +98,18 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
     let resize_value = data[0]; // A value that fits the bit width.
 
     group.bench_function("Baseline_Vec<u64>/resize", |b| {
-        b.iter_with_setup(
+        b.iter_batched(
             || data[..RESIZE_FROM].to_vec(),
             |mut vec| {
                 vec.resize(RESIZE_TO, resize_value);
                 black_box(vec);
             },
+            criterion::BatchSize::LargeInput,
         );
     });
 
     group.bench_function("LEFixedVec/resize", |b| {
-        b.iter_with_setup(
+        b.iter_batched(
             || {
                 LEFixedVec::builder()
                     .bit_width(BitWidth::Explicit(BIT_WIDTH as usize))
@@ -117,11 +120,12 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
                 vec.resize(RESIZE_TO, resize_value);
                 black_box(vec);
             },
+            criterion::BatchSize::LargeInput,
         );
     });
 
     group.bench_function("sux::BitFieldVec/resize", |b| {
-        b.iter_with_setup(
+        b.iter_batched(
             || {
                 let mut vec = BitFieldVec::<u64>::with_capacity(BIT_WIDTH as usize, RESIZE_FROM);
                 for &val in &data[..RESIZE_FROM] {
@@ -133,11 +137,12 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
                 vec.resize(RESIZE_TO, resize_value);
                 black_box(vec);
             },
+            criterion::BatchSize::LargeInput,
         );
     });
 
     group.bench_function("succinct::VarVector/resize", |b| {
-        b.iter_with_setup(
+        b.iter_batched(
             || {
                 let mut vec =
                     IntVector::<u64>::with_capacity(BIT_WIDTH as usize, RESIZE_FROM as u64);
@@ -150,6 +155,7 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
                 vec.resize(RESIZE_TO as u64, resize_value);
                 black_box(vec);
             },
+            criterion::BatchSize::LargeInput,
         );
     });
 
@@ -173,7 +179,7 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
     }
 
     group.bench_function("LEFixedVec/set_unchecked_random", |b| {
-        b.iter_with_setup(
+        b.iter_batched(
             || base_le_fixed_vec.clone(),
             |mut vec| {
                 for i in 0..NUM_SETS {
@@ -181,23 +187,25 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
                 }
                 black_box(vec);
             },
+            criterion::BatchSize::LargeInput,
         );
     });
 
     group.bench_function("sux::BitFieldVec/set_unchecked_random", |b| {
-        b.iter_with_setup(
+        b.iter_batched(
             || base_sux_bfv.clone(),
             |mut vec| {
                 for i in 0..NUM_SETS {
-                    unsafe { vec.set_unchecked(set_indices[i], set_values[i]) };
+                    unsafe { vec.set_value_unchecked(set_indices[i], set_values[i]) };
                 }
                 black_box(vec);
             },
+            criterion::BatchSize::LargeInput,
         );
     });
 
     group.bench_function("succinct::VarVector/set_random", |b| {
-        b.iter_with_setup(
+        b.iter_batched(
             || base_succinct_iv.clone(),
             |mut vec| {
                 for i in 0..NUM_SETS {
@@ -206,6 +214,7 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
                 }
                 black_box(vec);
             },
+            criterion::BatchSize::LargeInput,
         );
     });
 
@@ -215,9 +224,9 @@ fn benchmark_mutable_ops(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(20)
         .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(2));
+        .measurement_time(Duration::from_secs(3));
     targets = benchmark_mutable_ops
 }
 criterion_main!(benches);

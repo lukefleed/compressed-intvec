@@ -2,10 +2,11 @@ use std::time::Duration;
 
 // benches/fixed/bench_sequential_ops.rs
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use succinct::int_vec::{IntVec, IntVecMut, IntVector};
-use sux::prelude::{BitFieldSliceMut, BitFieldVec};
+use sux::prelude::BitFieldVec;
+use value_traits::slices::SliceByValueMut;
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -28,7 +29,8 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
 
     for &bit_width in &bit_widths_to_test {
         let mut group = c.benchmark_group(format!("SequentialOps/{}bit", bit_width));
-        group.sample_size(10);
+        group.throughput(Throughput::Elements(VECTOR_SIZE as u64));
+        group.sample_size(20);
 
         let data = generate_random_vec(VECTOR_SIZE, 1u64.wrapping_shl(bit_width));
 
@@ -97,27 +99,29 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
         let map_fn = |x: u64| (x ^ 0x5555_5555_5555_5555) & mask;
 
         group.bench_function("Baseline_Vec<u64>/map_in_place", |b| {
-            b.iter_with_setup(
+            b.iter_batched(
                 || data.clone(),
                 |mut d| {
                     d.iter_mut().for_each(|x| *x = map_fn(*x));
                     black_box(d);
                 },
+                criterion::BatchSize::LargeInput,
             );
         });
 
         group.bench_function("LEFixedVec/map_in_place_unchecked", |b| {
-            b.iter_with_setup(
+            b.iter_batched(
                 || le_fixed_vec.clone(),
                 |mut vec| {
                     unsafe { vec.map_in_place_unchecked(map_fn) };
                     black_box(vec);
                 },
+                criterion::BatchSize::LargeInput,
             );
         });
 
         group.bench_function("sux::BitFieldVec/map_in_place_unchecked", |b| {
-            b.iter_with_setup(
+            b.iter_batched(
                 || sux_bfv.clone(),
                 |mut vec| {
                     unsafe {
@@ -125,11 +129,12 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
                     }
                     black_box(vec);
                 },
+                criterion::BatchSize::LargeInput,
             );
         });
 
         group.bench_function("succinct::IntVector/map_in_place_loop", |b| {
-            b.iter_with_setup(
+            b.iter_batched(
                 || succinct_iv.clone(),
                 |mut vec| {
                     // succulent does not have a dedicated map_in_place, so we simulate
@@ -140,6 +145,7 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
                     }
                     black_box(vec);
                 },
+                criterion::BatchSize::LargeInput,
             );
         });
 
@@ -150,9 +156,9 @@ fn benchmark_sequential_ops(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(20)
         .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(2));
+        .measurement_time(Duration::from_secs(3));
 
     targets = benchmark_sequential_ops
 }

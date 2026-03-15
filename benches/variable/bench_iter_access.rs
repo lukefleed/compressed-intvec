@@ -159,7 +159,7 @@ fn benchmark_iter_access(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(20)
         .warm_up_time(Duration::from_millis(10))
         .measurement_time(Duration::from_secs(2));
     targets = benchmark_iter_access

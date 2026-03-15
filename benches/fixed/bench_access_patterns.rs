@@ -2,11 +2,12 @@ use std::time::Duration;
 
 // benches/fixed/bench_access_patterns.rs
 use compressed_intvec::prelude::*;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
 use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
 use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector};
-use sux::prelude::{BitFieldSlice, BitFieldVec};
+use sux::prelude::BitFieldVec;
+use value_traits::slices::SliceByValue;
 
 /// Generates a vector with uniformly random values up to a given maximum.
 ///
@@ -144,6 +145,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             BIT_WIDTH,
             pattern.name()
         ));
+        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
 
         let mut rng = SmallRng::seed_from_u64(1337);
         let access_indices =
@@ -171,7 +173,7 @@ fn benchmark_access_patterns(c: &mut Criterion) {
             b.iter(|| {
                 for &index in black_box(&access_indices) {
                     // SAFETY: Indices are generated within bounds.
-                    black_box(unsafe { sux_bfv.get_unchecked(index) });
+                    black_box(unsafe { sux_bfv.get_value_unchecked(index) });
                 }
             })
         });
@@ -200,9 +202,9 @@ fn benchmark_access_patterns(c: &mut Criterion) {
 criterion_group! {
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(20)
         .warm_up_time(Duration::from_millis(100))
-        .measurement_time(Duration::from_secs(2));
+        .measurement_time(Duration::from_secs(3));
 
     targets = benchmark_access_patterns
 }

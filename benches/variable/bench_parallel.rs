@@ -1,4 +1,4 @@
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use dsi_bitstream::{
     codes::{len_rice, len_zeta_param},
     utils::sample_implied_distribution,
@@ -85,6 +85,7 @@ fn benchmark_access(c: &mut Criterion) {
 
     for (distribution, dist_name) in distributions {
         let mut group = c.benchmark_group(dist_name);
+        group.throughput(Throughput::Elements(NUM_ACCESSES as u64));
         let data = distribution.generate(VECTOR_SIZE);
 
         for (spec_name, codec_spec) in codecs_to_test {
@@ -145,7 +146,7 @@ fn benchmark_access(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default()
-        .sample_size(10)
+        .sample_size(20)
         .warm_up_time(Duration::from_millis(10))
         .measurement_time(Duration::from_secs(2));
     targets = benchmark_access

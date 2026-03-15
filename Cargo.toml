@@ -16,7 +16,7 @@ atomic = "0.5.3"
 bytemuck = { version = "1.23.1", optional = true }
 common_traits = "0.12.0"
 dsi-bitstream = { version = "0.5.0", features = ["mem_dbg"] }
-mem_dbg = "0.3.0"
+mem_dbg = "0.4.0"
 num-traits = "0.2.19"
 parking_lot = "0.12.4"
 rayon = { version = "1.10.0", optional = true }
@@ -30,9 +30,11 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 rand_distr = "0.5.0"
 csv = "1.3.1"
 serde_json = "1.0.141"
-sux = "0.8.0"
+sux = "0.13.1"
 succinct = "0.5.2"
+value-traits = "0.2.1"
 rand = "0.9.0"
+iai-callgrind = "0.16"
 
 # --- Benchmark Targets ---
 
@@ -92,14 +94,14 @@ harness = false
 path = "benches/bench_size.rs"
 
 [[bench]]
-name = "benchmark_lock_free_access"
+name = "bench_lock_free_access"
 harness = false
-path = "benches/fixed/benchmark_lock_free_access.rs"
+path = "benches/fixed/bench_lock_free_access.rs"
 
 [[bench]]
-name = "benchmark_locked_access"
+name = "bench_locked_access"
 harness = false
-path = "benches/fixed/benchmark_locked_access.rs"
+path = "benches/fixed/bench_locked_access.rs"
 
 [[bench]]
 name = "bench_random_write"
@@ -121,6 +123,27 @@ name = "bench_seq_parallel"
 harness = false
 path = "benches/seq/bench_seq_parallel.rs"
 required-features = ["parallel"]
+
+[[bench]]
+name = "bench_serde"
+harness = false
+path = "benches/bench_serde.rs"
+required-features = ["serde"]
+
+[[bench]]
+name = "iai_fixed"
+harness = false
+path = "benches/iai_fixed.rs"
+
+[[bench]]
+name = "iai_variable"
+harness = false
+path = "benches/iai_variable.rs"
+
+[[bench]]
+name = "iai_seq"
+harness = false
+path = "benches/iai_seq.rs"
 
 [features]
 default = ["parallel"]

@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU16, AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Duration;
-use sux::prelude::{AtomicBitFieldSlice, AtomicBitFieldVec};
+use sux::prelude::{bit_field_slice::AtomicBitFieldSlice, AtomicBitFieldVec};
 
 const VECTOR_SIZE: usize = 10_000;
 const OPS_PER_THREAD: usize = 100_000;
