@@ -101,6 +101,20 @@ where
         let remaining = self.len.saturating_sub(self.current_index);
         (remaining, Some(remaining))
     }
+
+    fn fold<Acc, F>(mut self, init: Acc, mut f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        let mut acc = init;
+        let remaining = self.len - self.current_index;
+        for _ in 0..remaining {
+            let word = self.code_reader.read(&mut self.reader).unwrap();
+            acc = f(acc, T::from_word(word));
+        }
+        self.current_index = self.len;
+        acc
+    }
 }
 
 impl<T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for VarVecIter<'_, T, E, B>
@@ -232,6 +246,20 @@ where
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.len.saturating_sub(self.current_index);
         (remaining, Some(remaining))
+    }
+
+    fn fold<Acc, F>(mut self, init: Acc, mut f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        let mut acc = init;
+        let remaining = self.len - self.current_index;
+        for _ in 0..remaining {
+            let word = self.code_reader.read(&mut self.reader).unwrap();
+            acc = f(acc, T::from_word(word));
+        }
+        self.current_index = self.len;
+        acc
     }
 }
 

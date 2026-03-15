@@ -86,6 +86,7 @@ use crate::fixed::{
     traits::{Storable, Word},
 };
 use dsi_bitstream::prelude::Endianness;
+use std::iter::FusedIterator;
 use std::{marker::PhantomData, ops::Deref};
 
 use std::cmp::min;
@@ -135,6 +136,10 @@ where
     front_index: usize,
     back_index: usize,
 
+    // Cached from vec to avoid repeated indirection in hot loops.
+    bit_width: usize,
+    mask: W,
+
     // State for forward iteration.
     front_window: W,
     front_bits_in_window: usize,
@@ -172,11 +177,16 @@ where
 {
     /// Creates a new stateful, bidirectional iterator for a given [`FixedVec`].
     pub(super) fn new(vec: &'a FixedVec<T, W, E, B>) -> Self {
+        let bit_width = vec.bit_width();
+        let mask = vec.mask;
+
         if vec.is_empty() {
             return Self {
                 vec,
                 front_index: 0,
                 back_index: 0,
+                bit_width,
+                mask,
                 front_window: W::ZERO,
                 front_bits_in_window: 0,
                 front_word_index: 0,
@@ -193,13 +203,17 @@ where
         // --- Setup forward state ---
         let front_word_index = 1;
         // Pre-load the first word into the forward window.
+        // SAFETY: The vector is non-empty, so limbs[0] exists (guaranteed by
+        // the padding word invariant).
         let front_window = unsafe { *limbs.get_unchecked(0) };
         let front_bits_in_window = bits_per_word;
 
         // --- Setup backward state ---
-        let total_bits = vec.len() * vec.bit_width();
+        let total_bits = vec.len() * bit_width;
         let back_word_index = (total_bits.saturating_sub(1)) / bits_per_word;
         // Pre-load the last word into the backward window.
+        // SAFETY: back_word_index is within bounds because total_bits > 0
+        // and the buffer has num_words + 1 words (padding invariant).
         let back_window = unsafe { *limbs.get_unchecked(back_word_index) };
         // Calculate how many bits in the last word are valid data.
         let back_bits_in_window = total_bits % bits_per_word;
@@ -213,6 +227,8 @@ where
             vec,
             front_index: 0,
             back_index: vec.len(),
+            bit_width,
+            mask,
             front_window,
             front_bits_in_window,
             front_word_index,
@@ -241,9 +257,13 @@ where
         let index = self.front_index;
         self.front_index += 1;
 
-        let bit_width = self.vec.bit_width();
+        let bit_width = self.bit_width;
+        let mask = self.mask;
+
         // Path for word-sized elements.
         if bit_width == <W as Word>::BITS {
+            // SAFETY: index < back_index <= vec.len(), and for word-sized
+            // elements limbs[index] is valid.
             let val = unsafe { *self.vec.as_limbs().get_unchecked(index) };
             let final_val = if E::IS_BIG { W::from_be(val) } else { val };
             return Some(<T as Storable<W>>::from_word(final_val));
@@ -251,10 +271,10 @@ where
 
         // Fallback to the standard `get_unchecked` for Big-Endian.
         if E::IS_BIG {
+            // SAFETY: index < back_index <= vec.len().
             return Some(unsafe { self.vec.get_unchecked(index) });
         }
 
-        let mask = self.vec.mask;
         // If the current window has enough bits for the next element.
         if self.front_bits_in_window >= bit_width {
             let value = self.front_window & mask;
@@ -264,6 +284,9 @@ where
         }
 
         // Otherwise, load the next word to replenish the window.
+        // SAFETY: front_word_index is valid because we advance it only when
+        // there are remaining elements, and the padding word invariant
+        // guarantees at least one extra word beyond the data.
         unsafe {
             let limbs = self.vec.as_limbs();
             let bits_from_old = self.front_bits_in_window;
@@ -286,6 +309,22 @@ where
         let remaining = self.back_index.saturating_sub(self.front_index);
         (remaining, Some(remaining))
     }
+
+    fn fold<Acc, F>(mut self, init: Acc, mut f: F) -> Acc
+    where
+        F: FnMut(Acc, Self::Item) -> Acc,
+    {
+        let mut acc = init;
+        // Drain all remaining elements without per-element bounds checking.
+        while self.front_index < self.back_index {
+            // SAFETY: We have verified front_index < back_index, so there is
+            // at least one element remaining. unwrap_unchecked is safe because
+            // next() only returns None when front_index >= back_index.
+            let item = unsafe { self.next().unwrap_unchecked() };
+            acc = f(acc, item);
+        }
+        acc
+    }
 }
 
 impl<T, W, E, B> DoubleEndedIterator for FixedVecIter<'_, T, W, E, B>
@@ -303,19 +342,24 @@ where
         self.back_index -= 1;
         let index = self.back_index;
 
-        if E::IS_BIG || self.vec.bit_width() == <W as Word>::BITS {
+        let bit_width = self.bit_width;
+        let mask = self.mask;
+
+        if E::IS_BIG || bit_width == <W as Word>::BITS {
+            // SAFETY: index < back_index (before decrement) <= vec.len().
             return Some(unsafe { self.vec.get_unchecked(index) });
         }
 
-        let bit_width = self.vec.bit_width();
         let bits_per_word: usize = <W as Word>::BITS;
 
         if self.back_bits_in_window >= bit_width {
             self.back_bits_in_window -= bit_width;
-            let value = (self.back_window >> self.back_bits_in_window) & self.vec.mask;
+            let value = (self.back_window >> self.back_bits_in_window) & mask;
             return Some(<T as Storable<W>>::from_word(value));
         }
 
+        // SAFETY: back_word_index is valid because we only decrement it when
+        // there are remaining elements, and the buffer has sufficient words.
         unsafe {
             let limbs = self.vec.as_limbs();
             let bits_from_old = self.back_bits_in_window;
@@ -345,6 +389,15 @@ where
     fn len(&self) -> usize {
         self.back_index.saturating_sub(self.front_index)
     }
+}
+
+impl<T, W, E, B> FusedIterator for FixedVecIter<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
 }
 
 /// An iterator that consumes an owned [`FixedVec`] and yields its elements.
@@ -434,6 +487,14 @@ where
     fn len(&self) -> usize {
         self.iter.len()
     }
+}
+
+impl<T, W, E> FusedIterator for FixedVecIntoIter<T, W, E>
+where
+    T: Storable<W> + 'static,
+    W: Word,
+    E: Endianness,
+{
 }
 
 /// An iterator over the elements of a [`FixedVecSlice`].
@@ -661,6 +722,16 @@ where
     }
 }
 
+impl<T, W, E, B, V> FusedIterator for FixedVecSliceIter<'_, T, W, E, B, V>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+    V: Deref<Target = FixedVec<T, W, E, B>>,
+{
+}
+
 impl<'a, T, W, E, B> Chunks<'a, T, W, E, B>
 where
     T: Storable<W>,
@@ -699,6 +770,15 @@ where
 
         Some(slice)
     }
+}
+
+impl<T, W, E, B> FusedIterator for Chunks<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
 }
 
 /// An iterator over overlapping sub-slices of a [`FixedVec`].
@@ -752,6 +832,15 @@ where
 
         Some(slice)
     }
+}
+
+impl<T, W, E, B> FusedIterator for Windows<'_, T, W, E, B>
+where
+    T: Storable<W>,
+    W: Word,
+    E: Endianness,
+    B: AsRef<[W]>,
+{
 }
 
 /// An unchecked iterator over the elements of a [`FixedVec`].

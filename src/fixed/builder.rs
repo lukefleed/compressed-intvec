@@ -223,7 +223,19 @@ where
             )));
         }
 
-        let mut writer = BufBitWriter::new(MemWordWriterVec::new(Vec::<W>::new()));
+        // Use iterator size_hint to pre-allocate the buffer.
+        let iter = self.iter.into_iter();
+        let (lower_bound, _) = iter.size_hint();
+        let initial_capacity = if lower_bound > 0 && self.bit_width > 0 {
+            let total_bits = lower_bound.saturating_mul(self.bit_width);
+            let num_words = total_bits.div_ceil(bits_per_word);
+            num_words + 1 // +1 for padding
+        } else {
+            0
+        };
+
+        let mut writer =
+            BufBitWriter::new(MemWordWriterVec::new(Vec::<W>::with_capacity(initial_capacity)));
 
         let mut len = 0;
         let limit = if self.bit_width < bits_per_word {
@@ -233,7 +245,7 @@ where
         };
 
         // Write each value from the iterator to the bitstream.
-        for (i, value_t) in self.iter.into_iter().enumerate() {
+        for (i, value_t) in iter.enumerate() {
             let value_w = <T as Storable<W>>::into_word(value_t);
             if self.bit_width < bits_per_word && value_w >= limit {
                 return Err(Error::ValueTooLarge {

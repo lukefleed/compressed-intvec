@@ -156,6 +156,32 @@ where
         iter
     }
 
+    /// Creates a new iterator using a pre-built [`CodecReader`], avoiding the
+    /// overhead of resolving the codec dispatch path on each call.
+    ///
+    /// This is used by iterators that yield many `SeqIter` instances (e.g.,
+    /// [`SeqVecSliceIter`](crate::seq::slice::SeqVecSliceIter)) to amortize
+    /// codec resolution cost.
+    #[inline]
+    pub(crate) fn new_with_codec(
+        data: &'a [u64],
+        start_bit: u64,
+        end_bit: u64,
+        code_reader: CodecReader<'a, E>,
+        len: Option<usize>,
+    ) -> Self {
+        let mut reader = SeqVecBitReader::<E>::new(MemWordReader::new_inf(data));
+        let _ = reader.set_bit_pos(start_bit);
+
+        Self {
+            reader,
+            code_reader,
+            end_bit,
+            known_len: len,
+            _marker: PhantomData,
+        }
+    }
+
     /// Returns the ending bit position for this sequence (exclusive).
     ///
     /// This is useful for understanding the memory footprint of the sequence
@@ -592,26 +618,59 @@ where
         }
     }
 
-    /// Lazily decodes the bit offset for the given index.
+    /// Lazily decodes the bit offset for the given index using direct bit
+    /// arithmetic on the raw backing storage.
     ///
-    /// This avoids decoding all offsets upfront, achieving O(1) amortized cost
-    /// during forward iteration.
+    /// This avoids constructing a `BufBitReader` per call, achieving O(1)
+    /// cost per offset extraction. The bit extraction mirrors the logic used
+    /// by `FixedVec::get_unchecked` for the appropriate endianness.
     #[inline]
     fn get_offset(&self, index: usize) -> u64 {
         if index >= self.bit_offsets_len {
             return 0; // Out of bounds: return sentinel
         }
 
-        let offset_bits = self.bit_offsets_num_bits;
-        let start_bit = (index as u64) * offset_bits;
+        let bit_width = self.bit_offsets_num_bits;
+        if bit_width == 0 {
+            return 0;
+        }
 
-        // Create a reader over the bit offsets data and extract the value.
-        let mut reader = SeqVecBitReader::<E>::new(MemWordReader::new_inf(self.bit_offsets_data));
-        let _ = reader.set_bit_pos(start_bit);
+        let bit_pos = (index as u64) * bit_width;
+        let word_index = (bit_pos / 64) as usize;
+        let bit_offset = (bit_pos % 64) as usize;
+        let bit_width_usize = bit_width as usize;
+        let mask: u64 = if bit_width >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << bit_width) - 1
+        };
 
-        // Read the offset value. For typical cases with explicit bit widths,
-        // this is a simple bit extraction.
-        reader.read_bits(offset_bits as usize).unwrap_or(0)
+        if E::IS_LITTLE {
+            // LE bit packing: LSB-first within words.
+            // SAFETY: The FixedVec backing storage has `ceil(len * bit_width / 64) + 1`
+            // words (padding word invariant), so word_index and word_index+1 are valid.
+            let lo = self.bit_offsets_data[word_index];
+            if bit_offset + bit_width_usize <= 64 {
+                (lo >> bit_offset) & mask
+            } else {
+                let hi = self.bit_offsets_data[word_index + 1];
+                ((lo >> bit_offset) | (hi << (64 - bit_offset))) & mask
+            }
+        } else {
+            // BE bit packing: MSB-first within words, words stored in native order.
+            // SAFETY: Same padding word invariant as the LE path — word_index and
+            // word_index+1 are guaranteed in bounds by the FixedVec buffer layout.
+            let word_hi = self.bit_offsets_data[word_index].to_be();
+            if bit_offset + bit_width_usize <= 64 {
+                (word_hi << bit_offset) >> (64 - bit_width_usize)
+            } else {
+                let word_lo = self.bit_offsets_data[word_index + 1].to_be();
+                let bits_in_first = 64 - bit_offset;
+                let high = (word_hi << bit_offset) >> (64 - bits_in_first);
+                let low = word_lo >> (64 - (bit_width_usize - bits_in_first));
+                (high << (bit_width_usize - bits_in_first)) | low
+            }
+        }
     }
 }
 

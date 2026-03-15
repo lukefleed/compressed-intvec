@@ -271,13 +271,16 @@ impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilde
         let mut writer = VarVecBitWriter::<E>::new(word_writer);
         let mut len = 0;
 
-        let mut temp_samples = Vec::new();
+        // Capture size_hint before consuming the iterator for pre-allocation.
+        let iter = self.iter.into_iter();
+        let (lower_bound, _) = iter.size_hint();
+        let mut temp_samples = Vec::with_capacity(lower_bound.div_ceil(self.k).max(1));
         let mut current_bit_offset = 0;
 
         // Resolve the codec dispatch ONCE at the beginning.
         let code_writer = CodecWriter::new(resolved_code);
 
-        for (i, value) in self.iter.into_iter().enumerate() {
+        for (i, value) in iter.enumerate() {
             if i % self.k == 0 {
                 temp_samples.push(current_bit_offset as u64);
             }

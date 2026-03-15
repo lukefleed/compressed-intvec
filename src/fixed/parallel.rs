@@ -58,8 +58,12 @@ where
     /// # }
     /// ```
     pub fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + '_ {
+        // Use with_min_len to batch elements into chunks, reducing
+        // per-element overhead from computing bit_pos/word_index/bit_offset.
+        let chunk_size = 1024.min(self.len());
         (0..self.len())
             .into_par_iter()
+            .with_min_len(chunk_size)
             .map(move |i| unsafe { self.get_unchecked(i) })
     }
 

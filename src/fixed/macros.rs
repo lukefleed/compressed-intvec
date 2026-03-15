@@ -163,10 +163,24 @@ where
         >,
     >: dsi_bitstream::prelude::BitWrite<<T as DefaultParams>::E, Error = std::convert::Infallible>,
 {
-    let mut v = Vec::new();
-    v.resize(len, elem);
-    FixedVec::<T, <T as DefaultParams>::W, <T as DefaultParams>::E>::builder()
-        .bit_width(BitWidth::Minimal)
-        .build(&v)
-        .unwrap()
+    // Determine bit_width from a single element to avoid materializing an
+    // intermediate Vec of `len` elements (which could be very large).
+    let word_val = <T as Storable<<T as DefaultParams>::W>>::into_word(elem);
+    // Convert to u128 to use leading_zeros, since the Word trait does not
+    // directly expose it. This is only called once, not in a hot loop.
+    let val_u128 = word_val.to_u128().unwrap_or(0);
+    let bit_width = if val_u128 == 0 {
+        1
+    } else {
+        (128 - val_u128.leading_zeros()) as usize
+    };
+
+    crate::fixed::builder::FixedVecFromIterBuilder::<
+        T,
+        <T as DefaultParams>::W,
+        <T as DefaultParams>::E,
+        _,
+    >::new(std::iter::repeat_n(elem, len), bit_width)
+    .build()
+    .unwrap()
 }

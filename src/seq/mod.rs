@@ -842,6 +842,22 @@ where
 
     /// Decodes sequence `index` into the provided buffer without bounds checking.
     ///
+    /// # Performance
+    ///
+    /// This method constructs a new bitstream reader and codec dispatcher on each
+    /// call. For repeated random access, prefer [`reader()`](Self::reader) which
+    /// reuses internal state across calls:
+    ///
+    /// ```no_run
+    /// # use compressed_intvec::seq::{SeqVec, LESeqVec};
+    /// # let vec: LESeqVec<u32> = SeqVec::from_slices(&[&[1u32][..]]).unwrap();
+    /// let mut reader = vec.reader();
+    /// let mut buf = Vec::new();
+    /// for i in 0..vec.num_sequences() {
+    ///     reader.decode_into(i, &mut buf);
+    /// }
+    /// ```
+    ///
     /// # Safety
     ///
     /// Calling this method with `index >= num_sequences()` is undefined behavior.
@@ -887,6 +903,10 @@ where
     }
 
     /// Decodes elements until the reader reaches `end_bit`.
+    ///
+    /// Pre-allocates an estimated capacity based on the bit range to reduce
+    /// reallocations. The estimate assumes ~4 bits per element, which is
+    /// reasonable for common codecs like Delta with values in the 1-10k range.
     #[inline(always)]
     fn decode_until<'a>(
         &self,
@@ -895,6 +915,12 @@ where
         buf: &mut Vec<T>,
         end_bit: u64,
     ) {
+        let start_bit = reader.bit_pos().unwrap();
+        let bit_range = end_bit.saturating_sub(start_bit);
+        // Estimate ~4 bits per element; clamp to at least 1 to avoid zero-capacity.
+        let estimate = (bit_range / 4).max(1) as usize;
+        buf.reserve(estimate);
+
         while reader.bit_pos().unwrap() < end_bit {
             let word = code_reader.read(reader).unwrap();
             buf.push(T::from_word(word));
@@ -1363,18 +1389,28 @@ where
         // Sort by sequence index to enable more sequential bitstream access.
         indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
 
-        // Pre-allocate result vectors with estimated capacity based on bit ranges.
-        // Iterate in original order to populate capacities before decoding.
-        let mut results: Vec<Vec<T>> = indices
-            .iter()
-            .map(|&idx| {
-                let start = unsafe { self.sequence_start_bit_unchecked(idx) };
-                let end = unsafe { self.sequence_end_bit_unchecked(idx) };
-                // Estimate ~4 bits per element (reasonable for Delta with values 1-10k).
-                let cap = ((end - start) / 4).max(1) as usize;
-                Vec::with_capacity(cap)
-            })
-            .collect();
+        // Pre-allocate result vectors. Use exact lengths when available,
+        // otherwise estimate capacity from bit ranges (~4 bits per element).
+        let mut results: Vec<Vec<T>> = if let Some(ref lengths) = self.seq_lengths {
+            indices
+                .iter()
+                .map(|&idx| {
+                    // SAFETY: bounds were checked by the caller.
+                    let len = unsafe { lengths.get_unchecked(idx) as usize };
+                    Vec::with_capacity(len)
+                })
+                .collect()
+        } else {
+            indices
+                .iter()
+                .map(|&idx| {
+                    let start = unsafe { self.sequence_start_bit_unchecked(idx) };
+                    let end = unsafe { self.sequence_end_bit_unchecked(idx) };
+                    let cap = ((end - start) / 4).max(1) as usize;
+                    Vec::with_capacity(cap)
+                })
+                .collect()
+        };
 
         // Decode in sorted order for compressed data locality.
         let mut reader = self.reader();
@@ -1471,14 +1507,21 @@ where
         // Sort by sequence index to enable more sequential bitstream access.
         indexed_indices.sort_unstable_by_key(|&(idx, _)| idx);
 
-        // Pre-allocate capacities for output vectors based on bit ranges.
-        // Iterate in original order to populate capacities before decoding.
-        for (i, &idx) in indices.iter().enumerate() {
-            let start = unsafe { self.sequence_start_bit_unchecked(idx) };
-            let end = unsafe { self.sequence_end_bit_unchecked(idx) };
-            // Estimate ~4 bits per element (reasonable for Delta with values 1-10k).
-            let cap = ((end - start) / 4).max(1) as usize;
-            output[i].reserve(cap);
+        // Pre-allocate capacities. Use exact lengths when available,
+        // otherwise estimate from bit ranges (~4 bits per element).
+        if let Some(ref lengths) = self.seq_lengths {
+            for (i, &idx) in indices.iter().enumerate() {
+                // SAFETY: bounds were checked by the caller.
+                let len = unsafe { lengths.get_unchecked(idx) as usize };
+                output[i].reserve(len);
+            }
+        } else {
+            for (i, &idx) in indices.iter().enumerate() {
+                let start = unsafe { self.sequence_start_bit_unchecked(idx) };
+                let end = unsafe { self.sequence_end_bit_unchecked(idx) };
+                let cap = ((end - start) / 4).max(1) as usize;
+                output[i].reserve(cap);
+            }
         }
 
         // Decode in sorted order for compressed data locality.

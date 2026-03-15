@@ -7,6 +7,7 @@
 //! [`SeqVec`]: crate::seq::SeqVec
 
 use super::{iter::SeqVecBitReader, SeqIter, SeqVec};
+use crate::common::codec_reader::CodecReader;
 use crate::variable::traits::Storable;
 use dsi_bitstream::prelude::{BitRead, BitSeek, CodesRead, Endianness};
 use std::cmp::Ordering;
@@ -301,10 +302,9 @@ where
     where
         T: Ord,
     {
-        self.binary_search_by(|probe_iter| {
+        self.binary_search_by(|mut probe_iter| {
             // Compare element-by-element with early exit on first difference.
-            let mut probe_iter = probe_iter.peekable();
-            let mut seq_iter = sequence.iter().peekable();
+            let mut seq_iter = sequence.iter();
 
             loop {
                 match (probe_iter.next(), seq_iter.next()) {
@@ -428,15 +428,30 @@ where
 ///
 /// This struct is created by the [`iter`](SeqVecSlice::iter) method. Each
 /// element of this iterator is a [`SeqIter`] for a sequence within the slice.
-pub struct SeqVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
+///
+/// The [`CodecReader`] is constructed once and cloned for each yielded
+/// [`SeqIter`], avoiding repeated codec dispatch resolution.
+pub struct SeqVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
+where
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
     slice: &'a SeqVecSlice<'a, T, E, B>,
+    /// Cached codec reader, constructed once and cloned per yielded `SeqIter`.
+    code_reader: CodecReader<'a, E>,
     /// Current front index for forward iteration.
     front: usize,
     /// Current back index (exclusive) for backward iteration.
     back: usize,
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for SeqVecSliceIter<'_, T, E, B> {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for SeqVecSliceIter<'_, T, E, B>
+where
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SeqVecSliceIter")
             .field("remaining", &self.back.saturating_sub(self.front))
@@ -479,11 +494,21 @@ where
     }
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSliceIter<'a, T, E, B> {
+impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSliceIter<'a, T, E, B>
+where
+    for<'b> SeqVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
     /// Creates a new iterator for a given `SeqVecSlice`.
+    ///
+    /// The [`CodecReader`] is constructed once here and reused for all
+    /// yielded [`SeqIter`] instances.
     fn new(slice: &'a SeqVecSlice<'a, T, E, B>) -> Self {
+        let code_reader = CodecReader::new(slice.vec.encoding);
         Self {
             slice,
+            code_reader,
             front: 0,
             back: slice.len(),
         }
@@ -508,8 +533,28 @@ where
         }
         let index = self.front;
         self.front += 1;
-        // SAFETY: The iterator's invariant ensures `index` is in bounds.
-        Some(unsafe { self.slice.get_unchecked(index) })
+
+        // Translate slice-relative index to parent vector index.
+        let parent_index = self.slice.start + index;
+        let vec = self.slice.vec;
+
+        // SAFETY: The iterator's invariant ensures `parent_index` is in bounds,
+        // and `bit_offsets` has `num_sequences + 1` entries.
+        let start_bit = unsafe { vec.bit_offsets.get_unchecked(parent_index) };
+        let end_bit = unsafe { vec.bit_offsets.get_unchecked(parent_index + 1) };
+        let len = vec
+            .seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(parent_index) as usize });
+
+        // Clone the cached codec reader instead of constructing a new one.
+        Some(SeqIter::new_with_codec(
+            vec.data.as_ref(),
+            start_bit,
+            end_bit,
+            self.code_reader.clone(),
+            len,
+        ))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -574,8 +619,26 @@ where
             return None;
         }
         self.back -= 1;
-        // SAFETY: The iterator's invariant ensures `back` is in bounds.
-        Some(unsafe { self.slice.get_unchecked(self.back) })
+
+        // Translate slice-relative index to parent vector index.
+        let parent_index = self.slice.start + self.back;
+        let vec = self.slice.vec;
+
+        // SAFETY: The iterator's invariant ensures `parent_index` is in bounds.
+        let start_bit = unsafe { vec.bit_offsets.get_unchecked(parent_index) };
+        let end_bit = unsafe { vec.bit_offsets.get_unchecked(parent_index + 1) };
+        let len = vec
+            .seq_lengths
+            .as_ref()
+            .map(|lengths| unsafe { lengths.get_unchecked(parent_index) as usize });
+
+        Some(SeqIter::new_with_codec(
+            vec.data.as_ref(),
+            start_bit,
+            end_bit,
+            self.code_reader.clone(),
+            len,
+        ))
     }
 
     #[inline]

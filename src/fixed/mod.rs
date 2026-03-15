@@ -1175,7 +1175,16 @@ where
         let bits_per_word = <W as traits::Word>::BITS;
         // Grow the underlying buffer if the new element would exceed its bit capacity.
         if (self.len + 1) * self.bit_width > self.bits.len() * bits_per_word {
-            self.bits.push(W::ZERO);
+            // Use reserve() for amortized geometric growth instead of
+            // pushing one word at a time.
+            self.reserve(1);
+            // Extend the buffer length to cover the new element plus padding.
+            let required_total_bits = (self.len + 1) * self.bit_width;
+            let required_data_words = required_total_bits.div_ceil(bits_per_word);
+            let required_vec_len = required_data_words.saturating_add(1); // +1 for padding
+            if self.bits.len() < required_vec_len {
+                self.bits.resize(required_vec_len, W::ZERO);
+            }
         }
 
         // SAFETY: We have ensured the value fits and the buffer has capacity.
@@ -1350,9 +1359,15 @@ where
                 self.bits.resize(required_vec_len, W::ZERO);
             }
 
-            for i in self.len..new_len {
-                unsafe {
-                    self.set_unchecked(i, value_w);
+            // Skip the per-element loop when the fill value is zero, because
+            // the buffer words are already zero-initialized by Vec::resize.
+            if value_w != W::ZERO {
+                for i in self.len..new_len {
+                    // SAFETY: We have ensured the buffer has sufficient capacity
+                    // above, and value_w fits in bit_width (checked earlier).
+                    unsafe {
+                        self.set_unchecked(i, value_w);
+                    }
                 }
             }
             self.len = new_len;

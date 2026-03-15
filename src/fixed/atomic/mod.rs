@@ -189,6 +189,12 @@ const MIN_LOCKS: usize = 2;
 /// A heuristic to determine the stripe size: one lock per this many data words.
 const WORDS_PER_LOCK: usize = 64;
 
+/// A cache-line aligned wrapper around a [`Mutex`] to prevent false sharing
+/// between adjacent locks in the striping pool.
+#[derive(Debug)]
+#[repr(align(64))]
+struct CacheAlignedLock(Mutex<()>);
+
 /// A proxy object for mutable access to an element within an [`AtomicFixedVec`]
 /// during parallel iteration.
 ///
@@ -292,8 +298,8 @@ where
 {
     /// The underlying storage for the bit-packed data.
     pub(crate) storage: Vec<AtomicU64>,
-    /// A pool of locks to protect spanning-word operations.
-    locks: Vec<Mutex<()>>,
+    /// A cache-line aligned pool of locks to protect spanning-word operations.
+    locks: Vec<CacheAlignedLock>,
     bit_width: usize,
     mask: u64,
     len: usize,
@@ -998,7 +1004,9 @@ where
                 .min(MAX_LOCKS)
         };
 
-        let locks = (0..num_locks).map(|_| Mutex::new(())).collect();
+        let locks = (0..num_locks)
+            .map(|_| CacheAlignedLock(Mutex::new(())))
+            .collect();
 
         Ok(Self {
             storage,
@@ -1027,11 +1035,14 @@ where
             let word = self.storage[word_index].load(order);
             (word >> bit_offset) & self.mask
         } else {
-            // Locked path for spanning values.
-            let lock_index = word_index & (self.locks.len() - 1);
-            let _guard = self.locks[lock_index].lock();
-            let low_word = self.storage[word_index].load(Ordering::Relaxed);
-            let high_word = self.storage[word_index + 1].load(Ordering::Relaxed);
+            // Locked path for spanning reads: a lock is required to prevent
+            // torn reads when a concurrent spanning write updates the two
+            // words non-atomically. Without the lock, we could observe one
+            // word from before and one from after the write.
+            let lock_index = word_index % self.locks.len();
+            let _guard = self.locks[lock_index].0.lock();
+            let low_word = self.storage[word_index].load(order);
+            let high_word = self.storage[word_index + 1].load(order);
             let combined =
                 (low_word >> bit_offset) | (high_word << (u64::BITS as usize - bit_offset));
             combined & self.mask
@@ -1065,7 +1076,7 @@ where
         } else {
             // Locked path for values spanning two words.
             let lock_index = word_index & (self.locks.len() - 1);
-            let _guard = self.locks[lock_index].lock();
+            let _guard = self.locks[lock_index].0.lock();
             // The lock guarantees exclusive access to this multi-word operation.
             // We still use atomic operations inside to prevent races with the
             // lock-free path, which might be concurrently accessing one of these words.
@@ -1121,7 +1132,7 @@ where
         } else {
             // Locked path for spanning values.
             let lock_index = word_index & (self.locks.len() - 1);
-            let _guard = self.locks[lock_index].lock();
+            let _guard = self.locks[lock_index].0.lock();
             let old_val = self.atomic_load(index, Ordering::Relaxed);
             self.atomic_store(index, value, order);
             old_val
@@ -1161,7 +1172,7 @@ where
         } else {
             // Locked path for spanning values.
             let lock_index = word_index & (self.locks.len() - 1);
-            let _guard = self.locks[lock_index].lock();
+            let _guard = self.locks[lock_index].0.lock();
             let old_val = self.atomic_load(index, failure);
             if old_val != current {
                 return Err(old_val);
@@ -1215,7 +1226,9 @@ where
                 .next_power_of_two()
                 .min(MAX_LOCKS)
         };
-        let locks = (0..num_locks).map(|_| Mutex::new(())).collect();
+        let locks = (0..num_locks)
+            .map(|_| CacheAlignedLock(Mutex::new(())))
+            .collect();
 
         Self {
             storage,
@@ -1254,17 +1267,17 @@ where
     T: Storable<u64>,
 {
     fn mem_size_rec(&self, flags: SizeFlags, _refs: &mut mem_dbg::HashMap<usize, usize>) -> usize {
-        // Since `parking_lot::Mutex` does not implement `CopyType`, we must calculate
+        // Since `CacheAlignedLock` does not implement `CopyType`, we must calculate
         // the size of the `locks` vector manually.
         let locks_size = if flags.contains(SizeFlags::CAPACITY) {
-            self.locks.capacity() * core::mem::size_of::<Mutex<()>>()
+            self.locks.capacity() * core::mem::size_of::<CacheAlignedLock>()
         } else {
-            self.locks.len() * core::mem::size_of::<Mutex<()>>()
+            self.locks.len() * core::mem::size_of::<CacheAlignedLock>()
         };
 
         core::mem::size_of::<Self>()
             + self.storage.mem_size(flags)
-            + core::mem::size_of::<Vec<Mutex<()>>>()
+            + core::mem::size_of::<Vec<CacheAlignedLock>>()
             + locks_size
     }
 }
@@ -1289,8 +1302,8 @@ impl<T: Storable<u64>> MemDbgImpl for AtomicFixedVec<T> {
             ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags, _dbg_refs)?;
 
         // Display the size of the lock vector, but do not recurse into it.
-        let locks_size = core::mem::size_of::<Vec<Mutex<()>>>()
-            + self.locks.capacity() * core::mem::size_of::<Mutex<()>>();
+        let locks_size = core::mem::size_of::<Vec<CacheAlignedLock>>()
+            + self.locks.capacity() * core::mem::size_of::<CacheAlignedLock>();
         locks_size._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags, _dbg_refs)?;
 
         self.storage
@@ -1322,8 +1335,9 @@ where
         if self.current_index >= self.vec.len() {
             return None;
         }
-        // Use the safe get method, which defaults to SeqCst ordering.
-        let value = self.vec.get(self.current_index).unwrap();
+        // SAFETY: We have checked that current_index < vec.len() above,
+        // so the unchecked load is safe.
+        let value = unsafe { self.vec.load_unchecked(self.current_index, Ordering::SeqCst) };
         self.current_index += 1;
         Some(value)
     }
@@ -1341,6 +1355,12 @@ where
     fn len(&self) -> usize {
         self.vec.len().saturating_sub(self.current_index)
     }
+}
+
+impl<T> std::iter::FusedIterator for AtomicFixedVecIter<'_, T>
+where
+    T: Storable<u64> + Copy + ToPrimitive,
+{
 }
 
 impl<'a, T> IntoIterator for &'a AtomicFixedVec<T>

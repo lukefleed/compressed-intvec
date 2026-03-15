@@ -214,6 +214,11 @@ where
         } else {
             let end_bit = unsafe { self.seqvec.sequence_end_bit_unchecked(index) };
 
+            // Pre-allocate estimated capacity from the bit range.
+            let bit_range = end_bit.saturating_sub(start_bit);
+            let estimate = (bit_range / 4).max(1) as usize;
+            buf.reserve(estimate);
+
             // Decode all elements in the sequence until we reach the end boundary.
             // For VarVecBitReader backed by MemWordReader, bit_pos() is infallible.
             while self.reader.bit_pos().unwrap() < end_bit {

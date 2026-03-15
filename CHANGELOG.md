@@ -6,51 +6,131 @@ All notable changes to this project will be documented in this file.
 
 ### BREAKING
 
-*   **`dsi-bitstream` upgraded from 0.5 to 0.9**: This is a transitive
-    breaking change for users who interact with the `Codes` enum directly.
-    Variants with parameters changed from struct syntax to tuple syntax
-    (e.g., `Codes::Zeta { k: 3 }` is now `Codes::Zeta(3)`).
+*   **`IntVec` renamed to `VarVec`**: The primary type in the `variable`
+    module is now `VarVec`. All related type aliases have been updated
+    (e.g., `LEIntVec` → `LEVarVec`, `SIntVec` → `SVarVec`). The old
+    names are kept as deprecated aliases for one release cycle.
 
-*   **Serde format for `VarVec` and `SeqVec` changed**: The `encoding`
+*   **`VariableCodecSpec` renamed to `Codec`**: The codec enum for
+    `VarVec` and `SeqVec` is now `variable::Codec`. The old name
+    `VariableCodecSpec` is kept as a deprecated alias.
+
+*   **`dsi-bitstream` upgraded from 0.5 to 0.9**: Codec enum variants
+    with parameters changed from struct syntax to tuple syntax
+    (e.g., `Codes::Zeta { k: 3 }` → `Codes::Zeta(3)`). `MemWordReader`
+    now requires an `INF` const generic for infallible reads.
+    `anyhow::Error` in dispatch paths replaced by `DispatchError`.
+
+*   **Serde format changed for `VarVec` and `SeqVec`**: The `encoding`
     field is now serialized via `Display`/`FromStr` (e.g., `"Zeta(3)"`)
-    instead of the previous struct-based JSON format. Data serialized with
-    0.5.x cannot be deserialized with 0.6.0.
+    instead of the previous struct-based JSON format. Data serialized
+    with 0.5.x cannot be deserialized with 0.6.0.
 
-*   **`rand` upgraded from 0.9 to 0.10**: Affects downstream code that
-    uses `rand` types from the public API or benchmarks. The `Rng` trait
-    methods `random_range` and `random` moved to `RngExt`.
+*   **`rand` upgraded from 0.9 to 0.10**: The `Rng` trait methods
+    `random_range` and `random` moved to `RngExt`. Affects downstream
+    code using `rand` types from the public API or benchmarks.
+    `rand_distr` upgraded from 0.5 to 0.6 in lockstep.
+
+*   **`UnsignedInt` removed from `Word` trait bounds**: Resolves method
+    ambiguity with `num-primitive` (brought in by dsi-bitstream 0.9).
+    Code relying on `UnsignedInt` methods through the `Word` bound must
+    now bound on `UnsignedInt` explicitly.
 
 ### New
 
-*   **`seq` module**: Introduced `SeqVec`, a compressed vector of
-    variable-length sequences with indexed access. Designed for adjacency
-    lists, document terms, and similar data organized as many
-    variable-length sequences. Includes `SeqVecBuilder`,
-    `SeqVecFromIterBuilder`, `SeqIter`, `SeqVecIter`, `SeqVecReader`,
-    `SeqVecSlice`, parallel iteration, and serde support.
+*   **`seq` module**: New `SeqVec` type for compressed sequences of
+    variable-length integer vectors. Designed for adjacency lists,
+    inverted indices, and document term lists. Bit offsets are stored at
+    sequence boundaries, so `get(i)` returns a lazy `SeqIter` in O(1).
+    Includes `SeqVecBuilder`, `SeqVecFromIterBuilder`, `SeqIter`,
+    `SeqVecIter` (consuming), `SeqVecReader` (reusable random access),
+    `SeqVecSlice` (zero-copy view), serde support, and full parallel
+    iteration via rayon.
+
+*   **`SeqVec` optional stored lengths**: `SeqVecBuilder` accepts a
+    `lengths_capacity_hint` to pre-allocate a secondary `FixedVec`
+    storing the length of each sequence. When present, `SeqIter`
+    implements `ExactSizeIterator` and iteration is faster.
+
+*   **`SeqVec` parallel methods**: `par_iter()`, `par_decode_many()`,
+    `par_for_each()`, `par_for_each_many()`, and `par_for_each_reduce()`
+    provide zero-allocation parallel access over sequences.
+    `par_for_each_reduce` accumulates results across threads with a
+    user-supplied fold/reduce pair.
+
+*   **`SeqVecSlice` zero-copy view**: `SeqVec::slice(range)` and
+    `SeqVec::split_at(mid)` return `SeqVecSlice` without copying data.
+    `SeqVecSlice` supports iteration, random access, binary search, and
+    `IntoIterator`.
+
+*   **`sfixed_vec!` and `sseq_vec!` macros**: Convenience macros for
+    constructing signed `FixedVec` and `SeqVec` instances. Complement
+    the existing `fixed_vec!` and `seq_vec!` macros.
+
+*   **`CodecWriter` internal writer** (`src/common/codec_writer.rs`):
+    Shared dispatch writer for variable-length codes used by both
+    `VarVec` and `SeqVec` builders. Mirrors the existing `CodecReader`
+    pattern for symmetric hot-path dispatch.
+
+*   **Shared serde utilities** (`src/common/serde.rs`): Common
+    serialization helpers (bit-buffer serde, length list serde) shared
+    between `VarVec` and `SeqVec`, replacing duplicated proxy code.
 
 ### Changed
 
 *   Upgraded `dsi-bitstream` from 0.5.0 to 0.9.0. Key upstream changes:
-    compile-time table validation, `Codes` with native serde support,
-    `Codes::canonicalize()`, `DispatchError` replacing `anyhow::Error`,
-    `MemWordReader` with `INF` const generic for infallible reads.
+    compile-time table validation, native `Serialize`/`Deserialize` for
+    `Codes`, `Codes::canonicalize()`, `DispatchError` replacing
+    `anyhow::Error`, `MemWordReader` with `INF` const generic.
 
-*   Upgraded `rand` from 0.9 to 0.10 and `rand_distr` from 0.5 to 0.6
-    for compatibility with `dsi-bitstream`'s `implied` feature.
+*   Upgraded `rand` from 0.9 to 0.10 and `rand_distr` from 0.5 to 0.6.
 
-*   Removed the internal `CodesSerde` proxy enum (`src/common/serde.rs`).
-    `Codes` now implements `Serialize`/`Deserialize` natively in
-    dsi-bitstream 0.9.
+*   Removed the `CodesSerde` proxy enum previously in
+    `src/common/serde.rs`. `Codes` now implements serde natively in
+    dsi-bitstream 0.9; the proxy is no longer needed.
 
-*   Removed `UnsignedInt` from the `Word` trait bounds to resolve trait
-    method ambiguity between `common_traits` and `num-primitive`.
+*   Codec resolution in `VarVec` and `SeqVec` builders now analyzes
+    iterators directly (single-pass) rather than collecting data first,
+    reducing peak memory during construction with `Codec::Auto`.
+
+*   `SeqVec` sequence access methods renamed from `get`/`get_vec` to
+    `decode`/`decode_vec` for clarity. The old names were never stable.
 
 ### Improved
 
-*   Codec auto-selection now applies `Codes::canonicalize()` to ensure
-    canonical codec forms (e.g., `Golomb(2^n)` becomes `Rice(n)`,
-    `Zeta(1)` becomes `Gamma`).
+*   Codec auto-selection now calls `Codes::canonicalize()` to ensure
+    canonical forms (e.g., `Golomb(2^n)` → `Rice(n)`,
+    `Zeta(1)` → `Gamma`).
+
+*   `SeqIter` fast-path when sequence lengths are stored: skips
+    bit-counting and provides an exact `size_hint` with zero decoding
+    overhead for `len()`.
+
+*   `SeqVecReader` index calculations use bit-shift when the sampling
+    rate is a power of two, reducing arithmetic overhead per access.
+
+*   Parallel iteration in `VarVec` and `SeqVec` pre-allocates decode
+    buffers based on known sequence lengths, reducing allocations.
+
+*   All public iterator types now implement `FusedIterator`.
+
+*   All public types now implement `Debug`.
+
+### Fixed
+
+*   **`FixedVecIntoIter` undefined behaviour**: The consuming iterator
+    held a transmuted `'static` reference to a stack-local `FixedVec`
+    that was subsequently partially moved, leaving a dangling pointer.
+    The `FixedVec` is now heap-allocated via `Box` before transmuting,
+    giving it a stable address for the lifetime of the iterator.
+
+*   **`SeqVecBuilder` error handling**: `build()` now propagates errors
+    from sequence-length validation correctly instead of silently
+    discarding them.
+
+*   **`seq_vec!()` empty macro**: The empty invocation `seq_vec!()`
+    previously produced an invalid state; it now correctly produces a
+    `SeqVec` with zero sequences.
 
 ## [0.5.1] - 2025-09-16
 

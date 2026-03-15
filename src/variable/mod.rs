@@ -323,14 +323,16 @@ impl From<FixedVecError> for VarVecError {
 pub struct VarVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// The raw, bit-packed compressed data.
     pub(super) data: B,
-    /// A `FixedVec` containing the bit offsets of sampled elements.
-    pub(super) samples: FixedVec<u64, u64, LE, B>,
     /// The sampling rate `k`. Every `k`-th element's position is stored.
+    /// Placed adjacent to `len` for cache-line sharing on the hot
+    /// bounds-check + sample-compute path.
     pub(super) k: usize,
     /// The number of elements in the vector.
     pub(super) len: usize,
     /// The `dsi-bitstream` code used for compression.
     pub(super) encoding: Codes,
+    /// A `FixedVec` containing the bit offsets of sampled elements.
+    pub(super) samples: FixedVec<u64, u64, LE, B>,
     /// Zero-sized markers for the generic type parameters.
     pub(super) _markers: PhantomData<(T, E)>,
 }
@@ -824,19 +826,22 @@ where
     {
         let mut reader = self.reader();
         let mut current_decoded_index: usize = 0;
+        // Cache the current block to avoid recomputing `block_of(current_decoded_index)`
+        // on every iteration. Updated only on seek.
+        let mut current_block: usize = usize::MAX;
 
         for &(target_index, original_position) in indexed_indices {
+            let target_block = block_of(target_index);
+
             // Check if we need to jump to a new sample block. This is true if the
             // target index is before our current position, or if it's in a different
             // sample block than the one we're currently in.
-            if target_index < current_decoded_index
-                || block_of(target_index) != block_of(current_decoded_index.saturating_sub(1))
-            {
-                let target_sample_block = block_of(target_index);
+            if target_index < current_decoded_index || target_block != current_block {
                 // SAFETY: The public-facing `get_many` performs bounds checks.
-                let start_bit = unsafe { self.samples.get_unchecked(target_sample_block) };
+                let start_bit = unsafe { self.samples.get_unchecked(target_block) };
                 reader.reader.set_bit_pos(start_bit)?;
-                current_decoded_index = start_of_block(target_sample_block);
+                current_decoded_index = start_of_block(target_block);
+                current_block = target_block;
             }
 
             // Sequentially decode elements until we reach our target.
@@ -915,6 +920,10 @@ where
 
     /// Binary searches this vector with a custom comparison function.
     ///
+    /// Uses a sequential reader (`VarVecSeqReader`) internally, which exploits
+    /// locality when binary search probes converge to nearby positions within
+    /// the same sample block.
+    ///
     /// # Complexity
     ///
     /// The time complexity of this operation is O(k * log n), where `n` is the
@@ -926,12 +935,12 @@ where
     {
         let mut low = 0;
         let mut high = self.len();
-        let mut reader = self.reader();
+        let mut seq_reader = self.seq_reader();
 
         while low < high {
             let mid = low + (high - low) / 2;
             // SAFETY: The loop invariants ensure `mid` is always in bounds.
-            let cmp = f(unsafe { reader.get_unchecked(mid) });
+            let cmp = f(unsafe { seq_reader.get_unchecked(mid) });
 
             match cmp {
                 std::cmp::Ordering::Less => low = mid + 1,

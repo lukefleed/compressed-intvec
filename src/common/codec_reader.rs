@@ -67,6 +67,21 @@ where
     Slow(Codes),
 }
 
+impl<E: Endianness> Clone for CodecReader<'_, E>
+where
+    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
+        + CodesRead<E>
+        + BitSeek<Error = core::convert::Infallible>,
+{
+    #[inline]
+    fn clone(&self) -> Self {
+        match self {
+            Self::Fast(reader) => Self::Fast(reader.clone()),
+            Self::Slow(codes) => Self::Slow(*codes),
+        }
+    }
+}
+
 impl<E: Endianness> CodecReader<'_, E>
 where
     for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
