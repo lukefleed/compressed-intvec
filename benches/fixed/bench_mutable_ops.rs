@@ -1,6 +1,6 @@
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use std::time::Duration;
 use succinct::int_vec::{IntVecMut, IntVector};
 use sux::prelude::BitFieldVec;

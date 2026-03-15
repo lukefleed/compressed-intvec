@@ -5,7 +5,7 @@
 //! underlying storage words and the conversion logic for different element types,
 //! allowing [`FixedVec`](crate::fixed::FixedVec) to be highly configurable.
 
-use common_traits::{IntoAtomic, SignedInt, UnsignedInt};
+use common_traits::{IntoAtomic, SignedInt};
 use dsi_bitstream::{
     prelude::{ToInt, ToNat},
     traits::Endianness,
@@ -20,8 +20,7 @@ use std::fmt::Debug;
 /// for storage, providing access to its size in bits and requiring the
 /// necessary traits for bit-level operations.
 pub trait Word:
-    UnsignedInt
-    + Bounded
+    Bounded
     + ToPrimitive
     + dsi_bitstream::traits::Word
     + NumCast
@@ -109,9 +108,10 @@ macro_rules! impl_storable_for_signed {
 
             #[inline(always)]
             fn from_word(word: W) -> Self {
-                let unsigned_val = word.try_into().unwrap_or_else(|_| {
-                    panic!("BUG: W -> Unsigned conversion failed. Logic error in FixedVec.")
-                });
+                let unsigned_val: <$T as SignedInt>::UnsignedInt =
+                    word.try_into().unwrap_or_else(|_| {
+                        panic!("BUG: W -> Unsigned conversion failed. Logic error in FixedVec.")
+                    });
                 ToInt::to_int(unsigned_val)
             }
         }

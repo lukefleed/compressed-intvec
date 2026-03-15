@@ -1,6 +1,6 @@
 use compressed_intvec::prelude::*;
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
-use rand::{Rng, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
+use rand::{RngExt, SeedableRng, rngs::SmallRng, seq::IndexedRandom};
 use rand_distr::{Distribution as RandDistribution, Uniform};
 use std::time::Duration;
 

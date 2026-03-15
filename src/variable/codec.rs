@@ -249,11 +249,11 @@ where
         Codec::Explicit(codes) => Ok(codes),
 
         // Codecs with explicit parameters: direct mapping.
-        Codec::Rice { log2_b: Some(p) } => Ok(Codes::Rice { log2_b: p as usize }),
-        Codec::Zeta { k: Some(p) } => Ok(Codes::Zeta { k: p as usize }),
-        Codec::Golomb { b: Some(p) } => Ok(Codes::Golomb { b: p as usize }),
-        Codec::Pi { k: Some(p) } => Ok(Codes::Pi { k: p as usize }),
-        Codec::ExpGolomb { k: Some(p) } => Ok(Codes::ExpGolomb { k: p as usize }),
+        Codec::Rice { log2_b: Some(p) } => Ok(Codes::Rice(p as usize)),
+        Codec::Zeta { k: Some(p) } => Ok(Codes::Zeta(p as usize)),
+        Codec::Golomb { b: Some(p) } => Ok(Codes::Golomb(p)),
+        Codec::Pi { k: Some(p) } => Ok(Codes::Pi(p as usize)),
+        Codec::ExpGolomb { k: Some(p) } => Ok(Codes::ExpGolomb(p as usize)),
 
         // Codecs requiring analysis: return error if no data provided.
         Codec::Auto
@@ -280,7 +280,7 @@ where
             match spec {
                 Codec::Auto => {
                     let (best_code, _) = stats.best_code();
-                    Ok(best_code)
+                    Ok(best_code.canonicalize())
                 }
                 Codec::Rice { log2_b: None } => {
                     let (best_param, _) = stats
@@ -289,7 +289,7 @@ where
                         .enumerate()
                         .min_by_key(|&(_, cost)| cost)
                         .unwrap_or((0, &0)); // Fallback to 0 if array is empty.
-                    Ok(Codes::Rice { log2_b: best_param })
+                    Ok(Codes::Rice(best_param))
                 }
                 Codec::Zeta { k: None } => {
                     let (best_param, _) = stats
@@ -298,7 +298,7 @@ where
                         .enumerate()
                         .min_by_key(|&(_, cost)| cost)
                         .unwrap_or((0, &0));
-                    Ok(Codes::Zeta { k: best_param + 1 }) // Zeta params are 1-based.
+                    Ok(Codes::Zeta(best_param + 1)) // Zeta params are 1-based.
                 }
                 Codec::Golomb { b: None } => {
                     let (best_param, _) = stats
@@ -307,7 +307,7 @@ where
                         .enumerate()
                         .min_by_key(|&(_, cost)| cost)
                         .unwrap_or((0, &0));
-                    Ok(Codes::Golomb { b: best_param + 1 }) // Golomb params are 1-based.
+                    Ok(Codes::Golomb((best_param + 1) as u64)) // Golomb params are 1-based.
                 }
                 Codec::Pi { k: None } => {
                     let (best_param, _) = stats
@@ -316,7 +316,7 @@ where
                         .enumerate()
                         .min_by_key(|&(_, cost)| cost)
                         .unwrap_or((0, &0));
-                    Ok(Codes::Pi { k: best_param + 2 }) // Pi params are offset by 2.
+                    Ok(Codes::Pi(best_param + 2)) // Pi params are offset by 2.
                 }
                 Codec::ExpGolomb { k: None } => {
                     let (best_param, _) = stats
@@ -325,7 +325,7 @@ where
                         .enumerate()
                         .min_by_key(|&(_, cost)| cost)
                         .unwrap_or((0, &0));
-                    Ok(Codes::ExpGolomb { k: best_param })
+                    Ok(Codes::ExpGolomb(best_param))
                 }
                 // This arm is guaranteed to be unreachable because the outer match
                 // ensures `spec` is one of the variants handled above.
@@ -372,7 +372,7 @@ where
     match spec {
         Codec::Auto => {
             let (best_code, _) = stats.best_code();
-            Ok(best_code)
+            Ok(best_code.canonicalize())
         }
         Codec::Rice { log2_b: None } => {
             let (best_param, _) = stats
@@ -381,7 +381,7 @@ where
                 .enumerate()
                 .min_by_key(|&(_, cost)| cost)
                 .unwrap_or((0, &0));
-            Ok(Codes::Rice { log2_b: best_param })
+            Ok(Codes::Rice(best_param))
         }
         Codec::Zeta { k: None } => {
             let (best_param, _) = stats
@@ -390,7 +390,7 @@ where
                 .enumerate()
                 .min_by_key(|&(_, cost)| cost)
                 .unwrap_or((0, &0));
-            Ok(Codes::Zeta { k: best_param + 1 })
+            Ok(Codes::Zeta(best_param + 1))
         }
         Codec::Golomb { b: None } => {
             let (best_param, _) = stats
@@ -399,7 +399,7 @@ where
                 .enumerate()
                 .min_by_key(|&(_, cost)| cost)
                 .unwrap_or((0, &0));
-            Ok(Codes::Golomb { b: best_param + 1 })
+            Ok(Codes::Golomb((best_param + 1) as u64))
         }
         Codec::Pi { k: None } => {
             let (best_param, _) = stats
@@ -408,7 +408,7 @@ where
                 .enumerate()
                 .min_by_key(|&(_, cost)| cost)
                 .unwrap_or((0, &0));
-            Ok(Codes::Pi { k: best_param + 2 })
+            Ok(Codes::Pi(best_param + 2))
         }
         Codec::ExpGolomb { k: None } => {
             let (best_param, _) = stats
@@ -417,7 +417,7 @@ where
                 .enumerate()
                 .min_by_key(|&(_, cost)| cost)
                 .unwrap_or((0, &0));
-            Ok(Codes::ExpGolomb { k: best_param })
+            Ok(Codes::ExpGolomb(best_param))
         }
         _ => unreachable!("resolve_codec_from_iter called with non-analysis codec"),
     }

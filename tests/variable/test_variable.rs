@@ -30,7 +30,7 @@ where
     T: Storable + Debug + PartialEq + PrimInt + AsPrimitive<u64> + Send + Sync + Ord + 'static,
     for<'a> VarVec<T, E, &'a [u64]>: PartialEq<&'a [T]>,
     E: Endianness + Send + Sync,
-    for<'a> BufBitReader<E, MemWordReader<u64, &'a [u64]>>: BitRead<E, Error = core::convert::Infallible>
+    for<'a> BufBitReader<E, MemWordReader<u64, &'a [u64], true>>: BitRead<E, Error = core::convert::Infallible>
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>
         + Send,

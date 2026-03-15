@@ -6,9 +6,9 @@
 //!
 //! # Implementation
 //!
-//! A manual implementation is necessary because the underlying `dsi-bitstream::codes::Codes`
-//! enum does not implement the `serde` traits. This module uses a serializable
-//! "proxy" enum to handle this conversion.
+//! A manual implementation is necessary because `SeqVec` uses generic type
+//! parameters that don't directly map to serde's derive capabilities. The
+//! `Codes` type from `dsi-bitstream` natively supports serde in version 0.9+.
 //!
 //! # Examples
 //!
@@ -40,10 +40,9 @@
 //! [`SeqVec`]: super::SeqVec
 
 use super::SeqVec;
-use crate::common::serde::CodesSerde;
 use crate::fixed::FixedVec;
 use crate::variable::traits::Storable;
-use dsi_bitstream::prelude::Endianness;
+use dsi_bitstream::prelude::{Codes, Endianness};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
 /// A proxy struct for serializing `SeqVec`.
@@ -58,7 +57,7 @@ struct SeqVecSerializeProxy<'a> {
     bit_offsets_len: usize,
     bit_offsets_bit_width: usize,
     seq_lengths: Option<SeqLengthsSerializeProxy<'a>>,
-    encoding: CodesSerde,
+    encoding: Codes,
 }
 
 /// A proxy struct for deserializing `SeqVec`.
@@ -72,7 +71,7 @@ struct SeqVecDeserializeProxy {
     bit_offsets_len: usize,
     bit_offsets_bit_width: usize,
     seq_lengths: Option<SeqLengthsDeserializeProxy>,
-    encoding: CodesSerde,
+    encoding: Codes,
 }
 
 /// A proxy struct for serializing sequence lengths.
@@ -109,7 +108,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Serialize for SeqVec<T, E, B> 
                     len: lengths.len(),
                     bit_width: lengths.bit_width(),
                 }),
-            encoding: self.encoding.into(),
+            encoding: self.encoding,
         };
         proxy.serialize(serializer)
     }
@@ -196,7 +195,7 @@ impl<'de, T: Storable + 'static, E: Endianness> Deserialize<'de> for SeqVec<T, E
                 proxy.data,
                 bit_offsets,
                 seq_lengths,
-                proxy.encoding.into(),
+                proxy.encoding,
             )
         })
     }

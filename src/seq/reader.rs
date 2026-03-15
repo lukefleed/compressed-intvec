@@ -103,7 +103,7 @@ where
     /// Creates a new `SeqVecReader`.
     #[inline]
     pub(super) fn new(seqvec: &'a SeqVec<T, E, B>) -> Self {
-        let reader = VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+        let reader = VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new_inf(
             seqvec.data.as_ref(),
         ));
         let code_reader = CodecReader::new(seqvec.encoding);

@@ -1,9 +1,9 @@
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use dsi_bitstream::{
-    codes::{len_rice, len_zeta_param},
+    codes::{len_rice, len_zeta},
     utils::sample_implied_distribution,
 };
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 #[cfg(feature = "parallel")]
@@ -32,7 +32,7 @@ impl Distribution {
             }
             Distribution::ZetaImplied => {
                 let mut rng = SmallRng::seed_from_u64(42);
-                sample_implied_distribution(|v| len_zeta_param::<false>(v, 3), &mut rng)
+                sample_implied_distribution(|v| len_zeta(v, 3), &mut rng)
                     .take(size)
                     .collect()
             }

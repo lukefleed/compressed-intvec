@@ -235,7 +235,7 @@ use dsi_bitstream::{
     },
     traits::{BE, BitWrite, LE},
 };
-use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
+use mem_dbg::{DbgFlags, FlatType, MemDbgImpl, MemSize, SizeFlags};
 use std::{
     error::Error,
     fmt::{self, Write},
@@ -339,7 +339,7 @@ pub struct VarVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
 pub(crate) type VarVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
 /// Type alias for the bit reader used internally by `VarVec` accessors.
 pub(crate) type VarVecBitReader<'a, E> =
-    BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
+    BufBitReader<E, MemWordReader<u64, &'a [u64], true>, DefaultReadParams>;
 
 impl<T: Storable + 'static, E: Endianness> VarVec<T, E, Vec<u64>> {
     /// Creates a builder for constructing an owned [`VarVec`] from a slice of data.
@@ -957,8 +957,8 @@ where
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for VarVec<T, E, B> {
-    fn mem_size(&self, flags: SizeFlags) -> usize {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize + FlatType> MemSize for VarVec<T, E, B> {
+    fn mem_size_rec(&self, flags: SizeFlags, _refs: &mut mem_dbg::HashMap<usize, usize>) -> usize {
         // Start with the stack size of the struct itself.
         let mut total_size = core::mem::size_of::<Self>();
         // Add the heap-allocated memory for the `data` field.
@@ -976,7 +976,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for VarVec<T
 struct CodeWrapper<'a>(&'a Codes);
 
 impl mem_dbg::MemSize for CodeWrapper<'_> {
-    fn mem_size(&self, _flags: mem_dbg::SizeFlags) -> usize {
+    fn mem_size_rec(&self, _flags: mem_dbg::SizeFlags, _refs: &mut mem_dbg::HashMap<usize, usize>) -> usize {
         core::mem::size_of_val(self.0)
     }
 }
@@ -993,6 +993,7 @@ impl mem_dbg::MemDbgImpl for CodeWrapper<'_> {
         is_last: bool,
         padded_size: usize,
         flags: DbgFlags,
+        _dbg_refs: &mut mem_dbg::HashSet<usize>,
     ) -> core::fmt::Result {
         if prefix.len() > max_depth {
             return Ok(());
@@ -1003,7 +1004,7 @@ impl mem_dbg::MemDbgImpl for CodeWrapper<'_> {
 
         // Replicate the size and percentage formatting from the default `MemDbgImpl`.
         if flags.contains(DbgFlags::HUMANIZE) {
-            let (value, uom) = mem_dbg::humanize_float(real_size as f64);
+            let (value, uom) = mem_dbg::humanize_float(real_size);
             if uom == " B" {
                 let _ = write!(&mut buffer, "{:>5}  B ", real_size);
             } else {
@@ -1080,12 +1081,13 @@ impl mem_dbg::MemDbgImpl for CodeWrapper<'_> {
         _prefix: &mut String,
         _is_last: bool,
         _flags: DbgFlags,
+        _dbg_refs: &mut mem_dbg::HashSet<usize>,
     ) -> core::fmt::Result {
         Ok(())
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for VarVec<T, E, B> {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl + FlatType> MemDbgImpl for VarVec<T, E, B> {
     fn _mem_dbg_rec_on(
         &self,
         writer: &mut impl core::fmt::Write,
@@ -1094,6 +1096,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
         prefix: &mut String,
         _is_last: bool,
         flags: DbgFlags,
+        _dbg_refs: &mut mem_dbg::HashSet<usize>,
     ) -> core::fmt::Result {
         // Manually display each field, ensuring correct tree structure.
         self.data._mem_dbg_depth_on(
@@ -1105,6 +1108,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
             false,
             core::mem::size_of_val(&self.data),
             flags,
+            _dbg_refs,
         )?;
         self.samples._mem_dbg_depth_on(
             writer,
@@ -1115,6 +1119,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
             false,
             core::mem::size_of_val(&self.samples),
             flags,
+            _dbg_refs,
         )?;
         self.k._mem_dbg_depth_on(
             writer,
@@ -1125,6 +1130,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
             false,
             core::mem::size_of_val(&self.k),
             flags,
+            _dbg_refs,
         )?;
         self.len._mem_dbg_depth_on(
             writer,
@@ -1135,6 +1141,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
             false,
             core::mem::size_of_val(&self.len),
             flags,
+            _dbg_refs,
         )?;
 
         // Use the custom wrapper to correctly display the `encoding` field.
@@ -1148,6 +1155,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
             false, // Not the last field.
             core::mem::size_of_val(&self.encoding),
             flags,
+            _dbg_refs,
         )?;
 
         self._markers._mem_dbg_depth_on(
@@ -1159,6 +1167,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Va
             true, // This is the last field.
             core::mem::size_of_val(&self._markers),
             flags,
+            _dbg_refs,
         )?;
         Ok(())
     }

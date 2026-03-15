@@ -3,7 +3,7 @@ use std::time::Duration;
 // benches/fixed/bench_sequential_ops.rs
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use succinct::int_vec::{IntVec, IntVecMut, IntVector};
 use sux::prelude::BitFieldVec;
 use value_traits::slices::SliceByValueMut;

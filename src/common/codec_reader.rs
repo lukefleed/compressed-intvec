@@ -23,7 +23,7 @@ use dsi_bitstream::{
 /// - Use buffered bit-level access (`BufBitReader`)
 /// - Have infallible read operations (memory reads cannot fail)
 pub(crate) type VarVecBitReader<'a, E> =
-    BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
+    BufBitReader<E, MemWordReader<u64, &'a [u64], true>, DefaultReadParams>;
 
 /// A hybrid dispatcher for reading compression codes.
 ///

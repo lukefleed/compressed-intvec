@@ -1253,7 +1253,7 @@ impl<T> MemSize for AtomicFixedVec<T>
 where
     T: Storable<u64>,
 {
-    fn mem_size(&self, flags: SizeFlags) -> usize {
+    fn mem_size_rec(&self, flags: SizeFlags, _refs: &mut mem_dbg::HashMap<usize, usize>) -> usize {
         // Since `parking_lot::Mutex` does not implement `CopyType`, we must calculate
         // the size of the `locks` vector manually.
         let locks_size = if flags.contains(SizeFlags::CAPACITY) {
@@ -1278,22 +1278,23 @@ impl<T: Storable<u64>> MemDbgImpl for AtomicFixedVec<T> {
         prefix: &mut String,
         _is_last: bool,
         flags: DbgFlags,
+        _dbg_refs: &mut mem_dbg::HashSet<usize>,
     ) -> core::fmt::Result {
         // Manual implementation to avoid trying to lock and inspect mutexes.
         self.bit_width
-            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags, _dbg_refs)?;
         self.len
-            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags, _dbg_refs)?;
         self.mask
-            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags, _dbg_refs)?;
 
         // Display the size of the lock vector, but do not recurse into it.
         let locks_size = core::mem::size_of::<Vec<Mutex<()>>>()
             + self.locks.capacity() * core::mem::size_of::<Mutex<()>>();
-        locks_size._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags)?;
+        locks_size._mem_dbg_rec_on(writer, total_size, max_depth, prefix, false, flags, _dbg_refs)?;
 
         self.storage
-            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, true, flags)?;
+            ._mem_dbg_rec_on(writer, total_size, max_depth, prefix, true, flags, _dbg_refs)?;
         Ok(())
     }
 }

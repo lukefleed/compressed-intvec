@@ -27,7 +27,7 @@ use std::marker::PhantomData;
 /// This reader is configured for in-memory buffers with infallible reads,
 /// matching the configuration used in the `variable` module.
 pub(crate) type SeqVecBitReader<'a, E> =
-    BufBitReader<E, MemWordReader<u64, &'a [u64]>, DefaultReadParams>;
+    BufBitReader<E, MemWordReader<u64, &'a [u64], true>, DefaultReadParams>;
 
 /// A zero-allocation iterator over the elements of a single sequence.
 ///
@@ -121,7 +121,7 @@ where
     /// * `encoding` - The codec used for compression.
     #[inline]
     pub(crate) fn new(data: &'a [u64], start_bit: u64, end_bit: u64, encoding: Codes) -> Self {
-        let mut reader = SeqVecBitReader::<E>::new(MemWordReader::new(data));
+        let mut reader = SeqVecBitReader::<E>::new(MemWordReader::new_inf(data));
 
         // Seek to the start of this sequence. The operation is infallible for
         // in-memory readers, but we handle the Result for type correctness.
@@ -606,7 +606,7 @@ where
         let start_bit = (index as u64) * offset_bits;
 
         // Create a reader over the bit offsets data and extract the value.
-        let mut reader = SeqVecBitReader::<E>::new(MemWordReader::new(self.bit_offsets_data));
+        let mut reader = SeqVecBitReader::<E>::new(MemWordReader::new_inf(self.bit_offsets_data));
         let _ = reader.set_bit_pos(start_bit);
 
         // Read the offset value. For typical cases with explicit bit widths,

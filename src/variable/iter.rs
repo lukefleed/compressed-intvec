@@ -62,7 +62,7 @@ where
 {
     /// Creates a new iterator.
     pub(super) fn new(intvec: &'a VarVec<T, E, B>) -> Self {
-        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(
+        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new_inf(
             intvec.data.as_ref(),
         ));
         // Instantiate the robust hybrid dispatcher. This will not panic.
@@ -195,7 +195,7 @@ where
         // guaranteeing that the data outlives the reference.
         let data_ref: &'static [u64] = unsafe { std::mem::transmute(vec.data.as_slice()) };
 
-        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(data_ref));
+        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new_inf(data_ref));
         let code_reader = CodecReader::new(vec.encoding);
 
         Self {

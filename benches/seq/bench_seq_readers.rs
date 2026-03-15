@@ -10,7 +10,7 @@
 
 use compressed_intvec::seq::{Codec, LESeqVec, SeqVec};
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 const NUM_SEQUENCES: usize = 50_000;

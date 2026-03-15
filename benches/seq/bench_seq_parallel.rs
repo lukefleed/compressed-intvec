@@ -17,7 +17,7 @@
 
 use compressed_intvec::seq::{Codec, LESeqVec, SeqVec};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use rayon::prelude::*;
 use std::time::Duration;
 

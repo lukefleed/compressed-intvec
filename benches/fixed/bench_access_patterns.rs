@@ -3,7 +3,7 @@ use std::time::Duration;
 // benches/fixed/bench_access_patterns.rs
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, seq::IndexedRandom, Rng, SeedableRng};
+use rand::{rngs::SmallRng, seq::IndexedRandom, RngExt, SeedableRng};
 use rand_distr::{Distribution as RandDistribution, Uniform};
 use succinct::int_vec::{IntVec as SuccinctIntVec, IntVector};
 use sux::prelude::BitFieldVec;

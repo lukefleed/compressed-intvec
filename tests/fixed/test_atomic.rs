@@ -13,7 +13,7 @@
 use compressed_intvec::atomic_fixed_vec;
 use compressed_intvec::fixed::atomic::{SAtomicFixedVec, UAtomicFixedVec};
 use compressed_intvec::fixed::{BitWidth, Error, FixedVec, UFixedVec};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{RngExt, rngs::SmallRng, SeedableRng};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;

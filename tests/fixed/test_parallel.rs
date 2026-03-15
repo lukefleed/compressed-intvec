@@ -3,7 +3,7 @@
 #![cfg(feature = "parallel")]
 
 use compressed_intvec::fixed::{BitWidth, Error as FixedVecError, FixedVec, SFixedVec, UFixedVec};
-use rand::{rngs::StdRng, seq::SliceRandom, Rng, SeedableRng};
+use rand::{RngExt, rngs::StdRng, seq::SliceRandom, SeedableRng};
 use rayon::iter::ParallelIterator;
 
 fn get_test_data_unsigned() -> Vec<u32> {

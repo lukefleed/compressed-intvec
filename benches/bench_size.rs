@@ -11,11 +11,11 @@
 use compressed_intvec::prelude::*;
 use criterion::{Criterion, criterion_group, criterion_main};
 use dsi_bitstream::{
-    codes::{len_rice, len_zeta_param},
+    codes::{len_rice, len_zeta},
     utils::sample_implied_distribution,
 };
 use mem_dbg::{DbgFlags, MemDbg, MemSize, SizeFlags};
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use std::{
     collections::HashSet,
     fmt::{Display, Formatter},
@@ -63,7 +63,7 @@ impl Distribution {
             Distribution::UniformHigh => generate_random_vec(size, 1 << 32),
             Distribution::RiceImplied => generate_with_distribution(size, |v| len_rice(v, 4)),
             Distribution::ZetaImplied => {
-                generate_with_distribution(size, |v| len_zeta_param::<false>(v, 3))
+                generate_with_distribution(size, |v| len_zeta(v, 3))
             }
         }
     }

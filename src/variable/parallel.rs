@@ -75,7 +75,7 @@ where
             let start_sample_idx = chunk_idx * chunk_size;
             let end_sample_idx = (start_sample_idx + chunk_size).min(num_samples);
             let mut bit_reader = VarVecBitReader::<E>::new(
-                dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()),
+                dsi_bitstream::impls::MemWordReader::new_inf(self.data.as_ref()),
             );
             let mut values = Vec::new();
             let code_reader = CodecReader::new(self.encoding);

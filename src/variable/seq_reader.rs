@@ -105,7 +105,7 @@ where
         let code_reader = CodecReader::new(intvec.encoding);
         Self {
             intvec,
-            reader: VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+            reader: VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new_inf(
                 intvec.data.as_ref(),
             )),
             code_reader,

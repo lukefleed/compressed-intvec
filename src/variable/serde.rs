@@ -6,9 +6,9 @@
 //!
 //! # Implementation
 //!
-//! A manual implementation is necessary because the underlying `dsi-bitstream::codes::Codes`
-//! enum does not implement the `serde` traits. This module uses a serializable
-//! "proxy" enum to handle this conversion.
+//! A manual implementation is necessary because `VarVec` uses generic type
+//! parameters that don't directly map to serde's derive capabilities. The
+//! `Codes` type from `dsi-bitstream` natively supports serde in version 0.9+.
 //!
 //! # Examples
 //!
@@ -41,9 +41,8 @@
 //! [`VarVec`]: crate::variable::VarVec
 
 use super::{traits::Storable, Endianness, VarVec};
-use crate::common::serde::CodesSerde;
 use crate::fixed::{FixedVec, LEFixedVec};
-use dsi_bitstream::prelude::LE;
+use dsi_bitstream::prelude::{Codes, LE};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for VarVec<T, E, B> {
@@ -57,7 +56,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for VarV
             samples: &'a FixedVec<u64, u64, LE, BSamples>,
             k: usize,
             len: usize,
-            encoding: CodesSerde,
+            encoding: Codes,
         }
 
         let proxy = SerializeProxy {
@@ -65,7 +64,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for VarV
             samples: &self.samples,
             k: self.k,
             len: self.len,
-            encoding: self.encoding.into(),
+            encoding: self.encoding,
         };
         proxy.serialize(serializer)
     }
@@ -79,7 +78,7 @@ struct VarVecProxy {
     samples: LEFixedVec,
     k: usize,
     len: usize,
-    encoding: CodesSerde,
+    encoding: Codes,
 }
 
 impl<'de, T: Storable, E: Endianness> Deserialize<'de> for VarVec<T, E, Vec<u64>> {
@@ -96,7 +95,7 @@ impl<'de, T: Storable, E: Endianness> Deserialize<'de> for VarVec<T, E, Vec<u64>
                 helper.samples,
                 helper.k,
                 helper.len,
-                helper.encoding.into(),
+                helper.encoding,
             )
         })
     }

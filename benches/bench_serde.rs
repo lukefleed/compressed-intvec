@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 
 /// Generates a vector with uniformly random values up to a given maximum.
 fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {

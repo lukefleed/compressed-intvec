@@ -1,6 +1,6 @@
 //! Helper functions for integration tests.
 #![allow(dead_code)] // Allow unused functions as this is a helper library for tests
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{RngExt, rngs::StdRng, SeedableRng};
 
 /// Generates a vector with uniformly random `u64` values.
 pub fn generate_random_vec(size: usize, max_val_exclusive: u64) -> Vec<u64> {

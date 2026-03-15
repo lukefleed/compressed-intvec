@@ -141,7 +141,7 @@ use dsi_bitstream::{
     prelude::{BE, BitRead, BitSeek, BitWrite, CodesWrite, Endianness, LE},
 };
 use iter::SeqVecBitReader;
-use mem_dbg::{DbgFlags, MemDbgImpl, MemSize, SizeFlags};
+use mem_dbg::{DbgFlags, FlatType, MemDbgImpl, MemSize, SizeFlags};
 use std::marker::PhantomData;
 use std::{error::Error, fmt};
 
@@ -855,7 +855,7 @@ where
         // directly into the buffer without creating an intermediate SeqIter.
         // This avoids iterator overhead and enables better compiler optimization.
         let mut reader =
-            SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new(self.data.as_ref()));
+            SeqVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new_inf(self.data.as_ref()));
         let _ = reader.set_bit_pos(start_bit);
         let code_reader = CodecReader::new(self.encoding);
 
@@ -1066,8 +1066,8 @@ where
 
 // --- MemSize Implementation ---
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for SeqVec<T, E, B> {
-    fn mem_size(&self, flags: SizeFlags) -> usize {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize + FlatType> MemSize for SeqVec<T, E, B> {
+    fn mem_size_rec(&self, flags: SizeFlags, _refs: &mut mem_dbg::HashMap<usize, usize>) -> usize {
         let mut total = core::mem::size_of::<Self>();
         // Add heap-allocated memory for the data buffer.
         total += self.data.mem_size(flags) - core::mem::size_of::<B>();
@@ -1091,7 +1091,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemSize> MemSize for SeqVec<T
 struct CodeWrapper<'a>(&'a Codes);
 
 impl MemSize for CodeWrapper<'_> {
-    fn mem_size(&self, _flags: SizeFlags) -> usize {
+    fn mem_size_rec(&self, _flags: SizeFlags, _refs: &mut mem_dbg::HashMap<usize, usize>) -> usize {
         core::mem::size_of_val(self.0)
     }
 }
@@ -1107,6 +1107,7 @@ impl MemDbgImpl for CodeWrapper<'_> {
         is_last: bool,
         padded_size: usize,
         flags: DbgFlags,
+        _dbg_refs: &mut mem_dbg::HashSet<usize>,
     ) -> core::fmt::Result {
         use core::fmt::Write;
 
@@ -1118,7 +1119,7 @@ impl MemDbgImpl for CodeWrapper<'_> {
         let mut buffer = String::new();
 
         if flags.contains(DbgFlags::HUMANIZE) {
-            let (value, uom) = mem_dbg::humanize_float(real_size as f64);
+            let (value, uom) = mem_dbg::humanize_float(real_size);
             if uom == " B" {
                 write!(buffer, "{:>4}{}", value as usize, uom)?;
             } else {
@@ -1168,12 +1169,13 @@ impl MemDbgImpl for CodeWrapper<'_> {
         _prefix: &mut String,
         _is_last: bool,
         _flags: DbgFlags,
+        _dbg_refs: &mut mem_dbg::HashSet<usize>,
     ) -> core::fmt::Result {
         Ok(())
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for SeqVec<T, E, B> {
+impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl + FlatType> MemDbgImpl for SeqVec<T, E, B> {
     fn _mem_dbg_rec_on(
         &self,
         writer: &mut impl core::fmt::Write,
@@ -1182,6 +1184,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
         prefix: &mut String,
         _is_last: bool,
         flags: DbgFlags,
+        _dbg_refs: &mut mem_dbg::HashSet<usize>,
     ) -> core::fmt::Result {
         self.data._mem_dbg_depth_on(
             writer,
@@ -1192,6 +1195,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
             false,
             core::mem::size_of_val(&self.data),
             flags,
+            _dbg_refs,
         )?;
         self.bit_offsets._mem_dbg_depth_on(
             writer,
@@ -1202,6 +1206,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
             false,
             core::mem::size_of_val(&self.bit_offsets),
             flags,
+            _dbg_refs,
         )?;
 
         if let Some(lengths) = &self.seq_lengths {
@@ -1214,6 +1219,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
                 false,
                 core::mem::size_of_val(lengths),
                 flags,
+                _dbg_refs,
             )?;
         }
 
@@ -1227,6 +1233,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
             false,
             core::mem::size_of_val(&self.encoding),
             flags,
+            _dbg_refs,
         )?;
 
         self._markers._mem_dbg_depth_on(
@@ -1238,6 +1245,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + MemDbgImpl> MemDbgImpl for Se
             true,
             core::mem::size_of_val(&self._markers),
             flags,
+            _dbg_refs,
         )?;
         Ok(())
     }

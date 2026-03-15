@@ -76,7 +76,7 @@ where
 {
     /// Creates a new `VarVecReader`.
     pub(super) fn new(intvec: &'a VarVec<T, E, B>) -> Self {
-        let bit_reader = VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new(
+        let bit_reader = VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new_inf(
             intvec.data.as_ref(),
         ));
         // This robustly selects the best available dispatch strategy.

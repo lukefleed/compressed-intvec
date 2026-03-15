@@ -1,7 +1,7 @@
 use compressed_intvec::prelude::*;
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use dsi_bitstream::codes::len_rice;
-use rand::{Rng, SeedableRng, rngs::SmallRng};
+use rand::{RngExt, SeedableRng, rngs::SmallRng};
 use std::time::Duration;
 
 /// Defines the data distributions for testing.

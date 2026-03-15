@@ -1,7 +1,7 @@
 use compressed_intvec::fixed::atomic::UAtomicFixedVec;
 use compressed_intvec::fixed::BitWidth;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Barrier};
 use std::thread;

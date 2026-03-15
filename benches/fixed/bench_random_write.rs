@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use compressed_intvec::prelude::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 use simple_sds_sbwt::{int_vector::IntVector as SdsIntVector, ops::Access};
 use succinct::int_vec::{IntVecMut, IntVector as SuccinctIntVector};
 use sux::prelude::BitFieldVec;

@@ -236,7 +236,7 @@ This should be your preferred method for any batch lookup when all indices are k
 
 ```rust
 use compressed_intvec::prelude::*;
-use rand::Rng;
+use rand::RngExt;
 
 let data: Vec<u64> = (0..10_000).collect();
 let varvec: LEVarVec = VarVec::builder()
@@ -246,7 +246,7 @@ let varvec: LEVarVec = VarVec::builder()
     .unwrap();
 
 // Indices can be in any order.
-let indices_to_get: Vec<usize> = (0..100).map(|_| rand::rng().gen_range(0..10_000)).collect();
+let indices_to_get: Vec<usize> = (0..100).map(|_| rand::rng().random_range(0..10_000)).collect();
 
 // `get_many` retrieves all values in one optimized pass.
 let values = varvec.get_many(&indices_to_get).unwrap();
@@ -403,7 +403,7 @@ The library integrates [`mem-dbg`] to provide memory usage statistics, allowing 
 ```rust
 use compressed_intvec::prelude::*;
 use mem_dbg::{DbgFlags, MemDbg};
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use rand::{rngs::SmallRng, RngExt, SeedableRng};
 
 // Generates a vector with uniformly random values.
 fn generate_random_vec(size: usize, max: u64) -> Vec<u64> {
