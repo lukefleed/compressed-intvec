@@ -2,6 +2,56 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - Unreleased
+
+### BREAKING
+
+*   **`dsi-bitstream` upgraded from 0.5 to 0.9**: This is a transitive
+    breaking change for users who interact with the `Codes` enum directly.
+    Variants with parameters changed from struct syntax to tuple syntax
+    (e.g., `Codes::Zeta { k: 3 }` is now `Codes::Zeta(3)`).
+
+*   **Serde format for `VarVec` and `SeqVec` changed**: The `encoding`
+    field is now serialized via `Display`/`FromStr` (e.g., `"Zeta(3)"`)
+    instead of the previous struct-based JSON format. Data serialized with
+    0.5.x cannot be deserialized with 0.6.0.
+
+*   **`rand` upgraded from 0.9 to 0.10**: Affects downstream code that
+    uses `rand` types from the public API or benchmarks. The `Rng` trait
+    methods `random_range` and `random` moved to `RngExt`.
+
+### New
+
+*   **`seq` module**: Introduced `SeqVec`, a compressed vector of
+    variable-length sequences with indexed access. Designed for adjacency
+    lists, document terms, and similar data organized as many
+    variable-length sequences. Includes `SeqVecBuilder`,
+    `SeqVecFromIterBuilder`, `SeqIter`, `SeqVecIter`, `SeqVecReader`,
+    `SeqVecSlice`, parallel iteration, and serde support.
+
+### Changed
+
+*   Upgraded `dsi-bitstream` from 0.5.0 to 0.9.0. Key upstream changes:
+    compile-time table validation, `Codes` with native serde support,
+    `Codes::canonicalize()`, `DispatchError` replacing `anyhow::Error`,
+    `MemWordReader` with `INF` const generic for infallible reads.
+
+*   Upgraded `rand` from 0.9 to 0.10 and `rand_distr` from 0.5 to 0.6
+    for compatibility with `dsi-bitstream`'s `implied` feature.
+
+*   Removed the internal `CodesSerde` proxy enum (`src/common/serde.rs`).
+    `Codes` now implements `Serialize`/`Deserialize` natively in
+    dsi-bitstream 0.9.
+
+*   Removed `UnsignedInt` from the `Word` trait bounds to resolve trait
+    method ambiguity between `common_traits` and `num-primitive`.
+
+### Improved
+
+*   Codec auto-selection now applies `Codes::canonicalize()` to ensure
+    canonical codec forms (e.g., `Golomb(2^n)` becomes `Rice(n)`,
+    `Zeta(1)` becomes `Gamma`).
+
 ## [0.5.1] - 2025-09-16
 
 ### New
