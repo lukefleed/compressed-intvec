@@ -8,7 +8,7 @@ readme = "README.md"
 license = "Apache-2.0"
 repository = "https://github.com/lukefleed/compressed-intvec"
 keywords = ["compression", "vector", "integer", "data-structures", "succinct"]
-categories = ["data-structures", "compression", "vector"]
+categories = ["data-structures", "compression"]
 exclude = [".github/*", "images/*", "python/*"]
 
 [dependencies]
