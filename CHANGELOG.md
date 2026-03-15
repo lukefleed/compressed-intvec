@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.6.0] - Unreleased
+## [0.6.0] - 2026-03-15
 
 ### BREAKING
 
@@ -15,10 +15,6 @@ All notable changes to this project will be documented in this file.
     field is now serialized via `Display`/`FromStr` (e.g., `"Zeta(3)"`)
     instead of the previous struct-based JSON format. Data serialized with
     0.5.x cannot be deserialized with 0.6.0.
-
-*   **`rand` upgraded from 0.9 to 0.10**: Affects downstream code that
-    uses `rand` types from the public API or benchmarks. The `Rng` trait
-    methods `random_range` and `random` moved to `RngExt`.
 
 ### New
 
