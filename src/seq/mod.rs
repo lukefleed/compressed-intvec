@@ -55,7 +55,7 @@
 //! in-place modification impractical, as changing one element could shift all
 //! subsequent data.
 //!
-//! # Main Components
+//! ## Main Components
 //!
 //! - [`SeqVec`]: The core compressed sequence vector.
 //! - [`SeqVecBuilder`]: Builder for constructing a [`SeqVec`] with custom codec.
