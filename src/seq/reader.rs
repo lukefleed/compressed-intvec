@@ -24,23 +24,27 @@ use dsi_bitstream::{
 };
 use std::fmt;
 
-/// A stateful reader for a `SeqVec` that provides convenient random sequence
+/// A stateful reader for a [`SeqVec`] that provides convenient random sequence
 /// access with optimized reader reuse.
 ///
-/// This reader is created by the [`SeqVec::reader`](super::SeqVec::reader)
-/// method. It provides a convenient interface for performing multiple random
-/// sequence lookups, with internal reader reuse for efficiency.
+/// This reader is created by the [`SeqVec::reader`] method. It provides a
+/// convenient interface for performing multiple random sequence lookups, with
+/// internal reader reuse for efficiency.
 ///
 /// ## Design
 ///
-/// Unlike the stateless [`crate::seq::SeqVec`] accessors, `SeqVecReader` maintains an
+/// Unlike the stateless [`SeqVec`] accessors, `SeqVecReader` maintains an
 /// internal `VarVecBitReader` and `CodecReader` that are reused across
-/// multiple accesses. This design mirrors [`VarVecReader`](crate::variable::VarVecReader)
-/// in the `variable` module.
+/// multiple accesses. This design mirrors [`VarVecReader`] in the `variable`
+/// module.
 ///
 /// The reader exposes only stateful, allocation-aware APIs that benefit from
-/// internal reader reuse. For lazy iteration, use [`SeqVec::get`](crate::seq::SeqVec::get)
-/// directly.
+/// internal reader reuse. For lazy iteration, use [`SeqVec::get`] directly.
+///
+/// [`SeqVec`]: super::SeqVec
+/// [`SeqVec::reader`]: super::SeqVec::reader
+/// [`SeqVec::get`]: super::SeqVec::get
+/// [`VarVecReader`]: crate::variable::VarVecReader
 ///
 /// # Examples
 ///
@@ -75,7 +79,9 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// A reference to the parent `SeqVec`.
+    /// A reference to the parent [`SeqVec`].
+    ///
+    /// [`SeqVec`]: super::SeqVec
     seqvec: &'a SeqVec<T, E, B>,
     /// The reusable bitstream reader for decoding sequences.
     reader: VarVecBitReader<'a, E>,
@@ -100,7 +106,7 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Creates a new `SeqVecReader`.
+    /// Creates a new [`SeqVecReader`].
     #[inline]
     pub(super) fn new(seqvec: &'a SeqVec<T, E, B>) -> Self {
         let reader = VarVecBitReader::new(dsi_bitstream::impls::MemWordReader::new_inf(
@@ -118,10 +124,12 @@ where
     /// bounds.
     ///
     /// This method reuses the internal bitstream reader and codec dispatcher,
-    /// providing better performance than collecting a [`SeqVec::get`]
-    /// iterator into a vector. For optimal memory allocation, ensure the builder option
-    /// [`SeqVecBuilder::store_lengths`](crate::seq::SeqVecBuilder::store_lengths)
-    /// was used during construction.
+    /// providing better performance than collecting a [`SeqVec::get`] iterator
+    /// into a vector. For optimal memory allocation, ensure the builder option
+    /// [`SeqVecBuilder::store_lengths`] was used during construction.
+    ///
+    /// [`SeqVec::get`]: super::SeqVec::get
+    /// [`SeqVecBuilder::store_lengths`]: crate::seq::SeqVecBuilder::store_lengths
     ///
     /// # Examples
     ///

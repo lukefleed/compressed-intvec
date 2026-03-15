@@ -1,15 +1,16 @@
 //! # Serde Serialization and Deserialization
 //!
-//! This module provides `serde` implementations for `FixedVec` and `AtomicFixedVec`,
+//! This module provides `serde` implementations for [`FixedVec`] and [`AtomicFixedVec`],
 //! enabled by the `serde` feature flag. It uses a "proxy struct" pattern to
 //! ensure that the public API remains clean and to handle the specific needs
 //! of serialization and deserialization.
 //!
 //! # Examples
 //!
-//! ## Serializing and deserializing a `FixedVec`
+//! ## Serializing and deserializing a [`FixedVec`]
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # #[cfg(feature = "serde")]
 //! # {
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec};
@@ -17,12 +18,14 @@
 //! let vec: UFixedVec<u32> = (0..10).collect();
 //!
 //! // Serialize the vector to a JSON string.
-//! let serialized = serde_json::to_string(&vec).unwrap();
+//! let serialized = serde_json::to_string(&vec)?;
 //!
 //! // Deserialize it back.
-//! let deserialized: UFixedVec<u32> = serde_json::from_str(&serialized).unwrap();
+//! let deserialized: UFixedVec<u32> = serde_json::from_str(&serialized)?;
 //!
 //! assert_eq!(vec, deserialized);
+//! # }
+//! # Ok(())
 //! # }
 //! ```
 
@@ -42,9 +45,9 @@ use std::sync::atomic::Ordering;
 
 // --- `FixedVec` Serde Implementation ---
 
-/// A private proxy struct for deserializing `FixedVec`.
+/// A private proxy struct for deserializing [`FixedVec`].
 ///
-/// This struct holds the essential data needed to reconstruct a `FixedVec`.
+/// This struct holds the essential data needed to reconstruct a [`FixedVec`].
 /// It is used to decouple the `serde` implementation from the main struct's
 /// internal details and type parameters.
 #[derive(Deserialize)]
@@ -63,7 +66,7 @@ where
     B: AsRef<[W]>,
     W: Serialize,
 {
-    /// Serializes a `FixedVec` by creating and serializing a temporary proxy struct.
+    /// Serializes a [`FixedVec`] by creating and serializing a temporary proxy struct.
     /// This pattern correctly handles lifetimes when serializing slice-backed data.
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -91,10 +94,10 @@ where
     W: Word + Deserialize<'de>,
     E: Endianness,
 {
-    /// Deserializes data into an owned `FixedVec`.
+    /// Deserializes data into an owned [`FixedVec`].
     ///
     /// The implementation first deserializes into a proxy struct and then
-    /// validates the data to ensure it can form a valid `FixedVec`.
+    /// validates the data to ensure it can form a valid [`FixedVec`].
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -132,7 +135,7 @@ where
 
 // --- `AtomicFixedVec` Serde Implementation ---
 
-/// A private proxy struct for serializing and deserializing `AtomicFixedVec`.
+/// A private proxy struct for serializing and deserializing [`AtomicFixedVec`].
 #[derive(Serialize, Deserialize)]
 struct AtomicFixedVecProxy {
     storage: Vec<u64>,
@@ -144,7 +147,7 @@ impl<T> Serialize for AtomicFixedVec<T>
 where
     T: Storable<u64> + Copy + ToPrimitive,
 {
-    /// Serializes an `AtomicFixedVec`.
+    /// Serializes an [`AtomicFixedVec`].
     ///
     /// This is done by atomically loading each element from the `Vec<AtomicU64>`
     /// into a plain `Vec<u64>` and then serializing a proxy struct.
@@ -174,7 +177,7 @@ impl<'de, T> Deserialize<'de> for AtomicFixedVec<T>
 where
     T: Storable<u64> + Copy + ToPrimitive,
 {
-    /// Deserializes data into an `AtomicFixedVec`.
+    /// Deserializes data into an [`AtomicFixedVec`].
     ///
     /// This uses the proxy struct and the internal `new` constructor to safely
     /// reconstruct the atomic vector, including its transient fields like `locks`.

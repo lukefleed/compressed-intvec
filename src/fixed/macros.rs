@@ -3,7 +3,7 @@
 /// Creates a [`FixedVec`] with default parameters.
 ///
 /// This macro simplifies the creation of [`FixedVec`] by using default parameters
-/// (`usize` for the storage word, `LittleEndian` for byte order) inferred
+/// ([`usize`] for the storage word, [`LE`](dsi_bitstream::prelude::LE) for byte order) inferred
 /// from the element type. It uses [`BitWidth::Minimal`] for space efficiency.
 ///
 /// There are three forms of this macro:

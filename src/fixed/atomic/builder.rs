@@ -10,6 +10,7 @@
 //! ## Building from a slice
 //!
 //! ```rust
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::prelude::*;
 //! use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
 //!
@@ -17,18 +18,18 @@
 //!
 //! // The builder can infer the minimal bit width (6 bits for 50).
 //! let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
-//!     .build(data)
-//!     .unwrap();
+//!     .build(data)?;
 //!
 //! assert_eq!(vec.bit_width(), 6);
 //!
 //! // Or a specific strategy can be chosen.
 //! let vec_pow2: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
 //!     .bit_width(BitWidth::PowerOfTwo)
-//!     .build(data)
-//!     .unwrap();
+//!     .build(data)?;
 //!
 //! assert_eq!(vec_pow2.bit_width(), 8);
+//! # Ok(())
+//! # }
 //! ```
 
 use crate::fixed::atomic::AtomicFixedVec;
@@ -46,6 +47,7 @@ use std::sync::atomic::AtomicU64;
 /// # Example
 ///
 /// ```
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::prelude::*;
 /// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
 ///
@@ -53,26 +55,25 @@ use std::sync::atomic::AtomicU64;
 ///
 /// // The builder can infer the minimal bit width (6 bits for 50).
 /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
-///     .build(data)
-///     .unwrap();
+///     .build(data)?;
 ///
 /// assert_eq!(vec.bit_width(), 6);
 ///
 /// // Or a specific strategy can be chosen.
 /// let vec_pow2: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
 ///     .bit_width(BitWidth::PowerOfTwo)
-///     .build(data)
-///     .unwrap();
+///     .build(data)?;
 ///
 /// assert_eq!(vec_pow2.bit_width(), 8);
 ///
 /// // You can also specify an explicit bit width.
 /// let vec_explicit: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
 ///    .bit_width(BitWidth::Explicit(10))
-///    .build(data)
-///    .unwrap();
+///    .build(data)?;
 ///
 /// assert_eq!(vec_explicit.bit_width(), 10);
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct AtomicFixedVecBuilder<T: Storable<u64>> {

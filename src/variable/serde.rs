@@ -6,13 +6,13 @@
 //!
 //! # Implementation
 //!
-//! A manual implementation is necessary because `VarVec` uses generic type
+//! A manual implementation is necessary because [`VarVec`] uses generic type
 //! parameters that don't directly map to serde's derive capabilities. The
-//! `Codes` type from `dsi-bitstream` natively supports serde in version 0.9+.
+//! [`Codes`] type from [`dsi-bitstream`] natively supports serde in version 0.9+.
 //!
 //! # Examples
 //!
-//! Serializing and deserializing an `VarVec` using `serde_json`:
+//! Serializing and deserializing a [`VarVec`] using [`serde_json`](https://crates.io/crates/serde_json):
 //!
 //! ```
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -39,6 +39,8 @@
 //!
 //! [`serde`]: https://serde.rs/
 //! [`VarVec`]: crate::variable::VarVec
+//! [`Codes`]: dsi_bitstream::prelude::Codes
+//! [`dsi-bitstream`]: https://crates.io/crates/dsi-bitstream
 
 use super::{traits::Storable, Endianness, VarVec};
 use crate::fixed::{FixedVec, LEFixedVec};
@@ -70,7 +72,7 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for VarV
     }
 }
 
-/// A helper struct for deserializing an owned `VarVec`.
+/// A helper struct for deserializing an owned [`VarVec`].
 #[derive(Deserialize)]
 #[serde(rename = "VarVec")]
 struct VarVecProxy {

@@ -119,6 +119,7 @@
 //! the vector's elements concurrently.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # #[cfg(feature = "parallel")] {
 //! use compressed_intvec::prelude::*;
 //! use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec};
@@ -126,8 +127,7 @@
 //!
 //! let data: Vec<u32> = (0..10_000).collect();
 //! let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
-//!     .build(&data)
-//!     .unwrap();
+//!     .build(&data)?;
 //!
 //! // Use the parallel iterator to find the sum of all even numbers.
 //! let sum_of_evens: u32 = vec.par_iter()
@@ -136,6 +136,8 @@
 //!
 //! let expected_sum: u32 = (0..10_000).filter(|&x| x % 2 == 0).sum();
 //! assert_eq!(sum_of_evens, expected_sum);
+//! # }
+//! # Ok(())
 //! # }
 //! ```
 //!
@@ -177,9 +179,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
-/// A thread-safe `FixedVec` for unsigned integers.
+/// A thread-safe [`FixedVec`] for unsigned integers.
 pub type UAtomicFixedVec<T> = AtomicFixedVec<T>;
-/// A thread-safe `FixedVec` for signed integers.
+/// A thread-safe [`FixedVec`] for signed integers.
 pub type SAtomicFixedVec<T> = AtomicFixedVec<T>;
 
 /// The upper bound on the number of locks to prevent excessive memory usage.
@@ -539,6 +541,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # #[cfg(feature = "parallel")] {
     /// use compressed_intvec::prelude::*;
     /// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
@@ -547,12 +550,13 @@ where
     ///
     /// let data: Vec<u32> = (0..1000).collect();
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// // Sum the elements in parallel.
     /// let sum: u32 = vec.par_iter().sum();
     /// assert_eq!(sum, (0..1000).sum());
+    /// # }
+    /// # Ok(())
     /// # }
     /// ```
     #[cfg(feature = "parallel")]
@@ -573,6 +577,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # #[cfg(feature = "parallel")] {
     /// use compressed_intvec::prelude::*;
     /// use compressed_intvec::fixed::{AtomicFixedVec, UAtomicFixedVec, BitWidth};
@@ -582,14 +587,15 @@ where
     /// let data: Vec<u32> = (0..100).collect();
     /// let vec: UAtomicFixedVec<u32> = AtomicFixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(8)) // 2*99 = 198, needs 8 bits
-    ///     .build(&data)
-    ///     .unwrap();
+    ///     .build(&data)?;
     ///
     /// vec.par_iter_mut().for_each(|mut proxy| {
     ///     *proxy *= 2;
     /// });
     ///
     /// assert_eq!(vec.load(50, Ordering::Relaxed), 100);
+    /// # }
+    /// # Ok(())
     /// # }
     /// ```
     #[cfg(feature = "parallel")]

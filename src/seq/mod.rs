@@ -207,7 +207,7 @@ pub(crate) type SeqVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u
 
 /// A compressed, indexed vector of integer sequences.
 ///
-/// `SeqVec` stores multiple sequences of integers in a single compressed
+/// [`SeqVec`] stores multiple sequences of integers in a single compressed
 /// bitstream, with an auxiliary index for O(1) access to each sequence by
 /// its rank. This is ideal for representing collections of variable-length
 /// sequences with minimal memory overhead.
@@ -220,6 +220,11 @@ pub(crate) type SeqVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u
 /// * `E` - The [`Endianness`] of the underlying bitstream ([`LE`] or [`BE`]).
 /// * `B` - The backing buffer type, enabling owned (`Vec<u64>`) or borrowed
 ///   (`&[u64]`) storage for zero-copy operations.
+///
+/// [`Storable`]: crate::variable::traits::Storable
+/// [`Endianness`]: dsi_bitstream::prelude::Endianness
+/// [`LE`]: dsi_bitstream::prelude::LE
+/// [`BE`]: dsi_bitstream::prelude::BE
 #[derive(Debug, Clone)]
 pub struct SeqVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     /// The compressed bitstream containing all sequences concatenated.
@@ -257,12 +262,16 @@ pub type USeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 ///
 /// Signed integers are transparently encoded using zig-zag encoding via the
 /// [`Storable`] trait.
+///
+/// [`Storable`]: crate::variable::traits::Storable
 pub type SSeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 
 /// A [`SeqVec`] for signed integers with big-endian bit ordering.
 ///
 /// Signed integers are transparently encoded using zig-zag encoding via the
 /// [`Storable`] trait.
+///
+/// [`Storable`]: crate::variable::traits::Storable
 pub type BESSeqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
 
 /// A [`SeqVec`] for signed integers with little-endian bit ordering.
@@ -272,6 +281,8 @@ pub type BESSeqVec<T, B = Vec<u64>> = SeqVec<T, BE, B>;
 ///
 /// Signed integers are transparently encoded using zig-zag encoding via the
 /// [`Storable`] trait.
+///
+/// [`Storable`]: crate::variable::traits::Storable
 pub type LESSeqVec<T, B = Vec<u64>> = SeqVec<T, LE, B>;
 
 /// Type alias for a tuple of two [`SeqVecSlice`] references.
@@ -360,6 +371,8 @@ impl<T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVec<T, E, B> {
     /// Returns [`SeqVecError::InvalidParameters`] if:
     /// * `bit_offsets_len` is zero (must have at least the sentinel entry).
     /// * The underlying [`FixedVec`] construction fails.
+    ///
+    /// [`FixedVec`]: crate::fixed::FixedVec
     ///
     /// # Safety Considerations
     ///

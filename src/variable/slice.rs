@@ -2,7 +2,7 @@
 //!
 //! This module provides [`VarVecSlice`], a view into a contiguous portion of an
 //! [`VarVec`]. Slices are immutable and do not own their data; they borrow it
-//! from the parent `VarVec`.
+//! from the parent [`VarVec`].
 //!
 //! [`VarVec`]: crate::variable::VarVec
 

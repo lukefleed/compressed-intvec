@@ -28,7 +28,7 @@ use dsi_bitstream::{
 };
 use std::fmt;
 
-/// A stateful reader for an `VarVec` that provides fast random access.
+/// A stateful reader for a [`VarVec`] that provides fast random access.
 ///
 /// This reader is created by the [`VarVec::reader`](super::VarVec::reader)
 /// method. It maintains an internal, reusable bitstream reader, making it highly
@@ -60,7 +60,7 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// A reference to the parent `VarVec`.
+    /// A reference to the parent [`VarVec`].
     pub(super) intvec: &'a VarVec<T, E, B>,
     /// The stateful, reusable bitstream reader.
     pub(super) reader: VarVecBitReader<'a, E>,

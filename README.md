@@ -7,7 +7,11 @@
 ![license](https://img.shields.io/crates/l/compressed-intvec)
 [![Line count](https://tokei.rs/b1/github/lukefleed/compressed-intvec?type=Rust,Python)](https://github.com/lukefleed/compressed-intvec)
 
-A Rust library that provides space-efficient, in-memory representations for integer vectors. It offers three complementary data structures: [`FixedVec`] for fixed-width encoding with _blazing fast_ mutable and atomic access, [`VarVec`] for variable-length encoding with high compression and amortized O(1) random access, and [`SeqVec`] for storing sequences of integers with indexed access.
+A Rust library that provides space-efficient, in-memory representations for integer vectors. It offers three complementary data structures:
+
+* [`FixedVec`] for fixed-width encoding with _blazing fast_ mutable and atomic access.
+* [`VarVec`] for variable-length encoding with high compression and amortized O(1) random access.
+* [`SeqVec`] for storing sequences of integers with indexed access.
 
 The library is designed to reduce the memory footprint of standard [`std::vec::Vec`] collections of integers while retaining performant access patterns.
 
@@ -15,7 +19,7 @@ The library is designed to reduce the memory footprint of standard [`std::vec::V
 
 The library provides three distinct vector types, each based on a different encoding principle and access pattern. Choosing the right one depends on the specific use case, performance requirements, and data characteristics.
 
-### [`FixedVec`]: Fixed-Width Encoding>
+### [`FixedVec`]: Fixed-Width Encoding
 
 Implements a vector where every integer occupies the same, predetermined number of bits.
 
@@ -25,20 +29,32 @@ Implements a vector where every integer occupies the same, predetermined number 
 
 ### [`VarVec`]: Variable-Width Element Encoding
 
-Implements a vector using variable-length instantaneous codes (e.g., Gamma, Delta, Rice, Zeta) to represent each integer with amortized O(1) random access.
+[`VarVec`] uses variable-length instantaneous codes (e.g., Gamma, Delta, Rice, Zeta) to represent each integer. Smaller or more frequent values get shorter codes, which can dramatically reduce memory usage for non-uniform distributions.
 
-*   **High Compression Ratios**: Achieves significant space savings for data with non-uniform distributions.
-*   **Automatic Codec Selection**: Can analyze the data to select the most effective compression codec automatically.
-*   **Amortized O(1) Random Access**: Enables fast random access by sampling the bit positions of elements at a configurable interval (`k`).
+The fundamental trade-off of variable-length encoding is that elements no longer have predictable positions in the bitstream: finding element *i* requires decoding every element before it. A naïve scan from the start would make random access O(*n*), which is impractical.
+
+[`VarVec`] solves this with periodic sampling: it stores the bit offset of every *k*-th element in an auxiliary [`FixedVec`]. To access element *i*, the reader jumps to the nearest sample at position ⌊*i*/*k*⌋ and decodes at most *k* − 1 elements forward. This bounds the cost per access to O(*k*), yielding amortized O(1) random access.
+
+The sampling rate *k* controls a space–speed trade-off:
+*   **Smaller *k***: faster access (fewer elements to decode per lookup), but more memory for the samples table.
+*   **Larger *k***: better compression (smaller samples table), but slower access.
+
+Additional features:
+*   **Automatic Codec Selection**: [`Codec::Auto`] analyzes the data to select the most space-efficient codec.
+*   **Immutability**: [`VarVec`] is immutable after construction — changing one element could alter its encoded length, shifting all subsequent data and invalidating every sample point.
 
 ### [`SeqVec`]: Variable-Length Sequence Encoding
 
-Implements a vector of sequences where each sequence is stored in compressed form and accessed as a whole, with efficient indexed access to sequences.
+[`SeqVec`] applies the same variable-length encoding as [`VarVec`], but at the level of *sequences* rather than individual elements. All sequences are concatenated into a single compressed bitstream, and an index stores the bit offset of each sequence boundary — essentially non-uniform sampling at the start of every sequence, rather than at periodic intervals.
 
-*   **Sequence-Oriented Access**: Optimized for workloads where entire sequences are retrieved together.
-*   **Minimal Overhead**: Stores only the bit offset of sequence boundaries; sequence lengths are computed on-the-fly or stored optionally.
-*   **Flexible Codec**: Supports the same compression codecs as [`VarVec`] for variable-length encoding of sequence elements.
-*   **Zero-Copy Iteration**: Provides zero-allocation iterators over sequence elements.
+This design is natural when the data is organized as variable-length collections (e.g., adjacency lists in a graph, document-term associations): you retrieve an entire sequence at once, iterating over its elements via a zero-allocation [`SeqIter`].
+
+*   **Indexed Access**: Jump to any sequence in O(1) via the boundary index, then decode its elements sequentially.
+*   **Optional Length Storage**: By default, sequence lengths are computed on-the-fly (the iterator stops when it reaches the next boundary). Enable [`store_lengths`] for O(1) length queries at a small additional memory cost.
+*   **Same Codec Flexibility**: Supports all the compression codecs available in [`VarVec`].
+
+[`SeqIter`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/seq/struct.SeqIter.html
+[`store_lengths`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/seq/struct.SeqVecBuilder.html#method.store_lengths
 
 [`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
 [`VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html
@@ -196,7 +212,7 @@ For _not too large_ use cases, the recommended strategy is [`Codec::Auto`], whic
 
 | `Codec` Variant | Description & Encoding Strategy | Optimal Data Distribution |
 | :--- | :--- | :--- |
-| **`Auto`** | Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
+| `Auto` | Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
 | `Gamma` (γ) | A universal, parameter-free code. Encodes `n` using the unary code of log₂(*n*+1), followed by the remaining bits of `n`+1. | Implied distribution is ≈ 1/(2*x*²). Optimal for data skewed towards small non-negative integers. |
 | `Delta` (δ) | A universal, parameter-free code. Encodes `n` using the γ code of  log₂(*n*+1) , making it more efficient than γ for larger values. | Implied distribution is ≈ 1/(2*x*(log *x*)²). |
 | `Rice` | A fast, tunable version of Golomb codes where the parameter *b* must be a power of two. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored in binary). | Geometric distributions. |
@@ -224,7 +240,7 @@ If you need to create multiple [`VarVec`] instances at run-time, consider using 
 
 ## [`VarVec`] Access Patterns
 
-The access strategy for a compressed [`VarVec`] has significant performance implications. The library provides several methods, each optimized for a specific access pattern. Using the appropriate method is key to achieving high throughput.
+Because variable-length elements can only be decoded sequentially from a known bit offset, the way you access a [`VarVec`] matters. The library provides several methods, each optimized for a specific access pattern.
 
 ### [`get_many`]: Batch Access from a Slice
 
@@ -280,7 +296,7 @@ There are interactive scenarios where lookup indices are not known in advance. T
 
 #### [`VarVecReader`]: Stateless Random Access
 
-A **stateless** reader for efficient, repeated random lookups.
+A stateless reader for efficient, repeated random lookups.
 
 *   **Mechanism**: Amortizes the setup cost of the bitstream reader across multiple calls. Each `get` operation performs an independent seek from the nearest sample point.
 
@@ -300,7 +316,7 @@ assert_eq!(reader.get(10).unwrap(), Some(10));
 
 #### [`VarVecSeqReader`]: Stateful Sequential Access
 
-A **stateful** reader optimized for access patterns with sequential locality.
+A stateful reader optimized for access patterns with sequential locality.
 
 *   **Mechanism**: Maintains an internal cursor. If a requested index is forward and within the same sample block, it decodes from the last position, avoiding a full seek.
 
@@ -327,9 +343,7 @@ assert_eq!(seq_reader.get(505).unwrap(), Some(505));
 
 ## Storing Sequences with [`SeqVec`]
 
-For workloads where data is naturally organized as multiple variable-length sequences and access patterns retrieve entire sequences, [`SeqVec`] provides an optimized solution. Each sequence is stored in compressed form using the same instantaneous codes as [`VarVec`], and all sequences are concatenated into a single compressed bitstream.
-
-Common applications include compressed graph representations (adjacency lists), document-term associations, and any scenario with variable-length collections.
+As described [above](#seqvec-variable-length-sequence-encoding), [`SeqVec`] concatenates all sequences into one compressed bitstream and stores a boundary index for O(1) access to any sequence. Common applications include compressed adjacency lists, document-term associations, and any data organized as variable-length collections.
 
 ### Basic Usage
 
@@ -525,7 +539,7 @@ By default, [`variable::VarVec`] only supports integer types with a fixed size (
 
 The `arch-dependent-storable` feature flag enables [`Storable`] implementations for `usize` and `isize`. When activated, you can create a `VarVec<usize>` directly.
 
-**Warning**: This feature breaks data portability. A `VarVec<usize>` created on a 64-bit system containing values larger than `u32::MAX` will cause a panic if deserialized or read on a 32-bit system. Only enable this feature if you can guarantee that your application and its data will only ever run on a single target architecture (e.g., `x86_64`).
+Warning: This feature breaks data portability. A `VarVec<usize>` created on a 64-bit system containing values larger than `u32::MAX` will cause a panic if deserialized or read on a 32-bit system. Only enable this feature if you can guarantee that your application and its data will only ever run on a single target architecture (e.g., `x86_64`).
 
 Enable it in your `Cargo.toml`:
 

@@ -6,13 +6,15 @@
 //!
 //! # Implementation
 //!
-//! A manual implementation is necessary because `SeqVec` uses generic type
+//! A manual implementation is necessary because [`SeqVec`] uses generic type
 //! parameters that don't directly map to serde's derive capabilities. The
-//! `Codes` type from `dsi-bitstream` natively supports serde in version 0.9+.
+//! `Codes` type from [`dsi-bitstream`] natively supports serde in version 0.9+.
+//!
+//! [`dsi-bitstream`]: https://crates.io/crates/dsi-bitstream
 //!
 //! # Examples
 //!
-//! Serializing and deserializing a `SeqVec` using `serde_json`:
+//! Serializing and deserializing a [`SeqVec`] using `serde_json`:
 //!
 //! ```
 //! # #[cfg(feature = "serde")]
@@ -45,11 +47,13 @@ use crate::variable::traits::Storable;
 use dsi_bitstream::prelude::{Codes, Endianness};
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 
-/// A proxy struct for serializing `SeqVec`.
+/// A proxy struct for serializing [`SeqVec`].
 ///
 /// This struct extracts only the data fields without generic type parameters,
 /// allowing serde to serialize the contents without requiring the generic types
 /// to implement `Serialize`.
+///
+/// [`SeqVec`]: super::SeqVec
 #[derive(Serialize)]
 struct SeqVecSerializeProxy<'a> {
     data: &'a [u64],
@@ -60,10 +64,12 @@ struct SeqVecSerializeProxy<'a> {
     encoding: Codes,
 }
 
-/// A proxy struct for deserializing `SeqVec`.
+/// A proxy struct for deserializing [`SeqVec`].
 ///
-/// This struct holds the raw data fields needed to reconstruct a `SeqVec`.
+/// This struct holds the raw data fields needed to reconstruct a [`SeqVec`].
 /// It decouples deserialization from the generic type parameters.
+///
+/// [`SeqVec`]: super::SeqVec
 #[derive(Deserialize)]
 struct SeqVecDeserializeProxy {
     data: Vec<u64>,

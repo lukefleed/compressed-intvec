@@ -23,10 +23,11 @@
 //! ## Iterating over elements
 //!
 //! ```rust
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, SFixedVec};
 //!
 //! let data: &[i16] = &[-100, 0, 100, 200];
-//! let vec: SFixedVec<i16> = FixedVec::builder().build(data).unwrap();
+//! let vec: SFixedVec<i16> = FixedVec::builder().build(data)?;
 //!
 //! let mut sum = 0;
 //! for value in vec.iter() {
@@ -34,6 +35,8 @@
 //! }
 //!
 //! assert_eq!(sum, 200);
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Bidirectional Iteration
@@ -70,7 +73,7 @@
 //! let vec: UFixedVec<u32> = (0..100u32).collect();
 //!
 //! // Create a slice containing elements from index 20 to 29.
-//! let slice = vec.slice(20, 10).unwrap();
+//! let slice = vec.slice(20, 10).expect("slice failed");
 //! assert_eq!(slice.len(), 10);
 //!
 //! // The slice iterator will yield the elements from the slice.
@@ -101,27 +104,33 @@ use std::cmp::min;
 /// ## Forward iteration
 ///
 /// ```rust
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
 ///
 /// let data: &[u8] = &[1, 2, 3, 4, 5];
-/// let vec: UFixedVec<u8> = FixedVec::builder().build(data).unwrap();
+/// let vec: UFixedVec<u8> = FixedVec::builder().build(data)?;
 /// let mut iter = vec.iter();
 ///
 /// assert_eq!(iter.next(), Some(1));
 /// assert_eq!(iter.next(), Some(2));
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// ## Reverse iteration
 ///
 /// ```rust
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
 ///
 /// let data: &[u8] = &[1, 2, 3, 4, 5];
-/// let vec: UFixedVec<u8> = FixedVec::builder().build(data).unwrap();
+/// let vec: UFixedVec<u8> = FixedVec::builder().build(data)?;
 /// let mut iter = vec.iter();
 ///
 /// assert_eq!(iter.next_back(), Some(5));
 /// assert_eq!(iter.next_back(), Some(4));
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug)]
 pub struct FixedVecIter<'a, T, W, E, B>

@@ -42,11 +42,11 @@ use dsi_bitstream::{
 /// # Type Parameters
 ///
 /// - `E`: The endianness used for writing bits to the bitstream.
-/// - `W`: The bitstream writer type implementing `CodesWrite`.
+/// - `W`: The bitstream writer type implementing [`CodesWrite`].
 pub(crate) enum CodecWriter<E: Endianness, W: CodesWrite<E>> {
     /// Fast-path writer using a pre-resolved function pointer.
     Fast(FuncCodeWriter<E, W>),
-    /// Fallback writer using dynamic dispatch on the `Codes` enum.
+    /// Fallback writer using dynamic dispatch on the [`Codes`] enum.
     Slow(Codes),
 }
 

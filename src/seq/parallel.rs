@@ -298,8 +298,9 @@ where
     /// - The dataset is large enough to amortize thread overhead
     /// - Sequences are reasonably sized
     ///
-    /// For small datasets or very fast codecs, the sequential [`into_vecs`]
-    /// method may be faster due to better cache locality.
+    /// For small datasets or very fast codecs, the sequential
+    /// [`into_vecs`](super::SeqVec::into_vecs) method may be faster due to
+    /// better cache locality.
     ///
     /// # Examples
     ///

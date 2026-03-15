@@ -7,7 +7,7 @@
 //! [`VarVec`]: crate::variable::VarVec
 //! [`VarVec::builder`]: crate::variable::VarVec::builder
 
-/// Creates a [`LEVarVec`] (an `VarVec` of [`u64`]s) containing the given elements.
+/// Creates a [`LEVarVec`] (a [`VarVec`] of [`u64`]s) containing the given elements.
 ///
 /// `int_vec!` allows for concise initialization of a [`LEVarVec`], which is an
 /// alias for `VarVec<u64, LE>`. It uses a set of reasonable defaults for its
@@ -49,6 +49,7 @@
 /// assert_eq!(v.get(50), Some(42));
 /// ```
 ///
+/// [`VarVec`]: crate::variable::VarVec
 /// [`LEVarVec`]: crate::variable::LEVarVec
 /// [`Codec::Auto`]: crate::variable::Codec::Auto
 #[macro_export]
@@ -76,7 +77,7 @@ macro_rules! int_vec {
     };
 }
 
-/// Creates a [`LESVarVec`] (an `VarVec` of [`i64`]s) containing the given elements.
+/// Creates a [`LESVarVec`] (a [`VarVec`] of [`i64`]s) containing the given elements.
 ///
 /// `sint_vec!` allows for concise initialization of a [`LESVarVec`], which is an
 /// alias for `VarVec<i64, LE>`. It uses a set of reasonable defaults:
@@ -120,6 +121,7 @@ macro_rules! int_vec {
 /// assert_eq!(v.get(50), Some(-42));
 /// ```
 ///
+/// [`VarVec`]: crate::variable::VarVec
 /// [`LESVarVec`]: crate::variable::LESVarVec
 /// [`Codec::Auto`]: crate::variable::Codec::Auto
 #[macro_export]

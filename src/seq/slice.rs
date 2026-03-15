@@ -2,7 +2,7 @@
 //!
 //! This module provides [`SeqVecSlice`], a view into a contiguous portion of a
 //! [`SeqVec`]. Slices are immutable and do not own their data; they borrow it
-//! from the parent `SeqVec`.
+//! from the parent [`SeqVec`].
 //!
 //! [`SeqVec`]: crate::seq::SeqVec
 
@@ -17,11 +17,14 @@ use std::ops::Range;
 ///
 /// This struct provides a view into a contiguous portion of a [`SeqVec`]
 /// without copying the underlying compressed data. It is created by the
-/// [`slice`](super::SeqVec::slice) or [`split_at`](super::SeqVec::split_at)
-/// methods on a [`SeqVec`].
+/// [`slice`] or [`split_at`] methods on a [`SeqVec`].
 ///
 /// All operations on a [`SeqVecSlice`] are relative to the start of the slice,
 /// not the parent vector. The slice contains a contiguous range of sequences.
+///
+/// [`SeqVec`]: super::SeqVec
+/// [`slice`]: super::SeqVec::slice
+/// [`split_at`]: super::SeqVec::split_at
 ///
 /// # Examples
 ///
@@ -61,7 +64,7 @@ pub struct SeqVecSlice<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
 }
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSlice<'a, T, E, B> {
-    /// Creates a new `SeqVecSlice`.
+    /// Creates a new [`SeqVecSlice`].
     pub(super) fn new(vec: &'a SeqVec<T, E, B>, range: Range<usize>) -> Self {
         debug_assert!(
             range.end <= vec.num_sequences(),
@@ -338,10 +341,13 @@ where
     ///
     /// - For fast key extraction (first element, hash, etc.), decode only what
     ///   is needed within the closure and return early.
-    /// - To search by a pre-computed key, use [`binary_search_by_key`](Self::binary_search_by_key)
-    ///   instead, which is optimized for key-based comparisons.
+    /// - To search by a pre-computed key, use
+    ///   [`binary_search_by_key`](Self::binary_search_by_key) instead, which is
+    ///   optimized for key-based comparisons.
     /// - For comparisons requiring the full sequence, full decoding is
     ///   unavoidable: O(m * log n).
+    ///
+    /// [`SeqIter`]: super::iter::SeqIter
     ///
     /// # Examples
     ///
@@ -426,8 +432,11 @@ where
 
 /// An iterator over the sequences of a [`SeqVecSlice`].
 ///
-/// This struct is created by the [`iter`](SeqVecSlice::iter) method. Each
-/// element of this iterator is a [`SeqIter`] for a sequence within the slice.
+/// This struct is created by the [`iter`] method. Each element of this
+/// iterator is a [`SeqIter`] for a sequence within the slice.
+///
+/// [`iter`]: SeqVecSlice::iter
+/// [`SeqIter`]: super::iter::SeqIter
 pub struct SeqVecSliceIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> {
     slice: &'a SeqVecSlice<'a, T, E, B>,
     /// Current front index for forward iteration.
@@ -480,7 +489,7 @@ where
 }
 
 impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> SeqVecSliceIter<'a, T, E, B> {
-    /// Creates a new iterator for a given `SeqVecSlice`.
+    /// Creates a new iterator for a given [`SeqVecSlice`].
     fn new(slice: &'a SeqVecSlice<'a, T, E, B>) -> Self {
         Self {
             slice,

@@ -51,6 +51,7 @@
 //! automatically determine the minimal number of bits required.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec};
 //!
 //! // The numbers 0-7 can all be represented in 3 bits.
@@ -58,12 +59,13 @@
 //!
 //! // The builder infers that `bit_width` should be 3.
 //! let vec: UFixedVec<u32> = FixedVec::builder()
-//!     .build(&data)
-//!     .unwrap();
+//!     .build(&data)?;
 //!
 //! assert_eq!(vec.len(), 8);
 //! assert_eq!(vec.bit_width(), 3);
 //! assert_eq!(vec.get(5), Some(5));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Storing Signed Integers
@@ -72,17 +74,20 @@
 //! which maps small negative and positive numbers to small unsigned integers.
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use compressed_intvec::fixed::{FixedVec, SFixedVec};
 //!
 //! // The values range from -2 to 1. Zig-zag encoding maps these to
 //! // unsigned values, so the maximum value is 3, which
 //! // requires 2 bits.
 //! let data: &[i16] = &[-2, -1, 0, 1];
-//! let vec: SFixedVec<i16> = FixedVec::builder().build(data).unwrap();
+//! let vec: SFixedVec<i16> = FixedVec::builder().build(data)?;
 //!
 //! assert_eq!(vec.bit_width(), 2);
 //! assert_eq!(vec.get(0), Some(-2));
 //! assert_eq!(vec.get(3), Some(1));
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Implementation Notes
@@ -309,15 +314,17 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
     ///
     /// let data: &[u32] = &[10, 20, 30, 40, 50];
     /// let vec: UFixedVec<u32> = FixedVec::builder()
     ///     .bit_width(BitWidth::Minimal)
-    ///     .build(data)
-    ///     .unwrap();
+    ///     .build(data)?;
     ///
     /// assert_eq!(vec.get(1), Some(20));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn builder() -> builder::FixedVecBuilder<T, W, E> {
         builder::FixedVecBuilder::new()
@@ -337,16 +344,18 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// let data = 0..100u32;
     /// let vec: UFixedVec<u32> = FixedVec::from_iter_builder(data, 7)
-    ///     .build()
-    ///     .unwrap();
+    ///     .build()?;
     ///
     /// assert_eq!(vec.len(), 100);
     /// assert_eq!(vec.bit_width(), 7);
     /// assert_eq!(vec.get(99), Some(99));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_iter_builder<I: IntoIterator<Item = T>>(
         iter: I,
@@ -363,15 +372,18 @@ where
     /// # Examples
     ///
     /// ```rust
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// let data: &[u32] = &[10, 20, 30];
     ///
-    /// let vec: UFixedVec<u32> = FixedVec::from_slice(data).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::from_slice(data)?;
     ///
     /// assert_eq!(vec.len(), 3);
     /// assert_eq!(vec.bit_width(), 5); // 30 fits in 5 bits
     /// assert_eq!(vec.get(0), Some(10));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_slice(slice: &[T]) -> Result<Self, Error> {
         Self::builder().build(slice)
@@ -406,6 +418,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// // 3 elements * 5 bits = 15 bits. This requires 1 data word.
@@ -416,10 +429,12 @@ where
     /// // 10 (01010), 20 (10100), 30 (11110)
     /// buffer[0] = 0b11110_10100_01010;
     ///
-    /// let vec = UFixedVec::<u32, _>::from_parts(&buffer, 3, 5).unwrap();
+    /// let vec = UFixedVec::<u32, _>::from_parts(&buffer, 3, 5)?;
     /// assert_eq!(vec.get(0), Some(10));
     /// assert_eq!(vec.get(1), Some(20));
     /// assert_eq!(vec.get(2), Some(30));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn from_parts(bits: B, len: usize, bit_width: usize) -> Result<Self, Error> {
         if bit_width > <W as traits::Word>::BITS {
@@ -515,13 +530,16 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// let data: &[u32] = &[10, 20, 30];
-    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data)?;
     ///
     /// assert_eq!(vec.get(1), Some(20));
     /// assert_eq!(vec.get(3), None);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn get(&self, index: usize) -> Option<T> {
@@ -605,13 +623,16 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// let data: &[u32] = &[10, 20, 30];
-    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data)?;
     ///
     /// assert_eq!(vec.get_unaligned(1), Some(20));
     /// assert_eq!(vec.get_unaligned(3), None);
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline]
     pub fn get_unaligned(&self, index: usize) -> Option<T> {
@@ -728,15 +749,18 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// let data: &[u32] = &[10, 20, 30];
-    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
-    /// let mut iter = vec.iter();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data)?;
+    /// let iter = vec.iter();
     ///
     /// for (i, value) in iter.enumerate() {
     ///     assert_eq!(Some(value), vec.get(i));
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn iter(&self) -> iter::FixedVecIter<'_, T, W, E, B> {
         iter::FixedVecIter::new(self)
@@ -810,19 +834,22 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed_vec;
     ///
     /// let vec = fixed_vec![1u32, 2, 3, 4, 5];
     /// let mut windows = vec.windows(3);
     ///
-    /// let slice1 = vec.slice(0, 3).unwrap();
-    /// let slice2 = vec.slice(1, 3).unwrap();
-    /// let slice3 = vec.slice(2, 3).unwrap();
+    /// let slice1 = vec.slice(0, 3).ok_or("slice failed")?;
+    /// let slice2 = vec.slice(1, 3).ok_or("slice failed")?;
+    /// let slice3 = vec.slice(2, 3).ok_or("slice failed")?;
     ///
-    /// assert_eq!(windows.next().unwrap(), slice1);
-    /// assert_eq!(windows.next().unwrap(), slice2);
-    /// assert_eq!(windows.next().unwrap(), slice3);
+    /// assert_eq!(windows.next().ok_or("no window")?, slice1);
+    /// assert_eq!(windows.next().ok_or("no window")?, slice2);
+    /// assert_eq!(windows.next().ok_or("no window")?, slice3);
     /// assert!(windows.next().is_none());
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn windows(&self, size: usize) -> iter::Windows<'_, T, W, E, B> {
         assert!(size != 0, "window size cannot be zero");
@@ -894,13 +921,16 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// let data: &[u32] = &[10, 20, 30, 40, 50];
-    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(data)?;
     ///
     /// assert_eq!(vec.binary_search(&30), Ok(2));
     /// assert_eq!(vec.binary_search(&35), Err(3));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn binary_search(&self, value: &T) -> Result<usize, usize>
     where
@@ -1122,11 +1152,14 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let vec: UFixedVec<u32> = FixedVec::new(8).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::new(8)?;
     /// assert!(vec.is_empty());
     /// assert_eq!(vec.bit_width(), 8);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn new(bit_width: usize) -> Result<Self, Error> {
         if bit_width > <W as traits::Word>::BITS {
@@ -1151,14 +1184,17 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let mut vec: UFixedVec<u32> = FixedVec::new(4).unwrap();
+    /// let mut vec: UFixedVec<u32> = FixedVec::new(4)?;
     /// vec.push(10);
     /// vec.push(15);
     ///
     /// assert_eq!(vec.len(), 2);
     /// assert_eq!(vec.get(1), Some(15));
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn push(&mut self, value: T) {
@@ -1226,10 +1262,13 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let vec: UFixedVec<u32> = FixedVec::with_capacity(5, 1000).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::with_capacity(5, 1000)?;
     /// assert!(vec.capacity() >= 1000);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn with_capacity(bit_width: usize, capacity: usize) -> Result<Self, Error> {
         if bit_width > <W as traits::Word>::BITS {
@@ -1279,11 +1318,14 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let mut vec: UFixedVec<u32> = FixedVec::new(4).unwrap();
+    /// let mut vec: UFixedVec<u32> = FixedVec::new(4)?;
     /// vec.reserve(100);
     /// assert!(vec.capacity() >= 100);
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn reserve(&mut self, additional: usize) {
         let target_element_capacity = self.len.saturating_add(additional);
@@ -1315,9 +1357,10 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
-    /// let mut vec = UFixedVec::<u32>::new(4).unwrap();
+    /// let mut vec = UFixedVec::<u32>::new(4)?;
     /// vec.push(1);
     /// vec.push(2);
     ///
@@ -1328,6 +1371,8 @@ where
     /// vec.resize(1, 0);
     /// assert_eq!(vec.len(), 1);
     /// assert_eq!(vec.get(0), Some(1));
+    /// # Ok(())
+    /// # }
     /// ```
     #[inline(always)]
     pub fn resize(&mut self, new_len: usize, value: T) {
@@ -1758,13 +1803,16 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec, BitWidth};
     ///
     /// let data: &[u32] = &[10, 20, 30];
-    /// let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(data).unwrap();
+    /// let mut vec: UFixedVec<u32> = FixedVec::builder().bit_width(BitWidth::Explicit(7)).build(data)?;
     ///
     /// vec.set(1, 99);
     /// assert_eq!(vec.get(1), Some(99));
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn set(&mut self, index: usize, value: T) {
         assert!(
@@ -2065,20 +2113,22 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{FixedVec, BitWidth, UFixedVec};
     ///
     /// // Values up to 9*2=18, requires 5 bits. We must build with enough space.
     /// let initial_data: Vec<u32> = (0..10).collect();
     /// let mut vec: UFixedVec<u32> = FixedVec::builder()
     ///     .bit_width(BitWidth::Explicit(5))
-    ///     .build(&initial_data)
-    ///     .unwrap();
+    ///     .build(&initial_data)?;
     ///
     /// vec.map_in_place(|x| x * 2);
     ///
     /// for i in 0..vec.len() {
     ///     assert_eq!(vec.get(i), Some(i as u32 * 2));
     /// }
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn map_in_place<F>(&mut self, mut f: F)
     where
@@ -2489,18 +2539,21 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use compressed_intvec::fixed::{UFixedVec, SFixedVec};
     /// use std::convert::TryFrom;
     ///
     /// // For unsigned types
     /// let data_u: &[u32] = &[10, 20, 30];
-    /// let vec_u = UFixedVec::<u32>::try_from(data_u).unwrap();
+    /// let vec_u = UFixedVec::<u32>::try_from(data_u)?;
     /// assert_eq!(vec_u.bit_width(), 5);
     ///
     /// // For signed types
     /// let data_s: &[i16] = &[-10, 0, 10];
-    /// let vec_s = SFixedVec::<i16>::try_from(data_s).unwrap();
+    /// let vec_s = SFixedVec::<i16>::try_from(data_s)?;
     /// assert_eq!(vec_s.bit_width(), 5);
+    /// # Ok(())
+    /// # }
     /// ```
     fn try_from(slice: &'a [T]) -> Result<Self, Self::Error> {
         Self::builder().bit_width(BitWidth::Minimal).build(slice)

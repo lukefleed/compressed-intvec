@@ -25,7 +25,10 @@ use std::marker::PhantomData;
 /// Type alias for the bit reader used internally by [`SeqVec`] accessors.
 ///
 /// This reader is configured for in-memory buffers with infallible reads,
-/// matching the configuration used in the `variable` module.
+/// matching the configuration used in the [`variable`] module.
+///
+/// [`SeqVec`]: crate::seq::SeqVec
+/// [`variable`]: crate::variable
 pub(crate) type SeqVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64], true>, DefaultReadParams>;
 
@@ -48,7 +51,7 @@ pub(crate) type SeqVecBitReader<'a, E> =
 /// ## Exact Size Hint
 ///
 /// This iterator only implements [`ExactSizeIterator`] when the sequence length
-/// is known upfront (e.g., when created from `SeqVecIter` with pre-stored lengths).
+/// is known upfront (e.g., when created from [`SeqVecIter`] with pre-stored lengths).
 /// If lengths are not pre-stored, computing the size requires decoding the entire
 /// remaining sequence—an O(n) operation that would be deceptive if hidden behind
 /// the `ExactSizeIterator` contract (which users expect to be O(1)).
@@ -460,7 +463,7 @@ where
 {
 }
 
-/// An owning iterator over all sequences in a [`crate::seq::SeqVec`].
+/// An owning iterator over all sequences in a [`SeqVec`].
 ///
 /// This iterator consumes a `SeqVec<T, E, Vec<u64>>` and yields [`SeqIter`]
 /// instances for each sequence. The iterator owns the underlying data buffer,
@@ -468,16 +471,20 @@ where
 ///
 /// ## Design
 ///
-/// This is a self-referential struct similar to [`VarVecIntoIter`](crate::variable::iter::VarVecIntoIter).
+/// This is a self-referential struct similar to [`VarVecIntoIter`].
 /// The data buffer is stored in `_data_owner`, and a transmuted `'static` reference
 /// is used to create the reader. This is safe because `_data_owner` is part of
 /// the same struct, guaranteeing the data outlives the reader.
 ///
 /// ## Bit Offsets Storage
 ///
-/// Rather than decoding all offsets from the `FixedVec` upfront (O(n) operation),
+/// Rather than decoding all offsets from the [`FixedVec`] upfront (O(n) operation),
 /// we store the raw bit width and offsets backing storage. Offsets are decoded
 /// lazily during iteration via `get_offset()`.
+///
+/// [`SeqVec`]: crate::seq::SeqVec
+/// [`VarVecIntoIter`]: crate::variable::iter::VarVecIntoIter
+/// [`FixedVec`]: crate::fixed::FixedVec
 ///
 /// ## Trait Implementations
 ///
@@ -557,8 +564,11 @@ where
     /// Creates a new owning iterator from a [`SeqVec`] with owned data.
     ///
     /// This constructor avoids decoding all offsets upfront. Instead, it stores
-    /// the raw bit width and backing data of the `FixedVec`, allowing offsets to
-    /// be decoded lazily during iteration.
+    /// the raw bit width and backing data of the [`FixedVec`], allowing offsets
+    /// to be decoded lazily during iteration.
+    ///
+    /// [`SeqVec`]: crate::seq::SeqVec
+    /// [`FixedVec`]: crate::fixed::FixedVec
     pub(crate) fn new(vec: super::SeqVec<T, E, Vec<u64>>) -> Self {
         let encoding = vec.encoding;
         let num_sequences = vec.num_sequences();

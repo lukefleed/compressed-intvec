@@ -27,7 +27,7 @@ use std::marker::PhantomData;
 /// when the data is already available in memory. It allows for detailed
 /// configuration of the sampling rate (`k`) and the compression codec.
 ///
-/// This builder always produces an owned `VarVec<T, E, Vec<u64>>`. It is obtained
+/// This builder always produces an owned [`VarVec`]. It is obtained
 /// by calling [`VarVec::builder`].
 #[derive(Debug)]
 pub struct VarVecBuilder<T: Storable, E: Endianness> {
@@ -37,7 +37,7 @@ pub struct VarVecBuilder<T: Storable, E: Endianness> {
 }
 
 impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
-    /// Creates a new builder for an `VarVec` with default settings.
+    /// Creates a new builder for a [`VarVec`] with default settings.
     ///
     /// By default, the sampling rate is `k=32` and the codec is chosen
     /// automatically via [`Codec::Auto`].

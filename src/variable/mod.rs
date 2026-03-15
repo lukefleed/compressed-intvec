@@ -248,7 +248,7 @@ pub use reader::VarVecReader;
 pub use seq_reader::VarVecSeqReader;
 pub use slice::{VarVecSlice, VarVecSliceIter};
 
-/// Defines the set of errors that can occur in `VarVec` operations.
+/// Defines the set of errors that can occur in [`VarVec`] operations.
 #[derive(Debug)]
 pub enum VarVecError {
     /// An error occurred during an I/O operation, typically from the underlying
@@ -308,7 +308,7 @@ impl From<FixedVecError> for VarVecError {
 
 /// A compressed, randomly accessible vector of integers using variable-length encoding.
 ///
-/// `VarVec` achieves compression by using instantaneous codes and enables fast,
+/// [`VarVec`] achieves compression by using instantaneous codes and enables fast,
 /// amortized O(1) random access via a sampling mechanism. See the
 /// [module-level documentation](crate::variable) for a detailed explanation.
 ///
@@ -335,9 +335,9 @@ pub struct VarVec<T: Storable, E: Endianness, B: AsRef<[u64]> = Vec<u64>> {
     pub(super) _markers: PhantomData<(T, E)>,
 }
 
-/// Type alias for the bit writer used internally by `VarVec` builders.
+/// Type alias for the bit writer used internally by [`VarVec`] builders.
 pub(crate) type VarVecBitWriter<E> = BufBitWriter<E, MemWordWriterVec<u64, Vec<u64>>>;
-/// Type alias for the bit reader used internally by `VarVec` accessors.
+/// Type alias for the bit reader used internally by [`VarVec`] accessors.
 pub(crate) type VarVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64], true>, DefaultReadParams>;
 

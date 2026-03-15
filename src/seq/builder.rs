@@ -109,6 +109,8 @@ impl<T: Storable, E: Endianness> SeqVecBuilder<T, E> {
     /// paths that avoid end-bit checks.
     ///
     /// The default is `false` to minimize memory usage.
+    ///
+    /// [`FixedVec`]: crate::fixed::FixedVec
     #[inline]
     pub fn store_lengths(mut self, store: bool) -> Self {
         self.store_lengths = store;
@@ -385,6 +387,8 @@ where
     /// paths that avoid end-bit checks.
     ///
     /// The default is `false` to minimize memory usage.
+    ///
+    /// [`FixedVec`]: crate::fixed::FixedVec
     #[inline]
     pub fn store_lengths(mut self, store: bool) -> Self {
         self.store_lengths = store;
@@ -526,6 +530,8 @@ type EncodeSequencesResult = (Vec<u64>, Vec<u64>, Option<Vec<u64>>);
 /// pre-allocated offsets vector. The codec dispatch is resolved once at the
 /// beginning via [`CodecWriter`] rather than per-element, avoiding repeated
 /// dispatch overhead and improving throughput.
+///
+/// [`CodecWriter`]: crate::common::codec_writer::CodecWriter
 ///
 /// # Arguments
 ///

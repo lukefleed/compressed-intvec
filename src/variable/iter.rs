@@ -187,7 +187,7 @@ where
         + CodesRead<E>
         + BitSeek<Error = core::convert::Infallible>,
 {
-    /// Creates a new, efficient owning iterator from an `VarVec`.
+    /// Creates a new, efficient owning iterator from a [`VarVec`].
     pub(super) fn new(vec: VarVec<T, E, Vec<u64>>) -> Self {
         // This is a self-referential struct. We move the owned data buffer into `_data_owner`.
         // Then, we create a 'static reference to that data to initialize the reader.

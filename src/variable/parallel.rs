@@ -37,7 +37,7 @@ where
     ///
     /// For the specific task of full decompression, this parallel version is not
     /// always faster than the sequential [`iter`](super::VarVec::iter). If the
-    /// decoding operation is very fast (e.g., with `VByte` encoding), the
+    /// decoding operation is very fast (e.g., with [`VByte`](crate::variable::Codec::VByteLe) encoding), the
     /// operation can be limited by memory bandwidth. In such cases, the
     /// sequential iterator's better use of CPU caches may outperform this
     /// parallel version.

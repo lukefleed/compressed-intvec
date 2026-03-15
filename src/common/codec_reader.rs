@@ -1,6 +1,6 @@
 //! Internal hybrid codec dispatcher for variable-length integer codes.
 //!
-//! This module provides [`CodecReader`], a two-stage dispatcher that optimizes
+//! This module provides `CodecReader`, a two-stage dispatcher that optimizes
 //! reading from compressed bitstreams while maintaining compatibility with all
 //! codecs supported by [`dsi-bitstream`](https://crates.io/crates/dsi-bitstream).
 //!
@@ -19,8 +19,8 @@ use dsi_bitstream::{
 ///
 /// This reader type is used throughout the variable-length integer modules
 /// for decoding compressed data. It is configured to:
-/// - Read from memory (`MemWordReader`)
-/// - Use buffered bit-level access (`BufBitReader`)
+/// - Read from memory ([`MemWordReader`])
+/// - Use buffered bit-level access ([`BufBitReader`])
 /// - Have infallible read operations (memory reads cannot fail)
 pub(crate) type VarVecBitReader<'a, E> =
     BufBitReader<E, MemWordReader<u64, &'a [u64], true>, DefaultReadParams>;
@@ -63,7 +63,7 @@ where
 {
     /// Fast-path reader using a pre-resolved function pointer.
     Fast(FuncCodeReader<E, VarVecBitReader<'a, E>>),
-    /// Fallback reader using dynamic dispatch on the `Codes` enum.
+    /// Fallback reader using dynamic dispatch on the [`Codes`] enum.
     Slow(Codes),
 }
 

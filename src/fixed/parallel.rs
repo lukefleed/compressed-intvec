@@ -7,17 +7,20 @@
 //! # Examples
 //!
 //! ```
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # #[cfg(feature = "parallel")]
 //! # {
 //! use compressed_intvec::fixed::{FixedVec, UFixedVec};
 //! use rayon::prelude::*;
 //!
 //! let data: Vec<u32> = (0..1000).collect();
-//! let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+//! let vec: UFixedVec<u32> = FixedVec::builder().build(&data)?;
 //!
 //! // Sum the elements in parallel.
 //! let sum: u32 = vec.par_iter().sum();
 //! assert_eq!(sum, (0..1000).sum());
+//! # }
+//! # Ok(())
 //! # }
 //! ```
 //!
@@ -45,16 +48,19 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # #[cfg(feature = "parallel")]
     /// # {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     /// use rayon::prelude::*;
     ///
     /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(&data)?;
     ///
     /// let count = vec.par_iter().filter(|&x| x % 2 == 0).count();
     /// assert_eq!(count, 50);
+    /// # }
+    /// # Ok(())
     /// # }
     /// ```
     pub fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + '_ {
@@ -72,20 +78,23 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # #[cfg(feature = "parallel")]
     /// # {
     /// use compressed_intvec::fixed::{FixedVec, UFixedVec};
     ///
     /// let data: Vec<u32> = (0..100).collect();
-    /// let vec: UFixedVec<u32> = FixedVec::builder().build(&data).unwrap();
+    /// let vec: UFixedVec<u32> = FixedVec::builder().build(&data)?;
     ///
     /// let indices = vec![10, 50, 99];
-    /// let values = vec.par_get_many(&indices).unwrap();
+    /// let values = vec.par_get_many(&indices)?;
     /// assert_eq!(values, vec![10, 50, 99]);
     ///
     /// // An out-of-bounds index will result in an error.
     /// let invalid_indices = vec![10, 100];
     /// assert!(vec.par_get_many(&invalid_indices).is_err());
+    /// # }
+    /// # Ok(())
     /// # }
     /// ```
     pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<T>, FixedVecError> {
