@@ -5,7 +5,6 @@
 [![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec)
 [![downloads](https://img.shields.io/crates/d/compressed-intvec)](https://crates.io/crates/compressed-intvec)
 ![license](https://img.shields.io/crates/l/compressed-intvec)
-[![Line count](https://tokei.rs/b1/github/lukefleed/compressed-intvec?type=Rust,Python)](https://github.com/lukefleed/compressed-intvec)
 
 A Rust library that provides space-efficient, in-memory representations for integer vectors. It offers three complementary data structures:
 
