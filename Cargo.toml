@@ -14,7 +14,7 @@ exclude = [".github/*", "images/*", "python/*"]
 [dependencies]
 atomic = "0.5.3"
 bytemuck = { version = "1.23.1", optional = true }
-common_traits = "0.12.0"
+common_traits = "0.12.1"
 dsi-bitstream = { version = "0.9.0", features = ["mem_dbg", "implied"] }
 mem_dbg = "0.4.0"
 num-traits = "0.2.19"
