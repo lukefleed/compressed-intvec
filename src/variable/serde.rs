@@ -1,104 +1,158 @@
-//! [`serde`] support for [`VarVec`].
+//! Serialization of [`VarVec`] with the `serde` feature.
 //!
-//! This module provides `Serialize` and `Deserialize` implementations for
-//! [`VarVec`], allowing it to be easily serialized and deserialized with formats
-//! like JSON, Bincode, etc. This is enabled by the `serde` feature flag.
-//!
-//! # Implementation
-//!
-//! A manual implementation is necessary because [`VarVec`] uses generic type
-//! parameters that don't directly map to serde's derive capabilities. The
-//! [`Codes`] type from [`dsi-bitstream`] natively supports serde in version 0.9+.
-//!
-//! # Examples
-//!
-//! Serializing and deserializing a [`VarVec`] using [`serde_json`](https://crates.io/crates/serde_json):
-//!
-//! ```
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # #[cfg(feature = "serde")] {
-//! use compressed_intvec::prelude::*;
-//!
-//! // The `sint_vec!` macro creates a vector of `i64`.
-//! // We specify the type of `vec` as `LESVarVec` to match.
-//! let vec: LESVarVec = sint_vec![-10, 20, -30, 40, -50];
-//!
-//! // Serialize the vector to a JSON string
-//! let serialized = serde_json::to_string(&vec)?;
-//!
-//! // Deserialize the JSON string back into an VarVec of the same type.
-//! let deserialized: LESVarVec = serde_json::from_str(&serialized)?;
-//!
-//! // To compare for equality, we can collect both into a standard Vec.
-//! // This verifies that the content is identical after the round trip.
-//! assert_eq!(vec.iter().collect::<Vec<_>>(), deserialized.iter().collect::<Vec<_>>());
-//! # }
-//! # Ok(())
-//! # }
-//! ```
-//!
-//! [`serde`]: https://serde.rs/
-//! [`VarVec`]: crate::variable::VarVec
-//! [`Codes`]: dsi_bitstream::prelude::Codes
-//! [`dsi-bitstream`]: https://crates.io/crates/dsi-bitstream
+//! The serialized form is tagged with the format version, and its body records the element
+//! signedness ([`Storable::SIGNED`]), the code, the sampling rate, the length and the words of
+//! the stream up to its last codeword. Deserialization requires the same signedness, decodes
+//! every element with the checked decoder, which also checks that it fits the element type,
+//! and rebuilds the samples in that pass.
 
-use super::{traits::Storable, Endianness, VarVec};
-use crate::fixed::{FixedVec, LEFixedVec};
-use dsi_bitstream::prelude::{Codes, LE};
+use super::{VarVec, VarVecPartsError};
+use crate::common::Decoder;
+use crate::common::serde::{
+    CodecWire, StreamError, StreamWords, check_stream_words, stream_words_from_wire,
+};
+use crate::{Backend, Storable};
+use serde::de;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::{fmt, num::NonZeroUsize};
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]> + Serialize> Serialize for VarVec<T, E, B> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        #[derive(Serialize)]
-        struct SerializeProxy<'a, BSamples: AsRef<[u64]> + Serialize> {
-            data: &'a [u64],
-            samples: &'a FixedVec<u64, u64, LE, BSamples>,
-            k: usize,
-            len: usize,
-            encoding: Codes,
-        }
+/// The serialized form of a [`VarVec`], with the stream words as `D`.
+///
+/// Format version 1 carries the element signedness, the code, the sampling rate, the length and
+/// the stream words up to the one that holds the last bit of the last codeword, with the bits
+/// after that codeword zero. The samples are not serialized: the reader rebuilds them. Loading
+/// requires the signedness of `T`, a code with its parameter in range, a nonzero sampling rate,
+/// `len` codewords that each encode a word below `2^T::BITS`, no word after the last codeword,
+/// and zero bits after it.
+///
+/// The variant is the format version, which every serde format decodes before the body, so an
+/// unknown version is refused before the body is read. Binary formats write the variant's
+/// position in this declaration, so versions are only appended.
+///
+/// Once released, a version is never changed: a format change appends a variant, and readers
+/// keep loading every earlier version.
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "VarVec")]
+enum Wire<D> {
+    V1(V1<D>),
+}
 
-        let proxy = SerializeProxy {
-            data: self.data.as_ref(),
-            samples: &self.samples,
-            k: self.k,
-            len: self.len,
-            encoding: self.encoding,
+/// The body of format version 1 of a [`VarVec`].
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V1<D> {
+    element_signed: bool,
+    codec: CodecWire,
+    sampling_rate: u64,
+    len: u64,
+    data: D,
+}
+
+impl<T: Storable, B: Backend> VarVec<T, B> {
+    /// Returns the bit position after the last codeword, decoding from the last sample.
+    fn stream_end(&self) -> u64 {
+        let Some(last) = self.len.checked_sub(1) else {
+            return 0;
         };
-        proxy.serialize(serializer)
+        let block = last / self.sampling_rate.get();
+        let mut decoder = Decoder::new(self.data.as_ref(), self.codec);
+        decoder.seek(
+            self.samples
+                .get(block)
+                .expect("every element below the length has a sample"),
+        );
+        for _ in block * self.sampling_rate.get()..self.len {
+            decoder.read();
+        }
+        decoder.bit_pos()
     }
 }
 
-/// A helper struct for deserializing an owned [`VarVec`].
-#[derive(Deserialize)]
-#[serde(rename = "VarVec")]
-struct VarVecProxy {
-    data: Vec<u64>,
-    samples: LEFixedVec,
-    k: usize,
-    len: usize,
-    encoding: Codes,
+impl<T: Storable, B: Backend> Serialize for VarVec<T, B> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Lossless: usize is at most 64 bits wide on every supported target.
+        Wire::V1(V1 {
+            element_signed: T::SIGNED,
+            codec: self.codec.get().into(),
+            sampling_rate: self.sampling_rate.get() as u64,
+            len: self.len as u64,
+            data: StreamWords {
+                words: self.data.as_ref(),
+                start: 0,
+                end: self.stream_end(),
+            },
+        })
+        .serialize(serializer)
+    }
 }
 
-impl<'de, T: Storable, E: Endianness> Deserialize<'de> for VarVec<T, E, Vec<u64>> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let helper = VarVecProxy::deserialize(deserializer)?;
-        // SAFETY: The deserialized proxy struct contains all necessary components,
-        // which are assumed to be consistent as they were serialized together.
-        Ok(unsafe {
-            VarVec::new_unchecked(
-                helper.data,
-                helper.samples,
-                helper.k,
-                helper.len,
-                helper.encoding,
-            )
-        })
+/// A failure to deserialize a [`VarVec`] with the requested element type.
+enum WireError {
+    Signedness { found: bool },
+    SamplingRate(u64),
+    Length(u64),
+    Parts(VarVecPartsError),
+    Stream(StreamError),
+}
+
+impl fmt::Display for WireError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let signedness = |signed: bool| if signed { "signed" } else { "unsigned" };
+        match self {
+            Self::Signedness { found } => write!(
+                f,
+                "serialized elements are {}, expected {}",
+                signedness(*found),
+                signedness(!found)
+            ),
+            Self::SamplingRate(rate) => {
+                write!(
+                    f,
+                    "serialized sampling rate {rate} is zero or does not fit usize"
+                )
+            }
+            Self::Length(len) => write!(f, "serialized length {len} does not fit usize"),
+            Self::Parts(error) => write!(f, "invalid serialized VarVec: {error}"),
+            Self::Stream(error) => write!(f, "invalid serialized VarVec: {error}"),
+        }
+    }
+}
+
+/// Builds the vector that `wire` describes, checking every property of the format.
+fn parse<T: Storable>(wire: Wire<Vec<u64>>) -> Result<VarVec<T>, WireError> {
+    let Wire::V1(V1 {
+        element_signed,
+        codec,
+        sampling_rate,
+        len,
+        data,
+    }) = wire;
+    if element_signed != T::SIGNED {
+        return Err(WireError::Signedness {
+            found: element_signed,
+        });
+    }
+    let sampling_rate = usize::try_from(sampling_rate)
+        .ok()
+        .and_then(NonZeroUsize::new)
+        .ok_or(WireError::SamplingRate(sampling_rate))?;
+    let len = usize::try_from(len).map_err(|_| WireError::Length(len))?;
+    let (vec, end) = VarVec::from_stream(
+        stream_words_from_wire(data),
+        len,
+        sampling_rate,
+        codec.into(),
+    )
+    .map_err(WireError::Parts)?;
+    check_stream_words(&vec.data, 0, end).map_err(WireError::Stream)?;
+    Ok(vec)
+}
+
+impl<'de, T: Storable> Deserialize<'de> for VarVec<T> {
+    /// Deserializes a vector, checking the format version before the body, then the signedness
+    /// of the elements, every codeword against the length and the element type, and that the
+    /// stream ends with the last codeword.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        parse(Wire::<Vec<u64>>::deserialize(deserializer)?).map_err(de::Error::custom)
     }
 }

@@ -1,189 +1,100 @@
-//! Parallel operations for [`VarVec`].
-//!
-//! This module provides parallel implementations for [`VarVec`] operations,
-//! enabled by the `parallel` feature flag. These methods are built on the
-//! [Rayon] library and are designed to leverage multi-core architectures to
-//! accelerate data decompression and access.
-//!
-//! [Rayon]: https://github.com/rayon-rs/rayon
-//! [`VarVec`]: crate::variable::VarVec
+//! Parallel iteration over a [`VarVec`], with the `parallel` feature.
 
-use super::{VarVec, VarVecBitReader, VarVecError, traits::Storable};
-use dsi_bitstream::{
-    dispatch::{CodesRead, StaticCodeRead},
-    prelude::{BitRead, BitSeek, Endianness},
-};
-use rayon::prelude::{
-    IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
-};
+use super::{VarVec, VarVecIter, View};
+use crate::{Backend, Storable};
+use rayon::iter::plumbing::{Consumer, Producer, ProducerCallback, UnindexedConsumer, bridge};
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
+use std::marker::PhantomData;
 
-impl<T, E, B> VarVec<T, E, B>
-where
-    T: Storable + Send + Sync,
-    E: Endianness + Send + Sync,
-    B: AsRef<[u64]> + Send + Sync,
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>
-        + Send,
-{
-    /// Returns a parallel iterator over the decompressed values.
+impl<T: Storable + Send, B: Backend> VarVec<T, B> {
+    /// Returns an indexed parallel iterator yielding elements by value.
     ///
-    /// This method uses Rayon to decompress the entire vector in parallel. It
-    /// can provide a significant speedup on multi-core systems, especially when
-    /// using a computationally intensive compression codec.
-    ///
-    /// # Performance
-    ///
-    /// For the specific task of full decompression, this parallel version is not
-    /// always faster than the sequential [`iter`](super::VarVec::iter). If the
-    /// decoding operation is very fast (e.g., with [`VByte`](crate::variable::Codec::VByteLe) encoding), the
-    /// operation can be limited by memory bandwidth. In such cases, the
-    /// sequential iterator's better use of CPU caches may outperform this
-    /// parallel version.
+    /// Available with the `parallel` feature. Each Rayon task decodes its range sequentially,
+    /// starting at the nearest preceding sample. The producer requests a minimum task length
+    /// of [`sampling_rate`](VarVec::sampling_rate) elements to limit the overhead of decoding
+    /// before a range starts. The indexed iterator preserves element order when collected.
     ///
     /// # Examples
     ///
     /// ```
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # #[cfg(feature = "parallel")] {
-    /// use compressed_intvec::variable::{VarVec, UVarVec};
+    /// use compressed_intvec::VarVec;
     /// use rayon::prelude::*;
     ///
-    /// let data: Vec<u32> = (0..1000).collect();
-    /// let vec: UVarVec<u32> = VarVec::from_slice(&data)?;
-    ///
-    /// // Use the parallel iterator to compute the sum in parallel
-    /// let sum: u32 = vec.par_iter().sum();
-    ///
-    /// assert_eq!(sum, (0..1000).sum());
-    /// # }
-    /// # Ok(())
-    /// # }
+    /// let vec: VarVec<u32> = (0..10_000).collect();
+    /// let sum: u64 = vec.par_iter().map(u64::from).sum();
+    /// assert_eq!(sum, 49_995_000);
+    /// let positions: Vec<usize> = vec.par_iter().positions(|x| x % 5000 == 0).collect();
+    /// assert_eq!(positions, [0, 5000]);
     /// ```
-    pub fn par_iter(&self) -> impl ParallelIterator<Item = T> + '_ {
-        let k = self.k;
-        let num_samples = self.samples.len();
-        let num_threads = rayon::current_num_threads();
-        // Divide the sample blocks among the available threads.
-        let chunk_size = num_samples.div_ceil(num_threads).max(1);
-        let num_chunks = num_samples.div_ceil(chunk_size);
+    pub fn par_iter(&self) -> impl IndexedParallelIterator<Item = T> + '_ {
+        Elements {
+            view: self.view(),
+            front: 0,
+            back: self.len,
+            element: PhantomData,
+        }
+    }
+}
 
-        (0..num_chunks).into_par_iter().flat_map(move |chunk_idx| {
-            use crate::common::codec_reader::CodecReader;
+/// The elements `front..back` of a vector, as a parallel iterator and as a rayon producer.
+struct Elements<'a, T> {
+    view: View<'a>,
+    front: usize,
+    back: usize,
+    element: PhantomData<fn() -> T>,
+}
 
-            let start_sample_idx = chunk_idx * chunk_size;
-            let end_sample_idx = (start_sample_idx + chunk_size).min(num_samples);
-            let mut bit_reader = VarVecBitReader::<E>::new(
-                dsi_bitstream::impls::MemWordReader::new_inf(self.data.as_ref()),
-            );
-            let mut values = Vec::new();
-            let code_reader = CodecReader::new(self.encoding);
+impl<T: Storable + Send> ParallelIterator for Elements<'_, T> {
+    type Item = T;
 
-            // Each thread decodes its assigned range of sample blocks.
-            for sample_idx in start_sample_idx..end_sample_idx {
-                let (start_elem_index, end_elem_index) = if k.is_power_of_two() {
-                    let k_exp = k.trailing_zeros();
-                    (
-                        sample_idx << k_exp,
-                        ((sample_idx + 1) << k_exp).min(self.len),
-                    )
-                } else {
-                    (sample_idx * k, ((sample_idx + 1) * k).min(self.len))
-                };
-
-                unsafe {
-                    bit_reader
-                        .set_bit_pos(self.samples.get_unchecked(sample_idx))
-                        .unwrap();
-                }
-
-                for _ in start_elem_index..end_elem_index {
-                    let word = code_reader.read(&mut bit_reader).unwrap();
-                    values.push(Storable::from_word(word));
-                }
-            }
-            values.into_par_iter()
-        })
+    fn drive_unindexed<C: UnindexedConsumer<T>>(self, consumer: C) -> C::Result {
+        bridge(self, consumer)
     }
 
-    /// Retrieves multiple elements from a slice of indices in parallel.
-    ///
-    /// This method uses Rayon to parallelize random access. It works by creating
-    /// a separate [`VarVecReader`](super::VarVecReader) for each thread and
-    /// distributing the lookup work among them.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`VarVecError::IndexOutOfBounds`] if any index is out of bounds.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # #[cfg(feature = "parallel")] {
-    /// use compressed_intvec::variable::{VarVec, SVarVec};
-    ///
-    /// let data: Vec<i64> = (0..1000).map(|x| x * -1).collect();
-    /// let vec: SVarVec<i64> = VarVec::from_slice(&data)?;
-    ///
-    /// let indices = [500, 10, 999, 0, 250];
-    /// let values = vec.par_get_many(&indices)?;
-    ///
-    /// assert_eq!(values, vec![-500, -10, -999, 0, -250]);
-    /// # }
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn par_get_many(&self, indices: &[usize]) -> Result<Vec<T>, VarVecError> {
-        if indices.is_empty() {
-            return Ok(Vec::new());
-        }
+    fn opt_len(&self) -> Option<usize> {
+        Some(self.back - self.front)
+    }
+}
 
-        for &index in indices {
-            if index >= self.len {
-                return Err(VarVecError::IndexOutOfBounds(index));
-            }
-        }
-
-        // SAFETY: We have pre-checked the bounds of all indices.
-        Ok(unsafe { self.par_get_many_unchecked(indices) })
+impl<T: Storable + Send> IndexedParallelIterator for Elements<'_, T> {
+    fn len(&self) -> usize {
+        self.back - self.front
     }
 
-    /// Retrieves multiple elements in parallel without bounds checking.
-    ///
-    /// # Safety
-    ///
-    /// Calling this method with any out-of-bounds index in the `indices` slice
-    /// is undefined behavior. In debug builds, an assertion will panic.
-    pub unsafe fn par_get_many_unchecked(&self, indices: &[usize]) -> Vec<T> {
-        #[cfg(debug_assertions)]
-        {
-            for &index in indices {
-                debug_assert!(
-                    index < self.len,
-                    "Index out of bounds: index was {} but length was {}",
-                    index,
-                    self.len
-                );
-            }
-        }
+    fn drive<C: Consumer<T>>(self, consumer: C) -> C::Result {
+        bridge(self, consumer)
+    }
 
-        if indices.is_empty() {
-            return Vec::new();
-        }
+    fn with_producer<CB: ProducerCallback<T>>(self, callback: CB) -> CB::Output {
+        callback.callback(self)
+    }
+}
 
-        let mut results = vec![Storable::from_word(0); indices.len()];
+impl<'a, T: Storable + Send> Producer for Elements<'a, T> {
+    type Item = T;
+    type IntoIter = VarVecIter<'a, T>;
 
-        results.par_iter_mut().enumerate().for_each_init(
-            || self.reader(), // Create a thread-local reader.
-            |reader, (original_pos, res_val)| {
-                let target_index = indices[original_pos];
-                // SAFETY: bounds are guaranteed by the caller.
-                *res_val = unsafe { reader.get_unchecked(target_index) };
-            },
-        );
+    fn into_iter(self) -> VarVecIter<'a, T> {
+        VarVecIter::new(self.view, self.front, self.back)
+    }
 
-        results
+    fn min_len(&self) -> usize {
+        // A shorter range would seek to a sample and decode elements that it then skips.
+        self.view.sampling_rate
+    }
+
+    fn split_at(self, index: usize) -> (Self, Self) {
+        let mid = self.front + index;
+        let left = Self {
+            back: mid,
+            element: PhantomData,
+            ..self
+        };
+        let right = Self {
+            front: mid,
+            element: PhantomData,
+            ..self
+        };
+        (left, right)
     }
 }

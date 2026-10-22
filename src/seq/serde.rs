@@ -1,208 +1,130 @@
-//! [`serde`] support for [`SeqVec`].
+//! Serialization of [`SeqVec`] with the `serde` feature.
 //!
-//! This module provides `Serialize` and `Deserialize` implementations for
-//! [`SeqVec`], allowing it to be easily serialized and deserialized with formats
-//! like JSON, Bincode, etc. This is enabled by the `serde` feature flag.
-//!
-//! # Implementation
-//!
-//! A manual implementation is necessary because [`SeqVec`] uses generic type
-//! parameters that don't directly map to serde's derive capabilities. The
-//! `Codes` type from [`dsi-bitstream`] natively supports serde in version 0.9+.
-//!
-//! [`dsi-bitstream`]: https://crates.io/crates/dsi-bitstream
-//!
-//! # Examples
-//!
-//! Serializing and deserializing a [`SeqVec`] using `serde_json`:
-//!
-//! ```
-//! # #[cfg(feature = "serde")]
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use compressed_intvec::seq::{SeqVec, LESeqVec};
-//!
-//! let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[100]];
-//! let vec: LESeqVec<u32> = SeqVec::from_slices(sequences)?;
-//!
-//! // Serialize the vector to a JSON string
-//! let serialized = serde_json::to_string(&vec)?;
-//!
-//! // Deserialize the JSON string back into a SeqVec of the same type.
-//! let deserialized: LESeqVec<u32> = serde_json::from_str(&serialized)?;
-//!
-//! // Verify equality
-//! assert_eq!(vec, deserialized);
-//! #     Ok(())
-//! # }
-//! # #[cfg(not(feature = "serde"))]
-//! # fn main() {}
-//! ```
-//!
-//! [`serde`]: https://serde.rs/
-//! [`SeqVec`]: super::SeqVec
+//! The serialized form is tagged with the format version, and its body records the element
+//! signedness ([`Storable::SIGNED`]), the code, the words of the stream up to the last offset,
+//! the offsets, and whether the vector stores the lengths. Deserialization requires the same
+//! signedness, decodes every sequence with the checked decoder, which also checks that it fits
+//! the element type, and counts the lengths in that pass.
 
-use super::SeqVec;
-use crate::fixed::FixedVec;
-use crate::variable::traits::Storable;
-use dsi_bitstream::prelude::{Codes, Endianness};
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use super::{SeqVec, SeqVecPartsError};
+use crate::common::serde::{
+    CodecWire, StreamError, StreamWords, check_stream_words, stream_words_from_wire,
+};
+use crate::{Backend, FixedVec, Storable};
+use serde::de;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 
-/// A proxy struct for serializing [`SeqVec`].
+/// The serialized form of a [`SeqVec`], with the stream words as `D` and the offsets as `P`.
 ///
-/// This struct extracts only the data fields without generic type parameters,
-/// allowing serde to serialize the contents without requiring the generic types
-/// to implement `Serialize`.
+/// Format version 1 carries the element signedness, the code, the stream words up to the one
+/// that holds the bit before the last offset, with the bits before the first offset and from the
+/// last offset on zero, the offsets as a serialized [`FixedVec`], and whether the vector stores
+/// the lengths, which the reader counts. Loading requires the signedness of `T`, a code with its
+/// parameter in range, at least one offset, sequences whose codewords each encode a word below
+/// `2^T::BITS` and end at the next offset, no word after the last offset, and zero bits outside
+/// the offsets.
 ///
-/// [`SeqVec`]: super::SeqVec
-#[derive(Serialize)]
-struct SeqVecSerializeProxy<'a> {
-    data: &'a [u64],
-    bit_offsets_data: &'a [u64],
-    bit_offsets_len: usize,
-    bit_offsets_bit_width: usize,
-    seq_lengths: Option<SeqLengthsSerializeProxy<'a>>,
-    encoding: Codes,
+/// The variant is the format version, which every serde format decodes before the body, so an
+/// unknown version is refused before the body is read. Binary formats write the variant's
+/// position in this declaration, so versions are only appended.
+///
+/// Once released, a version is never changed: a format change appends a variant, and readers
+/// keep loading every earlier version.
+#[derive(Serialize, Deserialize)]
+#[serde(rename = "SeqVec")]
+enum Wire<D, P> {
+    V1(V1<D, P>),
 }
 
-/// A proxy struct for deserializing [`SeqVec`].
-///
-/// This struct holds the raw data fields needed to reconstruct a [`SeqVec`].
-/// It decouples deserialization from the generic type parameters.
-///
-/// [`SeqVec`]: super::SeqVec
-#[derive(Deserialize)]
-struct SeqVecDeserializeProxy {
-    data: Vec<u64>,
-    bit_offsets_data: Vec<u64>,
-    bit_offsets_len: usize,
-    bit_offsets_bit_width: usize,
-    seq_lengths: Option<SeqLengthsDeserializeProxy>,
-    encoding: Codes,
+/// The body of format version 1 of a [`SeqVec`].
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V1<D, P> {
+    element_signed: bool,
+    codec: CodecWire,
+    data: D,
+    offsets: P,
+    store_lengths: bool,
 }
 
-/// A proxy struct for serializing sequence lengths.
-#[derive(Serialize)]
-struct SeqLengthsSerializeProxy<'a> {
-    data: &'a [u64],
-    len: usize,
-    bit_width: usize,
-}
-
-/// A proxy struct for deserializing sequence lengths.
-#[derive(Deserialize)]
-struct SeqLengthsDeserializeProxy {
-    data: Vec<u64>,
-    len: usize,
-    bit_width: usize,
-}
-
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Serialize for SeqVec<T, E, B> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let proxy = SeqVecSerializeProxy {
-            data: self.data.as_ref(),
-            bit_offsets_data: self.bit_offsets.as_limbs(),
-            bit_offsets_len: self.bit_offsets.len(),
-            bit_offsets_bit_width: self.bit_offsets.bit_width(),
-            seq_lengths: self
-                .seq_lengths
-                .as_ref()
-                .map(|lengths| SeqLengthsSerializeProxy {
-                    data: lengths.as_limbs(),
-                    len: lengths.len(),
-                    bit_width: lengths.bit_width(),
-                }),
-            encoding: self.encoding,
+impl<T: Storable, B: Backend> Serialize for SeqVec<T, B> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let offset = |i| {
+            self.offsets
+                .get(i)
+                .expect("the offsets hold one more entry than there are sequences")
         };
-        proxy.serialize(serializer)
+        Wire::V1(V1 {
+            element_signed: T::SIGNED,
+            codec: self.codec.get().into(),
+            data: StreamWords {
+                words: self.data.as_ref(),
+                start: offset(0),
+                end: offset(self.len()),
+            },
+            offsets: &self.offsets,
+            store_lengths: self.lengths.is_some(),
+        })
+        .serialize(serializer)
     }
 }
 
-impl<'de, T: Storable + 'static, E: Endianness> Deserialize<'de> for SeqVec<T, E, Vec<u64>> {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let proxy = SeqVecDeserializeProxy::deserialize(deserializer)?;
+/// A failure to deserialize a [`SeqVec`] of the requested element type.
+enum WireError {
+    Signedness { found: bool },
+    Parts(SeqVecPartsError),
+    Stream(StreamError),
+}
 
-        // Validate bit_width
-        let word_size_bits = std::mem::size_of::<u64>() * 8;
-        if proxy.bit_offsets_bit_width > word_size_bits {
-            return Err(de::Error::custom(format!(
-                "Deserialized bit_offsets bit_width ({}) cannot be greater than word size ({})",
-                proxy.bit_offsets_bit_width, word_size_bits
-            )));
+impl fmt::Display for WireError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let signedness = |signed: bool| if signed { "signed" } else { "unsigned" };
+        match self {
+            Self::Signedness { found } => write!(
+                f,
+                "serialized elements are {}, expected {}",
+                signedness(*found),
+                signedness(!found)
+            ),
+            Self::Parts(error) => write!(f, "invalid serialized SeqVec: {error}"),
+            Self::Stream(error) => write!(f, "invalid serialized SeqVec: {error}"),
         }
+    }
+}
 
-        // Validate buffer size
-        let required_bits = proxy
-            .bit_offsets_len
-            .saturating_mul(proxy.bit_offsets_bit_width);
-        let required_data_words = required_bits.div_ceil(word_size_bits);
+/// Builds the vector that `wire` describes, checking every property of the format.
+fn parse<T: Storable>(wire: Wire<Vec<u64>, FixedVec<u64>>) -> Result<SeqVec<T>, WireError> {
+    let Wire::V1(V1 {
+        element_signed,
+        codec,
+        data,
+        offsets,
+        store_lengths,
+    }) = wire;
+    if element_signed != T::SIGNED {
+        return Err(WireError::Signedness {
+            found: element_signed,
+        });
+    }
+    let vec = SeqVec::from_stream(
+        stream_words_from_wire(data),
+        offsets,
+        store_lengths,
+        codec.into(),
+    )
+    .map_err(WireError::Parts)?;
+    let offset = |i| vec.offsets.get(i).expect("the offsets were checked");
+    check_stream_words(&vec.data, offset(0), offset(vec.len())).map_err(WireError::Stream)?;
+    Ok(vec)
+}
 
-        if proxy.bit_offsets_data.len() < required_data_words {
-            return Err(de::Error::custom(format!(
-                "Deserialized bit_offsets buffer is too small. It has {} words, but at least {} are required.",
-                proxy.bit_offsets_data.len(),
-                required_data_words
-            )));
-        }
-
-        // Reconstruct the FixedVec<u64, u64, E, Vec<u64>>
-        let bit_offsets = unsafe {
-            FixedVec::new_unchecked(
-                proxy.bit_offsets_data,
-                proxy.bit_offsets_len,
-                proxy.bit_offsets_bit_width,
-            )
-        };
-
-        let seq_lengths = if let Some(lengths_proxy) = proxy.seq_lengths {
-            if lengths_proxy.bit_width > word_size_bits {
-                return Err(de::Error::custom(format!(
-                    "Deserialized seq_lengths bit_width ({}) cannot be greater than word size ({})",
-                    lengths_proxy.bit_width, word_size_bits
-                )));
-            }
-
-            let required_bits = lengths_proxy.len.saturating_mul(lengths_proxy.bit_width);
-            let required_data_words = required_bits.div_ceil(word_size_bits);
-
-            if lengths_proxy.data.len() < required_data_words {
-                return Err(de::Error::custom(format!(
-                    "Deserialized seq_lengths buffer is too small. It has {} words, but at least {} are required.",
-                    lengths_proxy.data.len(),
-                    required_data_words
-                )));
-            }
-
-            if lengths_proxy.len + 1 != proxy.bit_offsets_len {
-                return Err(de::Error::custom(
-                    "Deserialized seq_lengths length must match number of sequences",
-                ));
-            }
-
-            Some(unsafe {
-                FixedVec::new_unchecked(
-                    lengths_proxy.data,
-                    lengths_proxy.len,
-                    lengths_proxy.bit_width,
-                )
-            })
-        } else {
-            None
-        };
-
-        // Reconstruct the SeqVec
-        Ok(unsafe {
-            SeqVec::from_raw_parts_with_lengths(
-                proxy.data,
-                bit_offsets,
-                seq_lengths,
-                proxy.encoding,
-            )
-        })
+impl<'de, T: Storable> Deserialize<'de> for SeqVec<T> {
+    /// Deserializes a vector, checking the format version before the body, then the signedness
+    /// of the elements, every sequence against the offsets and the element type, and that the
+    /// stream holds no bits outside the offsets.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        parse(Wire::<Vec<u64>, FixedVec<u64>>::deserialize(deserializer)?)
+            .map_err(de::Error::custom)
     }
 }

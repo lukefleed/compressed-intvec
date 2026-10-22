@@ -1,302 +1,176 @@
-//! Builders for constructing an [`VarVec`].
-//!
-//! This module provides the two primary builders for creating an [`VarVec`]:
-//!
-//! - [`VarVecBuilder`]: For building from an existing slice of data. This is the
-//!   most flexible builder, as it can analyze the data to automatically select
-//!   an optimal compression codec.
-//! - [`VarVecFromIterBuilder`]: For building from an iterator. This is suitable
-//!   for large datasets that are generated on the fly, but it requires the
-//!   compression codec to be specified manually.
-//!
-//! [`VarVec`]: crate::variable::VarVec
+//! The builder of [`VarVec`].
 
-use super::{codec, codec::Codec, traits::Storable, VarVec, VarVecBitWriter, VarVecError};
-use crate::common::codec_writer::CodecWriter;
-use crate::fixed::{BitWidth, FixedVec};
-use dsi_bitstream::{
-    dispatch::StaticCodeWrite,
-    impls::MemWordWriterVec,
-    prelude::{BitWrite, CodesWrite, Endianness, LE},
-};
-use std::marker::PhantomData;
+use super::VarVec;
+use crate::common::{Automatic, Codec, CodecError, Encoder, ValidCodec, select};
+use crate::{FixedVec, Storable};
+use std::{fmt, marker::PhantomData, num::NonZeroUsize};
 
-/// A builder for creating an [`VarVec`] from a slice of integers.
+/// The default sampling rate.
+const DEFAULT_SAMPLING_RATE: NonZeroUsize = NonZeroUsize::new(32).unwrap();
+
+/// Configures the compression and random-access index of a [`VarVec`].
 ///
-/// This builder is the primary entry point for constructing a compressed vector
-/// when the data is already available in memory. It allows for detailed
-/// configuration of the sampling rate (`k`) and the compression codec.
+/// Returned by [`VarVec::builder`]. By default, `C` is [`Automatic`]: the builder selects a code
+/// that can encode every input value, and `build` returns a vector directly. Calling
+/// [`codec`](VarVecBuilder::codec) changes `C` to [`Codec`], and `build` then returns a
+/// [`Result`] because the chosen code may have an invalid parameter or reject a value.
 ///
-/// This builder always produces an owned [`VarVec`]. It is obtained
-/// by calling [`VarVec::builder`].
-#[derive(Debug)]
-pub struct VarVecBuilder<T: Storable, E: Endianness> {
-    k: usize,
-    codec_spec: Codec,
-    _markers: PhantomData<(T, E)>,
+/// The sampling rate defaults to 32. Set a lower rate with
+/// [`sampling_rate`](VarVecBuilder::sampling_rate) to speed up random access at the cost of a
+/// larger index. See [`Codec`] for the automatic selection policy.
+///
+/// # Examples
+///
+/// ```
+/// use compressed_intvec::{Codec, CodecError, VarVec};
+///
+/// // Automatic selection returns the vector directly.
+/// let vec = VarVec::builder().build(&[1u64, 2, 3]);
+/// assert_eq!(vec.get(2), Some(3));
+///
+/// // Gamma reports u64::MAX as unencodable.
+/// let error = VarVec::builder().codec(Codec::Gamma).build(&[1, u64::MAX]).unwrap_err();
+/// assert_eq!(error, CodecError::Unencodable { codec: Codec::Gamma, value: u64::MAX });
+/// ```
+#[derive(Clone, Copy)]
+pub struct VarVecBuilder<T, C = Automatic> {
+    codec: C,
+    sampling_rate: NonZeroUsize,
+    element: PhantomData<fn() -> T>,
 }
 
-impl<T: Storable, E: Endianness> VarVecBuilder<T, E> {
-    /// Creates a new builder for a [`VarVec`] with default settings.
-    ///
-    /// By default, the sampling rate is `k=32` and the codec is chosen
-    /// automatically via [`Codec::Auto`].
-    pub(super) fn new() -> Self {
+/// Prints the codec and the sampling rate, whatever the element type.
+impl<T, C: fmt::Debug> fmt::Debug for VarVecBuilder<T, C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VarVecBuilder")
+            .field("codec", &self.codec)
+            .field("sampling_rate", &self.sampling_rate)
+            .finish()
+    }
+}
+
+impl<T> VarVecBuilder<T> {
+    pub(crate) fn new() -> Self {
         Self {
-            k: 32,
-            codec_spec: Codec::Auto,
-            _markers: PhantomData,
+            codec: Automatic,
+            sampling_rate: DEFAULT_SAMPLING_RATE,
+            element: PhantomData,
         }
-    }
-
-    /// Sets the sampling rate `k` for random access.
-    ///
-    /// The sampling rate determines how many elements are stored between each
-    /// sample point. A smaller `k` results in faster random access but uses
-    /// more memory for the sampling table. See the [module-level documentation](super)
-    /// for a detailed explanation.
-    ///
-    /// # Panics
-    ///
-    /// The [`build`](VarVecBuilder::build) method will return an error if `k` is 0.
-    pub fn k(mut self, k: usize) -> Self {
-        self.k = k;
-        self
-    }
-
-    /// Sets the compression codec to use.
-    ///
-    /// The choice of codec can significantly impact the compression ratio.
-    /// By default, this is [`Codec::Auto`], which analyzes the data
-    /// to select the best codec.
-    pub fn codec(mut self, codec_spec: Codec) -> Self {
-        self.codec_spec = codec_spec;
-        self
-    }
-
-    /// Builds the [`VarVec`] from a slice of data, consuming the builder.
-    ///
-    /// This method performs the compression and builds the sampling table.
-    ///
-    /// # Errors
-    ///
-    /// Returns an [`VarVecError`] if the parameters are invalid (e.g., `k=0`) or
-    /// if an error occurs during compression.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use compressed_intvec::variable::{VarVec, SVarVec, Codec};
-    ///
-    /// let data: &[i16] = &[-100, 0, 50, -2, 1000];
-    ///
-    /// let vec: SVarVec<i16> = VarVec::builder()
-    ///     .k(2) // Smaller `k` for faster access
-    ///     .codec(Codec::Delta) // Explicitly choose Delta coding
-    ///     .build(data)?;
-    ///
-    /// assert_eq!(vec.len(), 5);
-    /// assert_eq!(vec.get(0), Some(-100));
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn build(self, input: &[T]) -> Result<VarVec<T, E, Vec<u64>>, VarVecError>
-    where
-        VarVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
-    {
-        if self.k == 0 {
-            return Err(VarVecError::InvalidParameters(
-                "Sampling rate k cannot be zero".to_string(),
-            ));
-        }
-
-        // Resolve codec: only iterate for analysis when necessary.
-        let resolved_code = if self.codec_spec.requires_analysis() {
-            // Analysis needed: iterate input once, convert on-the-fly.
-            codec::resolve_codec_from_iter(input.iter().map(|&x| x.to_word()), self.codec_spec)?
-        } else {
-            // No analysis needed: resolve directly without data access.
-            codec::resolve_codec(&[] as &[u64], self.codec_spec)?
-        };
-
-        if input.is_empty() {
-            let empty_samples = FixedVec::<u64, u64, LE>::builder()
-                .build(&[0u64; 0])
-                .unwrap();
-            return Ok(unsafe {
-                VarVec::new_unchecked(Vec::new(), empty_samples, self.k, 0, resolved_code)
-            });
-        }
-
-        let word_writer = MemWordWriterVec::new(Vec::new());
-        let mut writer = VarVecBitWriter::<E>::new(word_writer);
-
-        let sample_capacity = input.len().div_ceil(self.k);
-        let mut temp_samples = Vec::with_capacity(sample_capacity);
-        let mut current_bit_offset = 0;
-
-        // Resolve the codec dispatch ONCE at the beginning.
-        // This eliminates per-element match overhead for common codecs.
-        let code_writer = CodecWriter::new(resolved_code);
-
-        // Iterate through the data, writing compressed values and recording samples.
-        for (i, &value) in input.iter().enumerate() {
-            if i % self.k == 0 {
-                temp_samples.push(current_bit_offset as u64);
-            }
-
-            let bits_written = code_writer.write(&mut writer, value.to_word())?;
-            current_bit_offset += bits_written;
-        }
-        // Write a final stopper to ensure the last value can always be read safely.
-        writer.write_bits(u64::MAX, 64).unwrap();
-
-        // Compress the recorded samples into a FixedVec.
-        let samples = FixedVec::<u64, u64, LE>::builder()
-            .bit_width(BitWidth::Minimal)
-            .build(&temp_samples)
-            .unwrap();
-
-        writer.flush().unwrap();
-        let mut data = writer.into_inner().unwrap().into_inner();
-        data.shrink_to_fit();
-
-        Ok(unsafe { VarVec::new_unchecked(data, samples, self.k, input.len(), resolved_code) })
     }
 }
 
-/// A builder for creating an [`VarVec`] from an iterator.
-///
-/// This builder is designed for constructing an [`VarVec`] from a data source that
-/// is an iterator. It consumes the iterator and compresses its elements on the fly.
-/// It is obtained by calling [`VarVec::from_iter_builder`].
-///
-/// # Limitations
-///
-/// This builder does **not** support automatic codec selection (i.e., [`Codec::Auto`])
-/// or automatic parameter estimation for codecs like [`Rice`](Codec::Rice) or [`Golomb`](Codec::Golomb). Since the
-/// iterator is consumed in a single pass, the data cannot be pre-analyzed to
-/// determine its statistical properties. The user must specify a concrete codec.
-#[derive(Debug)]
-pub struct VarVecFromIterBuilder<T: Storable, E: Endianness, I: IntoIterator<Item = T>> {
-    iter: I,
-    k: usize,
-    codec_spec: Codec,
-    _markers: PhantomData<(T, E)>,
-}
-
-impl<T: Storable, E: Endianness, I: IntoIterator<Item = T>> VarVecFromIterBuilder<T, E, I> {
-    /// Creates a new builder from an iterator with default settings.
+impl<T, C> VarVecBuilder<T, C> {
+    /// Sets the number of elements between two samples (32 by default).
     ///
-    /// By default, the sampling rate is `k=32` and the codec is [`Codec::Gamma`],
-    /// as automatic selection is not possible.
-    pub(super) fn new(iter: I) -> Self {
+    /// A random access decodes at most this many codewords. A higher rate stores fewer bit
+    /// positions and uses less index memory, but can require more decoding per access. Forward
+    /// iteration decodes consecutive elements from the stream.
+    pub fn sampling_rate(self, sampling_rate: NonZeroUsize) -> Self {
         Self {
-            iter,
-            k: 32,
-            codec_spec: Codec::Gamma,
-            _markers: PhantomData,
+            sampling_rate,
+            ..self
         }
     }
 
-    /// Sets the sampling rate `k` for random access.
-    pub fn k(mut self, k: usize) -> Self {
-        self.k = k;
-        self
+    /// Selects a codec explicitly, making the `build` methods return a [`Result`].
+    ///
+    /// The codec is checked when the vector is built. See [`Codec`] for parameter ranges and
+    /// representable values.
+    pub fn codec(self, codec: Codec) -> VarVecBuilder<T, Codec> {
+        VarVecBuilder {
+            codec,
+            sampling_rate: self.sampling_rate,
+            element: PhantomData,
+        }
+    }
+}
+
+impl<T: Storable> VarVecBuilder<T> {
+    /// Encodes `values` with an automatically selected codec.
+    ///
+    /// Selection considers only codecs that can encode every value, so this returns the vector
+    /// directly. The vector owns the resulting encoded storage.
+    pub fn build(self, values: &[T]) -> VarVec<T> {
+        let codec = select(values.iter().map(|value| value.to_word()));
+        encode(values.iter().copied(), codec, self.sampling_rate).unwrap_or_else(|_| {
+            unreachable!("the automatic choice picks a valid code that encodes every value")
+        })
     }
 
-    /// Sets the compression codec to use.
+    /// Collects and encodes an iterator with an automatically selected codec.
+    ///
+    /// Buffers the input values, selects a codec that represents every value, then encodes them
+    /// and returns the vector directly. With an explicit [`codec`](VarVecBuilder::codec), the
+    /// builder encodes the iterator in one pass.
+    pub fn build_from_iter(self, values: impl IntoIterator<Item = T>) -> VarVec<T> {
+        self.build(&values.into_iter().collect::<Vec<T>>())
+    }
+}
+
+impl<T: Storable> VarVecBuilder<T, Codec> {
+    /// Encodes `values` with the selected codec.
+    ///
+    /// The vector owns the resulting encoded storage.
     ///
     /// # Errors
     ///
-    /// The [`build`](Self::build) method will return an error if a codec specification that
-    /// requires data analysis is provided (e.g., [`Codec::Auto`]).
-    pub fn codec(mut self, codec_spec: Codec) -> Self {
-        self.codec_spec = codec_spec;
-        self
+    /// - [`CodecError::InvalidParameter`] if the parameter of the code is out of range;
+    /// - [`CodecError::Unencodable`] if the code cannot encode one of the values.
+    pub fn build(self, values: &[T]) -> Result<VarVec<T>, CodecError<T>> {
+        self.build_from_iter(values.iter().copied())
     }
 
-    /// Builds the [`VarVec`] by consuming the iterator.
+    /// Encodes an iterator in one pass with the selected codec.
     ///
-    /// This method iterates through the provided data source, compresses it,
-    /// and builds the sampling table in a single pass.
+    /// Each value is written to the encoded stream as it is consumed.
     ///
     /// # Errors
     ///
-    /// Returns an [`VarVecError`] if an automatic codec spec is used or if `k` is 0.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use compressed_intvec::variable::{VarVec, UVarVec, Codec};
-    ///
-    /// // Create a vector from a range iterator
-    /// let data_iter = 0..1000u32;
-    ///
-    /// let vec: UVarVec<u32> = VarVec::from_iter_builder(data_iter)
-    ///     .k(64)
-    ///     .codec(Codec::Gamma) // Must be specified
-    ///     .build()?;
-    ///
-    /// assert_eq!(vec.len(), 1000);
-    /// assert_eq!(vec.get(999), Some(999));
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub fn build(self) -> Result<VarVec<T, E, Vec<u64>>, VarVecError>
-    where
-        VarVecBitWriter<E>: BitWrite<E, Error = core::convert::Infallible> + CodesWrite<E>,
-    {
-        // Resolve the codec, but return an error if it requires data analysis.
-        let resolved_code = match self.codec_spec {
-            Codec::Auto
-            | Codec::Rice { log2_b: None }
-            | Codec::Zeta { k: None }
-            | Codec::Golomb { b: None } => {
-                return Err(VarVecError::InvalidParameters("Automatic parameter selection is not supported for iterator-based construction. Please provide fixed parameters.".to_string()));
-            }
-            // Pass an empty slice for validation; the parameters are explicit.
-            spec => codec::resolve_codec(&[0u64; 0], spec)?,
-        };
-
-        if self.k == 0 {
-            return Err(VarVecError::InvalidParameters(
-                "Sampling rate k cannot be zero".to_string(),
-            ));
-        }
-
-        let word_writer = MemWordWriterVec::new(Vec::new());
-        let mut writer = VarVecBitWriter::<E>::new(word_writer);
-        let mut len = 0;
-
-        let mut temp_samples = Vec::new();
-        let mut current_bit_offset = 0;
-
-        // Resolve the codec dispatch ONCE at the beginning.
-        let code_writer = CodecWriter::new(resolved_code);
-
-        for (i, value) in self.iter.into_iter().enumerate() {
-            if i % self.k == 0 {
-                temp_samples.push(current_bit_offset as u64);
-            }
-
-            let bits_written = code_writer.write(&mut writer, value.to_word())?;
-            current_bit_offset += bits_written;
-            len += 1;
-        }
-        writer.write_bits(u64::MAX, 64).unwrap(); // Stopper
-
-        let samples = FixedVec::<u64, u64, LE>::builder()
-            .bit_width(BitWidth::Minimal)
-            .build(&temp_samples)
-            .unwrap();
-
-        writer.flush().unwrap();
-        let mut data = writer.into_inner().unwrap().into_inner();
-        data.shrink_to_fit();
-
-        Ok(unsafe { VarVec::new_unchecked(data, samples, self.k, len, resolved_code) })
+    /// As [`build`](VarVecBuilder::build).
+    pub fn build_from_iter(
+        self,
+        values: impl IntoIterator<Item = T>,
+    ) -> Result<VarVec<T>, CodecError<T>> {
+        let codec = self
+            .codec
+            .validate()
+            .ok_or(CodecError::InvalidParameter(self.codec))?;
+        encode(values, codec, self.sampling_rate)
     }
+}
+
+/// Encodes `values` with `codec`.
+fn encode<T: Storable>(
+    values: impl IntoIterator<Item = T>,
+    codec: ValidCodec,
+    sampling_rate: NonZeroUsize,
+) -> Result<VarVec<T>, CodecError<T>> {
+    let mut encoder = Encoder::new(codec);
+    let mut samples = Vec::new();
+    let mut len = 0;
+    let mut until_sample = 0;
+    for value in values {
+        if until_sample == 0 {
+            samples.push(encoder.bit_len());
+            until_sample = sampling_rate.get();
+        }
+        until_sample -= 1;
+        encoder
+            .write(value.to_word())
+            .map_err(|_| CodecError::Unencodable {
+                codec: codec.get(),
+                value,
+            })?;
+        len += 1;
+    }
+    // The stream and the samples are consistent by construction, which is what `from_parts`
+    // would check.
+    Ok(VarVec {
+        data: encoder.finish(),
+        samples: FixedVec::from_slice(&samples),
+        sampling_rate,
+        len,
+        codec,
+        element: PhantomData,
+    })
 }

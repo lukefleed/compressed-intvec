@@ -1,554 +1,267 @@
-# Compressed Integer Vectors
+# compressed-intvec
 
 [![crates.io](https://img.shields.io/crates/v/compressed-intvec.svg)](https://crates.io/crates/compressed-intvec)
-[![rust](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
-[![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec)
-[![downloads](https://img.shields.io/crates/d/compressed-intvec)](https://crates.io/crates/compressed-intvec)
+[![docs](https://docs.rs/compressed-intvec/badge.svg)](https://docs.rs/compressed-intvec/latest/compressed_intvec/)
+[![rustc](https://img.shields.io/badge/rustc-1.88+-red.svg)](https://rust-lang.github.io/rfcs/2495-min-rust-version.html)
+[![CI](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml/badge.svg)](https://github.com/lukefleed/compressed-intvec/actions/workflows/rust.yml)
 ![license](https://img.shields.io/crates/l/compressed-intvec)
 
-A Rust library that provides space-efficient, in-memory representations for integer vectors. It offers three complementary data structures:
+A Rust library that provides space-efficient, in-memory representations for
+integer vectors. The library is designed to reduce the memory footprint of standard `Vec`
+collections of integers while retaining indexed access and iteration. It offers three complementary data structures:
 
-* [`FixedVec`] for fixed-width encoding with _blazing fast_ mutable and atomic access.
-* [`VarVec`] for variable-length encoding with high compression and amortized O(1) random access.
-* [`SeqVec`] for storing sequences of integers with indexed access.
+* [`FixedVec`] for fixed-width encoding with constant-time reads and updates by
+  index. [`AtomicFixedVec`] provides the atomic counterpart for concurrent access.
+* [`VarVec`] for variable-length encoding with automatic code selection and
+  sampled indexed access.
+* [`SeqVec`] for storing sequences of integers, such as adjacency lists, with
+  indexed access and lazy decoding.
 
-The library is designed to reduce the memory footprint of standard [`std::vec::Vec`] collections of integers while retaining performant access patterns.
+The elements can be any primitive integer up to 64 bits, or a type of your own
+that implements [`Storable`] by converting its values to and from `u64` words,
+so a `FixedVec<NodeId>` of an identifier newtype returns `NodeId` values.
 
-## Core Structures: [`FixedVec`], [`VarVec`], and [`SeqVec`]
+`FixedVec`, `VarVec` and `SeqVec` also take a storage type, `Vec<u64>` by
+default, which decides who owns the packed words:
 
-The library provides three distinct vector types, each based on a different encoding principle and access pattern. Choosing the right one depends on the specific use case, performance requirements, and data characteristics.
+* `Vec<u64>` owns them, and lets a `FixedVec` grow.
+* `Box<[u64]>` owns them without spare capacity, and a `FixedVec` can still
+  change its elements.
+* `Arc<[u64]>` shares them, so cloning the vector copies no data.
+* `&[u64]` borrows them from another owner.
 
-### [`FixedVec`]: Fixed-Width Encoding
+## FixedVec
 
-Implements a vector where every integer occupies the same, predetermined number of bits.
+`FixedVec` stores every integer in the same number of bits, so it suits data
+with a bounded range, such as node identifiers, compact labels and counters.
+Reads and updates by index take constant time, through an API modelled on
+`Vec`.
 
-*   **O(1) Random Access**: The memory location of any element is determined by a direct bit-offset calculation, resulting in minimal-overhead access. With low bit widths (e.g., 8, 16, 32), [`FixedVec`] can be faster than [`std::vec::Vec`] for random access due to better cache utilization.
-*   **Mutability**: Supports in-place modifications after creation through an API similar to [`std::vec::Vec`] (e.g., `push`, `set`, `pop`).
-*   **Atomic Operations**: Provides [`AtomicFixedVec`], a thread-safe variant that supports atomic read-modify-write operations for concurrent environments.
+The bit width is fixed when the vector is built. `from_slice` and `collect`
+choose the smallest width that holds the input, five bits for values from 0 to
+31, and `FixedVec::new` takes the width explicitly. Every later value must fit
+that width, so `set` and `push` panic on a value that does not fit, while
+`try_set` and `try_push` return a `ValueTooLarge` error that holds the rejected
+value.
 
-### [`VarVec`]: Variable-Width Element Encoding
-
-[`VarVec`] uses variable-length instantaneous codes (e.g., Gamma, Delta, Rice, Zeta) to represent each integer. Smaller or more frequent values get shorter codes, which can dramatically reduce memory usage for non-uniform distributions.
-
-The fundamental trade-off of variable-length encoding is that elements no longer have predictable positions in the bitstream: finding element *i* requires decoding every element before it. A naïve scan from the start would make random access O(*n*), which is impractical.
-
-[`VarVec`] solves this with periodic sampling: it stores the bit offset of every *k*-th element in an auxiliary [`FixedVec`]. To access element *i*, the reader jumps to the nearest sample at position ⌊*i*/*k*⌋ and decodes at most *k* − 1 elements forward. This bounds the cost per access to O(*k*), yielding amortized O(1) random access.
-
-The sampling rate *k* controls a space–speed trade-off:
-*   **Smaller *k***: faster access (fewer elements to decode per lookup), but more memory for the samples table.
-*   **Larger *k***: better compression (smaller samples table), but slower access.
-
-Additional features:
-*   **Automatic Codec Selection**: [`Codec::Auto`] analyzes the data to select the most space-efficient codec.
-*   **Immutability**: [`VarVec`] is immutable after construction — changing one element could alter its encoded length, shifting all subsequent data and invalidating every sample point.
-
-### [`SeqVec`]: Variable-Length Sequence Encoding
-
-[`SeqVec`] applies the same variable-length encoding as [`VarVec`], but at the level of *sequences* rather than individual elements. All sequences are concatenated into a single compressed bitstream, and an index stores the bit offset of each sequence boundary — essentially non-uniform sampling at the start of every sequence, rather than at periodic intervals.
-
-This design is natural when the data is organized as variable-length collections (e.g., adjacency lists in a graph, document-term associations): you retrieve an entire sequence at once, iterating over its elements via a zero-allocation [`SeqIter`].
-
-*   **Indexed Access**: Jump to any sequence in O(1) via the boundary index, then decode its elements sequentially.
-*   **Optional Length Storage**: By default, sequence lengths are computed on-the-fly (the iterator stops when it reaches the next boundary). Enable [`store_lengths`] for O(1) length queries at a small additional memory cost.
-*   **Same Codec Flexibility**: Supports all the compression codecs available in [`VarVec`].
-
-[`SeqIter`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/seq/struct.SeqIter.html
-[`store_lengths`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/seq/struct.SeqVecBuilder.html#method.store_lengths
-
-[`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
-[`VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html
-[`SeqVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/seq/struct.SeqVec.html
-[`AtomicFixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/atomic/struct.AtomicFixedVec.html
-[`std::vec::Vec`]: https://doc.rust-lang.org/std/vec/struct.Vec.html
-
-## Quick Start
-
-The following examples show some use cases for [`FixedVec`], [`VarVec`], and [`SeqVec`]. All common types and traits are available through the [`prelude`].
-
-### Example: [`FixedVec`] for Uniform Data and Mutable Access
-
+`get_unchecked` and `set_unchecked` skip the index check, and they are the
+crate's only `unsafe` functions.
 
 ```rust
-use compressed_intvec::prelude::*;
+use compressed_intvec::FixedVec;
 
-// Data where values are within a relatively small, uniform range.
-let data: &[u32] = &[10, 20, 30, 40, 50];
+let mut values = FixedVec::from_slice(&[3u64, 7, 31, 0]);
+assert_eq!(values.bit_width(), 5);
+assert_eq!(values.get(2), Some(31));
 
-// The builder automatically infers the minimal bit width required.
-let mut vec: UFixedVec<u32> = FixedVec::builder()
-    .build(data)
-    .unwrap();
+values.set(1, 12);
+values.push(9);
 
-assert_eq!(vec.get(2), Some(30));
-
-// `FixedVec` supports in-place mutation.
-vec.set(2, 35);
-assert_eq!(vec.get(2), Some(35));
+let view = values.as_borrowed(); // The same vector over borrowed words.
+assert_eq!(view.iter().collect::<Vec<_>>(), [3, 12, 31, 0, 9]);
 ```
 
-### Example: [`VarVec`] for High-Ratio Compression
+## AtomicFixedVec
+
+`AtomicFixedVec` is a `FixedVec` whose words are atomic, so threads can read
+and update its elements through a shared reference. As in `FixedVec`, the bit
+width is fixed at construction and writers panic on a value that does not fit
+it, while `fetch_add` and `fetch_sub` wrap at it.
+
+Each operation is atomic for the element it indexes, at every bit width, so a
+reader observes either the old value or the new one. The vector needs two
+mechanisms for that, because an element can lie inside one word or straddle
+two:
+
+* An element inside one word changes through a compare-and-swap on that word.
+* An element that straddles two words is guarded by a lock shared by a group
+  of words. Writers take the lock, and readers retry when a writer changed the
+  element while they read it.
+
+The operations are those of `AtomicU64`, with the same orderings: `load`,
+`store`, `swap`, `compare_exchange`, `fetch_update` and the arithmetic and
+bitwise `fetch_*` operations. `From` converts between `FixedVec` and
+`AtomicFixedVec` by value, so the words are never visible to atomic and plain
+accesses at the same time.
 
 ```rust
-use compressed_intvec::prelude::*;
+use compressed_intvec::AtomicFixedVec;
+use std::{sync::atomic::Ordering, thread};
 
-// Skewed data with a mix of small and large values.
-let skewed_data: &[u64] = &[5, 8, 13, 1000, 7, 6, 10_000, 10, 2, 3];
-
-// The builder can automatically select the best compression codec.
-let varvec: LEVarVec = VarVec::builder()
-    .codec(Codec::Auto)
-    .build(skewed_data)
-    .unwrap();
-
-assert_eq!(varvec.len(), skewed_data.len());
-assert_eq!(varvec.get(3), Some(1000));
+// 1000 counters of 21 bits, about a third of which straddle two words.
+let counters = AtomicFixedVec::<u32>::new(21, 1000).expect("21 bits fit in a u32");
+thread::scope(|scope| {
+    for _ in 0..4 {
+        scope.spawn(|| {
+            for i in 0..1000 {
+                counters.fetch_add(i, 1, Ordering::Relaxed);
+            }
+        });
+    }
+});
+assert!((0..1000).all(|i| counters.load(i, Ordering::Relaxed) == 4));
 ```
 
-### Example: [`SeqVec`] for Sequence Collections
+## VarVec
+
+`VarVec` stores each integer as a codeword whose length grows with its value,
+so it suits data where small values are common and a few large ones would make
+every element of a `FixedVec` wide. The codes come from [`dsi-bitstream`], and
+the vector is immutable once built.
+
+The codewords form one bitstream, and an index records the bit position of
+every `sampling_rate`-th element, 32 by default. `get(i)` seeks to the sample
+before `i` and decodes forward, so it decodes at most `sampling_rate`
+codewords, and a larger rate shrinks the index at the cost of a slower `get`.
+Iteration decodes each element once.
+
+The available codes are unary, Elias gamma, delta and omega, variable-length
+bytes in either byte order, Rice, Golomb, exponential Golomb, zeta and pi, and
+the [`Codec`] documentation describes each of them. By default the builder
+picks the code with the smallest estimated size. An explicit code fits data
+whose distribution is known. Rice and Golomb codes suit geometrically
+distributed values, such as the gaps between sorted random positions, and zeta
+codes suit power-law distributions, such as the degrees of a web graph.
+
+The builder records the choice in its type. With the automatic choice, `build`
+returns the vector, because only codes that encode every value are candidates.
+After `.codec(c)`, `build` returns a `Result`, whose `CodecError` reports a
+parameter out of range or the first value that the code cannot encode.
+
+Full-width values need no special handling, because the automatic choice skips
+the codes that cannot encode them:
 
 ```rust
-use compressed_intvec::prelude::*;
+use compressed_intvec::VarVec;
 
-let sequences: &[&[u32]] = &[
-    &[1, 2, 3],
-    &[10, 20],
-    &[100, 200, 300, 400],
-    &[], // Empty sequences are supported
-];
+let mut input = vec![0u64; 1024];
+input[513] = u64::MAX;
 
-// Use the builder to choose a codec. Here we explicitly set
-// `store_lengths(false)` to show the default behaviour where lengths are
-// not stored, so length queries require decoding.
-// Use `store_lengths(true)` when you frequently need O(1) length queries; it stores per-sequence lengths at a small additional memory cost.
-let vec: LESeqVec<u32> = SeqVec::builder()
-    .codec(Codec::Auto)
-    .store_lengths(false)
-    .build(sequences)
-    .unwrap();
-
-assert_eq!(vec.num_sequences(), 4);
-assert!(!vec.has_stored_lengths());
-assert_eq!(vec.sequence_len(0), None);
-
-// Access a sequence by index
-let seq1: Vec<u32> = vec.get(1).unwrap().collect();
-assert_eq!(seq1, vec![10, 20]);
-
-// Iterate over all sequences
-for (idx, seq_iter) in vec.iter().enumerate() {
-    let seq: Vec<u32> = seq_iter.collect();
-    println!("Sequence {}: {:?}", idx, seq);
-}
+let values = VarVec::from_slice(&input);
+assert_eq!(values.get(512), Some(0));
+assert_eq!(values.get(513), Some(u64::MAX));
+assert_eq!(values.iter().sum::<u64>(), u64::MAX);
 ```
 
-[`prelude`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/prelude/index.html
-[`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
-[`VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html
-[`SeqVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/seq/struct.SeqVec.html
-[`FixedVec::builder`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html#method.builder
-[`VarVec::builder`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html#method.builder
-[`UFixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/type.UFixedVec.html
-[`LEVarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/type.LEVarVec.html
-[`Codec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.Codec.html#variant.Auto
+## SeqVec
 
-## Atomic Operations with [`AtomicFixedVec`]
+`SeqVec` applies the codes of `VarVec` to a vector of integer sequences, such
+as graph adjacency lists or posting lists, which would otherwise be a
+`Vec<Vec<T>>`. The sequences keep their order and can have any length,
+including zero, and the vector is immutable once built.
 
-For concurrent applications, the library provides [`AtomicFixedVec`], a thread-safe variant of [`FixedVec`]. It supports atomic read-modify-write (RMW) operations, enabling safe and efficient manipulation of shared integer data across multiple threads. The atomicity guarantees depend on the element's bit width and its alignment within the underlying `u64` storage words.
+The values of all sequences share one bitstream, and an index stores `n + 1`
+bit offsets for `n` sequences, the start of each sequence and the end of the
+last one. `get(i)` reads two offsets, so it returns in constant time a
+`SeqIter` that decodes the values of sequence `i` as it advances. The builder
+chooses the code as it does for `VarVec`.
 
-*   **Lock-Free Path**: When an element is fully contained within a single `u64` word (guaranteed for power-of-two bit widths), operations are performed using lock-free atomic instructions. Performance here is optimal as no locks are involved.
-*   **Locked Path**: When an element's bits span across the boundary of two `u64` words (common for non-power-of-two bit widths), operations are protected by a fine-grained mutex from a striped lock pool. This ensures atomicity for the two-word update without resorting to a global lock.
+The builder can also store the length of every sequence, so `count` on a
+`SeqIter` takes constant time and its size hint is exact. Without stored
+lengths, `count` decodes the rest of the sequence.
 
-Ideal for shared counters, parallel data processing, and any scenario requiring multiple threads to read from and write to the same integer vector concurrently. For write-heavy workloads, configuring the bit width to a power of two (e.g., 8, 16, 32) is recommended to ensure all operations remain on the lock-free path.
-
-### Example: Concurrent Atomic Operations
+For a graph, each sequence contains one node's neighbors:
 
 ```rust
-use compressed_intvec::prelude::*;
-use std::sync::Arc;
-use std::thread;
-use std::sync::atomic::Ordering;
+use compressed_intvec::SeqVec;
 
-// A vector with a single counter, initialized to 0.
-// A bit width of 17 is sufficient to hold the final count (80000).
-let vec = Arc::new(
-    UAtomicFixedVec::<u32>::builder()
-        .bit_width(BitWidth::Explicit(17))
-        .build(&[0])
-        .unwrap(),
-);
+let lists: [&[u32]; 3] = [&[1, 2], &[], &[0, 1]];
+let graph = SeqVec::builder().store_lengths().build(&lists);
 
-const NUM_THREADS: u32 = 8;
-const INCREMENTS_PER_THREAD: u32 = 10_000;
-
-let mut handles = vec![];
-for _ in 0..NUM_THREADS {
-    let vec_clone = Arc::clone(&vec);
-    handles.push(thread::spawn(move || {
-        for _ in 0..INCREMENTS_PER_THREAD {
-            // Atomically increment the counter.
-            vec_clone.fetch_add(0, 1, Ordering::SeqCst);
-        }
-    }));
-}
-
-for handle in handles {
-    handle.join().unwrap();
-}
-
-let final_value = vec.get(0).unwrap();
-assert_eq!(final_value, NUM_THREADS * INCREMENTS_PER_THREAD);
+assert_eq!(graph.len(), 3);
+assert_eq!(graph.get(0).unwrap().count(), 2);
+assert_eq!(graph.get(1).unwrap().count(), 0);
+assert_eq!(graph.get(2).unwrap().sum::<u32>(), 1);
 ```
 
-## Compression with [`VarVec`]
-
-[`VarVec`] is the optimal choice when data is not uniformly distributed and minimizing memory usage is a priority. It uses variable-length codes to represent integers.
-
-The compression strategy is controlled by the [`Codec`] enum, passed to the builder.
-
-### Choosing the Right Codec
-
-For _not too large_ use cases, the recommended strategy is [`Codec::Auto`], which analyzes the data to select the most space-efficient codec. Note that this has a one-time cost during construction that is not negligible for very large datasets or frequent builds. You can also specify a codec explicitly based on your data characteristics.
-
-| `Codec` Variant | Description & Encoding Strategy | Optimal Data Distribution |
-| :--- | :--- | :--- |
-| `Auto` | Analyzes the data to choose the best variable-length code, balancing build time and compression ratio. | Agnostic; adapts to the input data. |
-| `Gamma` (γ) | A universal, parameter-free code. Encodes `n` using the unary code of log₂(*n*+1), followed by the remaining bits of `n`+1. | Implied distribution is ≈ 1/(2*x*²). Optimal for data skewed towards small non-negative integers. |
-| `Delta` (δ) | A universal, parameter-free code. Encodes `n` using the γ code of  log₂(*n*+1) , making it more efficient than γ for larger values. | Implied distribution is ≈ 1/(2*x*(log *x*)²). |
-| `Rice` | A fast, tunable version of Golomb codes where the parameter *b* must be a power of two. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored in binary). | Geometric distributions. |
-| `Golomb` | A tunable code, more general than Rice. Encodes `n` by splitting it into a quotient (stored in unary) and a remainder (stored using a minimal binary code). | Geometric distributions. Implied distribution is ≈ 1/*r*ˣ. |
-| `Zeta` (ζ) | A tunable code for power-law data. Encodes `n` based on log₂(*n*+1)/*k* in unary, followed by a minimal binary code for the remainder. | Power-law distributions (e.g., word frequencies, node degrees). Implied distribution is ≈ 1/*x*<sup>1+1/*k*</sup>. |
-| `VByteLe`/`Be`| A byte-aligned code that uses a continuation bit to store integers in a variable number of bytes. Fast to decode. The big-endian variant is lexicographical. | Implied distribution is ≈ 1/*x*<sup>8/7</sup>. Good for general-purpose integer data. |
-| `Omega` (ω) | A universal, parameter-free code that recursively encodes the length of the binary representation of `n`. | Implied distribution is approximately 1/*x*. Compact for very large numbers. |
-| `Unary` | The simplest code. Encodes `n` as `n` zero-bits followed by a one-bit. | Geometric distributions with a very high probability of small values (e.g., boolean flags). |
-| `Explicit` | An escape hatch to use any code from the [`dsi-bitstream::codes::Codes`][dsi-bitstream-codes] enum. | Advanced use cases requiring specific, unlisted codes. |
-
-[dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/enum.Codes.html
-
-### Automatic Selection with [`Codec::Auto`]
-
-The `Auto` strategy removes the guesswork from codec selection. During the build phase, it analyzes the input data and selects the codec that offers the best compression ratio. This introduces a one-time cost for the analysis at construction time. Use the `Auto` codec when you want to create a [`VarVec`] once and read it many times, as the amortized cost of the analysis is negligible compared to the space savings and performance of subsequent reads.
-
-If you need to create multiple [`VarVec`] instances at run-time, consider using a specific codec that matches your data distribution to avoid the overhead of analysis.
-
-[`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
-[`IntVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.IntVec.html
-[`Codec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.Codec.html
-[`Codec::Auto`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/codec/enum.Codec.html#variant.Auto
-[dsi-bitstream-codes]: https://docs.rs/dsi-bitstream/latest/dsi_bitstream/codes/enum.Codes.html
-[`mem-dbg`]: https://docs.rs/mem-dbg/latest/mem_dbg/
-
-## [`VarVec`] Access Patterns
-
-Because variable-length elements can only be decoded sequentially from a known bit offset, the way you access a [`VarVec`] matters. The library provides several methods, each optimized for a specific access pattern.
-
-### [`get_many`]: Batch Access from a Slice
-
-For retrieving a batch of elements from a slice of indices.
-
-*   **Mechanism**: This method sorts the provided indices to transform a random access pattern into a single, monotonic scan over the compressed data. This approach minimizes expensive bitstream seek operations and leverages data locality.
-
-This should be your preferred method for any batch lookup when all indices are known and can be stored in a slice.
-
-```rust
-use compressed_intvec::prelude::*;
-use rand::RngExt;
-
-let data: Vec<u64> = (0..10_000).collect();
-let varvec: LEVarVec = VarVec::builder()
-    .codec(Codec::Delta)
-    .k(32)
-    .build(&data)
-    .unwrap();
-
-// Indices can be in any order.
-let indices_to_get: Vec<usize> = (0..100).map(|_| rand::rng().random_range(0..10_000)).collect();
-
-// `get_many` retrieves all values in one optimized pass.
-let values = varvec.get_many(&indices_to_get).unwrap();
-
-assert_eq!(values, indices_to_get.iter().map(|&i| data[i]).collect::<Vec<_>>());
-```
-
-### [`get_many_from_iter`]: Access from an Iterator
-
-For retrieving elements from a streaming iterator of indices.
-
-*   **Mechanism**: Processes indices on-the-fly using a stateful [`variable::IntVecSeqReader`] internally, which is optimized for streams with sequential locality.
-
-Use when indices cannot be collected into a slice, for example due to memory constraints.
-
-```rust
-use compressed_intvec::prelude::*;
-
-let data: Vec<u64> = (0..10_000).collect();
-let varvec: LEVarVec = VarVec::from_slice(&data).unwrap();
-
-// Process indices from a streaming source, such as a range iterator.
-let values: Vec<u64> = varvec.get_many_from_iter(500..505).unwrap();
-
-assert_eq!(values, vec![500, 501, 502, 503, 504]);
-```
-
-### Dynamic Lookups: `VarVecReader` and `VarVecSeqReader`
-
-There are interactive scenarios where lookup indices are not known in advance. The library provides two reader types to handle such cases:
-
-#### [`VarVecReader`]: Stateless Random Access
-
-A stateless reader for efficient, repeated random lookups.
-
-*   **Mechanism**: Amortizes the setup cost of the bitstream reader across multiple calls. Each `get` operation performs an independent seek from the nearest sample point.
-
-Optimal for sparse, unpredictable access patterns where there is no locality between consecutive lookups.
-
-```rust
-use compressed_intvec::prelude::*;
-
-let data: Vec<u64> = (0..10_000).collect();
-let varvec: LEVarVec = VarVec::from_slice(&data).unwrap();
-
-// Create a stateless reader for random access.
-let mut reader = varvec.reader();
-assert_eq!(reader.get(500).unwrap(), Some(500));
-assert_eq!(reader.get(10).unwrap(), Some(10));
-```
-
-#### [`VarVecSeqReader`]: Stateful Sequential Access
-
-A stateful reader optimized for access patterns with sequential locality.
-
-*   **Mechanism**: Maintains an internal cursor. If a requested index is forward and within the same sample block, it decodes from the last position, avoiding a full seek.
-
-Optimal for iterating through sorted or clustered indices where consecutive lookups are near each other.
-
-```rust
-use compressed_intvec::prelude::*;
-
-let data: Vec<u64> = (0..10_000).collect();
-let varvec: LEVarVec = VarVec::from_slice(&data).unwrap();
-
-// Create a stateful reader for sequential access.
-let mut seq_reader = varvec.seq_reader();
-assert_eq!(seq_reader.get(500).unwrap(), Some(500));
-// This second call is faster as it decodes forward from index 500.
-assert_eq!(seq_reader.get(505).unwrap(), Some(505));
-```
-
-[`get`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html#method.get
-[`get_many`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html#method.get_many
-[`get_many_from_iter`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html#method.get_many_from_iter
-[`VarVecReader`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/reader/struct.VarVecReader.html
-[`VarVecSeqReader`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/seq_reader/struct.VarVecSeqReader.html
-
-## Storing Sequences with [`SeqVec`]
-
-As described [above](#seqvec-variable-length-sequence-encoding), [`SeqVec`] concatenates all sequences into one compressed bitstream and stores a boundary index for O(1) access to any sequence. Common applications include compressed adjacency lists, document-term associations, and any data organized as variable-length collections.
-
-### Basic Usage
-
-```rust
-use compressed_intvec::seq::{SeqVec, LESeqVec};
-
-let sequences: &[&[u32]] = &[
-    &[1, 2, 3],
-    &[10, 20],
-    &[100, 200, 300, 400],
-];
-
-let vec: LESeqVec<u32> = SeqVec::from_slices(sequences).unwrap();
-
-assert_eq!(vec.num_sequences(), 3);
-
-// Retrieve an entire sequence by index.
-let second_seq: Vec<u32> = vec.get(1).unwrap().collect();
-assert_eq!(second_seq, vec![10, 20]);
-
-// Iterate over all sequences.
-for (idx, seq_iter) in vec.iter().enumerate() {
-    let seq: Vec<u32> = seq_iter.collect();
-    println!("Sequence {}: {:?}", idx, seq);
-}
-```
-
-### Codec Customization
-
-Like [`VarVec`], [`SeqVec`] supports the same compression codecs and can automatically select the best one:
-
-```rust
-use compressed_intvec::seq::{SeqVec, LESeqVec, Codec};
-
-let sequences: Vec<Vec<u64>> = vec![
-    vec![1, 1, 1, 2, 3],
-    vec![100, 200, 300],
-];
-
-let vec: LESeqVec<u64> = SeqVec::builder()
-    .codec(Codec::Zeta { k: Some(3) })
-    .build(&sequences)
-    .unwrap();
-
-assert_eq!(vec.num_sequences(), 2);
-```
-
-### Storing Sequence Lengths
-
-By default, sequence lengths are computed on-the-fly by decoding elements until the next sequence boundary is reached. For scenarios where O(1) length queries are beneficial, lengths can be stored explicitly:
-
-```rust
-use compressed_intvec::seq::{SeqVec, LESeqVec};
-
-let sequences: &[&[u32]] = &[&[1, 2, 3], &[10, 20], &[]];
-
-let vec: LESeqVec<u32> = SeqVec::builder()
-    .store_lengths(true)
-    .build(sequences)
-    .unwrap();
-
-// O(1) length query instead of O(length).
-let len = vec.sequence_len(0).unwrap();
-assert_eq!(len, 3);
-```
-
-## Memory Analysis
-
-The library integrates [`mem-dbg`] to provide memory usage statistics, allowing you to compare the size of different encoding strategies easily. This is particularly useful for understanding the trade-offs between [`FixedVec`] and [`IntVec`] in terms of memory efficiency.
-
-```rust
-use compressed_intvec::prelude::*;
+## Building vectors from external data
+
+A vector built from words outside the crate, such as words read from a file,
+goes through `from_parts`, which checks the words before the vector exists.
+Corrupt input therefore returns an error in every build profile, without a
+panic or an endless loop, and `get` and the iterators decode without checking
+again. The fields of every vector are private, so the builders and
+`from_parts` are the only ways to obtain one.
+
+The checks depend on the vector:
+
+* `FixedVec::from_parts` checks that the bit width fits the element type and
+  that the buffer holds enough words for the length, in constant time.
+* `VarVec::from_parts` and `SeqVec::from_parts` decode the whole stream,
+  rejecting a truncated stream or a codeword whose value does not fit in 64
+  bits, and compare every stored sample or offset with the position the
+  decoder reached. They also check that every value fits the element type, so
+  they take time linear in the data.
+
+With the `serde` feature, deserialization reads the format version before the
+rest of the data, requires the same element signedness, and rejects unknown
+fields and any set bit outside the elements and codewords. It then builds the
+vector through the same checks, and `VarVec` rebuilds its samples while it
+decodes the stream, so the serialized form does not carry them.
+
+## Extra features
+
+Enable Cargo features for the integrations you need:
+
+| Feature | Provides |
+| --- | --- |
+| `parallel` | Indexed parallel iterators through [`rayon`]. |
+| `serde` | Serialization of packed vectors and validated deserialization through [`serde`]. |
+| `mem_dbg` | Memory size measurements and a tree of the vector's fields and buffers through [`mem_dbg`], outside the semver guarantee. |
+
+### mem_dbg
+
+With the `mem_dbg` feature, the vectors implement `MemSize` and `MemDbg` from
+[`mem_dbg`]. `MemSize` measures the vector and its owned heap buffers. `MemDbg`
+expands that footprint into a tree, showing each field's size, Rust type and
+share of the total.
+
+This example stores the same million integers in a `Vec<u64>` and a
+`VarVec<u64>`, with one large value every 1,000 elements, and prints both
+reports with allocated capacity:
+
+```rust,ignore
+use compressed_intvec::VarVec;
 use mem_dbg::{DbgFlags, MemDbg};
-use rand::{rngs::SmallRng, RngExt, SeedableRng};
 
-// Generates a vector with uniformly random values.
-fn generate_random_vec(size: usize, max: u64) -> Vec<u64> {
-    let mut rng = SmallRng::seed_from_u64(42);
-    (0..size).map(|_| rng.random_range(0..max)).collect()
-}
+let input: Vec<u64> = (0..1_000_000)
+    .map(|i| if i % 1000 == 0 { 1 << 40 } else { 0 })
+    .collect();
+let values = VarVec::from_slice(&input);
 
-fn main() {
-    let data = generate_random_vec(1_000_000, 1 << 20);
-
-    println!("Size of the uncompressed Vec<u64>:");
-    data.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
-
-    // Create a VarVec with Gamma encoding.
-    let gamma_varvec = LEVarVec::builder()
-        .codec(Codec::Gamma)
-        .build(&data)
-        .unwrap();
-
-    println!("\nSize of the VarVec with gamma encoding:");
-    gamma_varvec.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
-
-    // Let the library analyze the data and choose the best codec.
-    let auto_varvec = LEVarVec::builder()
-        .codec(Codec::Auto)
-        .build(&data)
-        .unwrap();
-
-    println!("\nSize of the VarVec with Auto encoding:");
-    auto_varvec.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
-    println!("\nCodec selected by Auto: {:?}", auto_varvec.encoding());
-
-    // Create a FixedVec with minimal bit width (20 bits)
-    let fixed_vec = LEFixedVec::builder()
-        .bit_width(BitWidth::Minimal)
-        .build(&data)
-        .unwrap();
-
-    println!("\nSize of the FixedVec with minimal bit width:");
-    fixed_vec.mem_dbg(DbgFlags::HUMANIZE | DbgFlags::PERCENTAGE | DbgFlags::RUST_LAYOUT);
-}
+let flags = DbgFlags::default() | DbgFlags::CAPACITY | DbgFlags::HUMANIZE;
+input.mem_dbg(flags).unwrap();
+values.mem_dbg(flags).unwrap();
 ```
 
-The output displays memory breakdown for a 1,000,000-element vector of `u64` integers, uniformly distributed between 0 and 2<sup>20</sup>
-
-- `Vec<u64>`: 8.00 MB (8 bytes per element)
-- [`VarVec`] with Gamma encoding: 4.73 MB (41% reduction)
-- [`VarVec`] with Auto codec selection: 2.85 MB (64% reduction, selected Zeta k=10)
-- [`FixedVec`] with minimal bit width: 2.50 MB (69% reduction, 20 bits per element)
-
-The memory analysis also shows the internal structure of each data type, including storage overhead for metadata, sampling structures, and encoding parameters.
+On a 64-bit target, the two vectors report:
 
 ```text
-Size of the uncompressed Vec<u64>:
-8.000 MB 100.00% ⏺
-
-Size of the VarVec with gamma encoding:
-4.727 MB 100.00% ⏺
-4.625 MB  97.85% ├╴data
-101.6 kB   2.15% ├╴samples
-101.6 kB   2.15% │ ├╴bits
-    8  B   0.00% │ ├╴bit_width
-    8  B   0.00% │ ├╴mask
-    8  B   0.00% │ ├╴len
-    0  B   0.00% │ ╰╴_phantom
-    8  B   0.00% ├╴k
-    8  B   0.00% ├╴len
-   16  B   0.00% ├╴encoding
-    0  B   0.00% ╰╴_markers
-
-Size of the VarVec with Auto encoding:
-2.846 MB 100.00% ⏺
-2.749 MB  96.57% ├╴data
-97.72 kB   3.43% ├╴samples
-97.70 kB   3.43% │ ├╴bits
-    8  B   0.00% │ ├╴bit_width
-    8  B   0.00% │ ├╴mask
-    8  B   0.00% │ ├╴len
-    0  B   0.00% │ ╰╴_phantom
-    8  B   0.00% ├╴k
-    8  B   0.00% ├╴len
-   16  B   0.00% ├╴encoding
-    0  B   0.00% ╰╴_markers
-
-Codec selected by Auto: Zeta { k: 10 }
-
-Size of the FixedVec with minimal bit width:
-2.500 MB 100.00% ⏺
-2.500 MB 100.00% ├╴bits
-    8  B   0.00% ├╴bit_width
-    8  B   0.00% ├╴mask
-    8  B   0.00% ├╴len
-    0  B   0.00% ╰╴_phantom
+8.000 MB 100.00% ⏺: alloc::vec::Vec<u64>
+213.4 kB 100.00% ⏺: compressed_intvec::variable::VarVec<u64>
+131.3 kB  61.52% ├╴data: alloc::vec::Vec<u64>
+82.09 kB  38.47% ├╴samples: compressed_intvec::fixed::FixedVec<u64>
+82.06 kB  38.46% │ ├╴words: alloc::vec::Vec<u64>
+    8  B   0.00% │ ├╴len: usize
+    8  B   0.00% │ ├╴bit_width: usize
+    8  B   0.00% │ ├╴mask: u64
+    0  B   0.00% │ ╰╴element: core::marker::PhantomData<fn() -> u64>
+    8  B   0.00% ├╴sampling_rate: core::num::nonzero::NonZero<usize>
+    8  B   0.00% ├╴len: usize
+   16  B   0.01% ├╴codec: compressed_intvec::common::codec::ValidCodec
+    0  B   0.00% ╰╴element: core::marker::PhantomData<fn() -> u64>
 ```
 
-[Rayon]: https://docs.rs/rayon/latest/rayon/
-[Serde]: https://serde.rs/
-[`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/struct.FixedVec.html
-[`VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html
-[`SeqVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/seq/struct.SeqVec.html
-[`AtomicFixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/fixed/atomic/struct.AtomicFixedVec.html
+For this data, `VarVec<u64>` takes 97.3% less memory than `Vec<u64>`,
+including its sampled index.
 
-## Benchmarks
-
-The library includes benchmarks for [`FixedVec`], [`VarVec`], and [`SeqVec`]. It also tests performance against other library implementations of compressed integer storage: [`sux::BitFieldVec`] and [`succinct::IntVector`]. These benchmarks are in the `benches` directory and can be run via
-
-```bash
-cargo bench
-```
-
-The benchmarks measure the performance of random access, batch access, sequential access, and memory usage for various data distributions and vector sizes.
-
-[`sux::BitFieldVec`]: https://docs.rs/sux/latest/sux/bits/bit_field_vec/index.htmll
-[`succinct::IntVector`]: https://docs.rs/succinct/latest/succinct/int_vec/trait.IntVec.html
-
-## Optional Features: Storing `usize` and `isize`
-
-By default, [`variable::VarVec`] only supports integer types with a fixed size (e.g., `u32`, `i64`). This guarantees that compressed data is portable across different machine architectures (e.g., from a 64-bit server to a 32-bit embedded device).
-
-The `arch-dependent-storable` feature flag enables [`Storable`] implementations for `usize` and `isize`. When activated, you can create a `VarVec<usize>` directly.
-
-Warning: This feature breaks data portability. A `VarVec<usize>` created on a 64-bit system containing values larger than `u32::MAX` will cause a panic if deserialized or read on a 32-bit system. Only enable this feature if you can guarantee that your application and its data will only ever run on a single target architecture (e.g., `x86_64`).
-
-Enable it in your `Cargo.toml`:
-
-```toml
-compressed-intvec = { version = "0.6.0", features = ["arch-dependent-storable"] }
-```
-
-[`Storable`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/traits/trait.Storable.html
-[`variable::VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/variable/struct.VarVec.html
-
-# TODO
-
-* [ ] Add support for [`epsilon-serde`](https://crates.io/crates/epserde)
+[`FixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/struct.FixedVec.html
+[`AtomicFixedVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/struct.AtomicFixedVec.html
+[`VarVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/struct.VarVec.html
+[`SeqVec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/struct.SeqVec.html
+[`Codec`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/enum.Codec.html
+[`Storable`]: https://docs.rs/compressed-intvec/latest/compressed_intvec/trait.Storable.html
+[`dsi-bitstream`]: https://docs.rs/dsi-bitstream/
+[`rayon`]: https://docs.rs/rayon/
+[`serde`]: https://docs.rs/serde/
+[`mem_dbg`]: https://docs.rs/mem_dbg/

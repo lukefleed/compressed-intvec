@@ -2,51 +2,79 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0] - 2026-10-30
+
+Version 1.0 is a rewrite of the crate. It places the public API and the serialized formats under semantic versioning, as the Stability section of the README describes. Code written for 0.6 needs the changes below, and data that 0.6 serialized does not load.
+
+### BREAKING
+
+*   **One flat namespace**: every public item is at the crate root, such as `compressed_intvec::FixedVec`, `VarVec`, `SeqVec`, `AtomicFixedVec`, `Codec` and `Storable`. The modules `fixed`, `variable`, `seq` and `prelude` are removed, and so are the macros `fixed_vec!`, `sfixed_vec!`, `atomic_fixed_vec!`, `int_vec!`, `sint_vec!`, `seq_vec!` and `sseq_vec!`. `from_slice`, `from_slices` and `collect` replace the macros.
+
+*   **No word type and no endianness parameter**: `FixedVec<T, W, E, B>`, `VarVec<T, E, B>` and `SeqVec<T, E, B>` become `FixedVec<T, B>`, `VarVec<T, B>` and `SeqVec<T, B>`. Storage is always `u64` words in one bit layout, and `B` is one of `Vec<u64>`, `Box<[u64]>`, `Arc<[u64]>` and `&[u64]`, closed by the sealed `Backend` trait. The aliases (`UFixedVec`, `SFixedVec`, `LEVarVec`, `BESeqVec` and the others) and the deprecated `Int*` and `VariableCodecSpec` names are removed.
+
+*   **One `Storable` trait**: the two traits of 0.6 merge into one with `to_word`, `from_word`, a required `const BITS: u32` and a defaulted `const SIGNED: bool`. Custom implementations must add `BITS`, and `SIGNED` for signed types. `to_word` must be deterministic. `u128` and `i128` are no longer element types. `usize` and `isize` work without a feature, and the `arch-dependent-storable` feature is removed.
+
+*   **`Codec` is the crate's own enum**: `Codec::Auto` and `Codec::Explicit(Codes)` are removed, the parameters are plain values (`Rice { log2_b: u32 }`, `Golomb { b: u64 }`, `ExpGolomb { k: u32 }`, `Zeta { k: u32 }`, `Pi { k: u32 }`), and the enum is `#[non_exhaustive]` and no longer implements `Default`. A builder selects a code automatically unless `.codec(..)` is called.
+
+*   **Typestate builders**: `VarVecBuilder<T, C = Automatic>` and `SeqVecBuilder<T, C = Automatic>`. With the automatic code, `build` returns the vector, and after `.codec(c)` it returns `Result<_, CodecError<T>>`. `from_slice` and `from_slices` no longer return a `Result`. `k(usize)` becomes `sampling_rate(NonZeroUsize)`, `store_lengths(bool)` becomes `store_lengths()`, and the `*FromIterBuilder` types become `build_from_iter`. `FixedVecBuilder` and `AtomicFixedVecBuilder` are removed in favor of `new` and `from_slice`.
+
+*   **New error types**: `FixedVecError`, `BitWidthTooLarge`, `ValueTooLarge<T>` (which holds the rejected value), `CodecError<T>`, `VarVecPartsError` and `SeqVecPartsError` replace `fixed::Error`, `VarVecError` and `SeqVecError`. Every public error enum is `#[non_exhaustive]`.
+
+*   **`from_parts` takes a parts struct**: `VarVec::from_parts(VarVecParts)` and `SeqVec::from_parts(SeqVecParts)` replace the positional constructors, and `into_parts` returns the same structs. The unchecked and raw-parts constructors of `VarVec` and `SeqVec` are removed.
+
+*   **Removed surface**: the mutable proxies and iterators of `FixedVec` (`at_mut`, `iter_mut`, `chunks_mut`, `split_at_mut`), `chunks`, `windows`, `split_at`, the unaligned reads and the unchecked operations other than `FixedVec::get_unchecked` and `set_unchecked`, the readers and slices of `VarVec` and `SeqVec`, their owned iterators, the `decode_*` methods, the `par_*` methods other than `par_iter`, and `AtomicFixedVec::{get, iter, par_iter, par_iter_mut}`.
+
+*   **Renamed and changed signatures**: `encoding` becomes `codec`, `SeqVec::num_sequences` becomes `len`, `bit_width` returns `u32`, `FixedVec::slice` takes a range, `VarVec::get_many` yields an `Option` per index, and `AtomicFixedVec::fetch_update` takes `(index, set_order, fetch_order, f)`.
+
+*   **New serialized formats**: every vector is wrapped in its format version (`{"V1": ...}` in JSON), which readers decode before the body, and records the element signedness. Deserialization rebuilds the vector through `from_parts`. `VarVec` no longer serializes its samples and `SeqVec` its lengths: the reader rebuilds them while it validates the stream. Readers reject unknown fields and any set bit or extra word outside the elements and codewords. Data that 0.6 serialized does not load.
+
+*   **Features**: `parallel` is no longer a default feature, and the `mem_dbg` traits moved behind the new `mem_dbg` feature, which sits outside the semver guarantee.
+
+*   **MSRV**: Rust 1.88, on targets whose `usize` has 32 to 64 bits.
+
+### Changed
+
+*   Equality: `FixedVec` compares the bit width and the elements, where 0.6 compared raw buffers. `FixedVecSlice`, `VarVec` and `SeqVec` compare elements only, across codes, sampling rates and storage types. `Debug` prints the elements.
+*   The smallest bit width of empty or all-zero input is 0, and `FixedVec::default()` uses the largest bit width of `T`.
+*   Every `VarVec` constructor uses a sampling rate of 32, where 0.6 `from_slice` used 16.
+*   Automatic selection considers only codes that can encode every value, uses `VByteLe` in place of `VByteBe`, and tries Golomb and pi parameters up to 10. The candidates are the current policy, which a minor release may change.
+*   `AtomicFixedVec` writers panic on a value that does not fit the bit width, `fetch_add` and `fetch_sub` wrap at the bit width, and the orderings that `AtomicU64` rejects panic.
+*   Dependencies: `dsi-bitstream` 0.10 without default features, and the optional `rayon`, `serde` and `mem_dbg`. `atomic`, `common_traits`, `num-traits`, `parking_lot` and `bytemuck` are no longer dependencies.
+
+### Improved
+
+*   `from_parts` and deserialization of `VarVec` and `SeqVec` decode and check the whole stream, so corrupt input returns an error in every build profile, without a panic or a hang. 0.6 built these vectors from unchecked parts.
+*   `AtomicFixedVec` keeps every element atomic at every bit width. Elements that straddle two words are guarded by striped sequence locks.
+*   `FixedVec` reads and writes most widths with one unaligned access, and widths 8, 16 and 32 with one aligned access of their size, where its iterators vectorize. The binary searches do not branch on each comparison. `VarVec` iterators are double-ended and seek through the samples in `nth`.
+*   `AtomicFixedVec` runs the uncontended access to an element that straddles two words inline, with retries, spinning and parking out of line.
+*   `VarVecBuilder` and `SeqVecBuilder` implement `Debug` for any `T`.
+*   The tests keep a serialized sample, in JSON and in postcard, of every structure and every code written by 1.0.0. CI runs the loom models, the tests in the release profile, Miri on a little-endian and a big-endian target, and the tests on a 32-bit target.
+
 ## [0.6.0] - 2026-03-15
 
 ### BREAKING
 
-*   **`dsi-bitstream` upgraded from 0.5 to 0.9**: This is a transitive
-    breaking change for users who interact with the `Codes` enum directly.
-    Variants with parameters changed from struct syntax to tuple syntax
-    (e.g., `Codes::Zeta { k: 3 }` is now `Codes::Zeta(3)`).
+*   **`dsi-bitstream` upgraded from 0.5 to 0.9**: This is a transitive breaking change for users who interact with the `Codes` enum directly. Variants with parameters changed from struct syntax to tuple syntax (e.g., `Codes::Zeta { k: 3 }` is now `Codes::Zeta(3)`).
 
-*   **Serde format for `VarVec` and `SeqVec` changed**: The `encoding`
-    field is now serialized via `Display`/`FromStr` (e.g., `"Zeta(3)"`)
-    instead of the previous struct-based JSON format. Data serialized with
-    0.5.x cannot be deserialized with 0.6.0.
+*   **Serde format for `VarVec` and `SeqVec` changed**: The `encoding` field is now serialized via `Display`/`FromStr` (e.g., `"Zeta(3)"`) instead of the previous struct-based JSON format. Data serialized with 0.5.x cannot be deserialized with 0.6.0.
 
 ### New
 
-*   **`seq` module**: Introduced `SeqVec`, a compressed vector of
-    variable-length sequences with indexed access. Designed for adjacency
-    lists, document terms, and similar data organized as many
-    variable-length sequences. Includes `SeqVecBuilder`,
-    `SeqVecFromIterBuilder`, `SeqIter`, `SeqVecIter`, `SeqVecReader`,
-    `SeqVecSlice`, parallel iteration, and serde support.
+*   **`seq` module**: Introduced `SeqVec`, a compressed vector of variable-length sequences with indexed access. Designed for adjacency lists, document terms, and similar data organized as many variable-length sequences. Includes `SeqVecBuilder`, `SeqVecFromIterBuilder`, `SeqIter`, `SeqVecIter`, `SeqVecReader`, `SeqVecSlice`, parallel iteration, and serde support.
 
 ### Changed
 
-*   Upgraded `dsi-bitstream` from 0.5.0 to 0.9.0. Key upstream changes:
-    compile-time table validation, `Codes` with native serde support,
-    `Codes::canonicalize()`, `DispatchError` replacing `anyhow::Error`,
-    `MemWordReader` with `INF` const generic for infallible reads.
+*   Upgraded `dsi-bitstream` from 0.5.0 to 0.9.0. Key upstream changes: compile-time table validation, `Codes` with native serde support, `Codes::canonicalize()`, `DispatchError` replacing `anyhow::Error`, `MemWordReader` with `INF` const generic for infallible reads.
 
-*   Upgraded `rand` from 0.9 to 0.10 and `rand_distr` from 0.5 to 0.6
-    for compatibility with `dsi-bitstream`'s `implied` feature.
+*   Upgraded `rand` from 0.9 to 0.10 and `rand_distr` from 0.5 to 0.6 for compatibility with `dsi-bitstream`'s `implied` feature.
 
-*   Removed the internal `CodesSerde` proxy enum (`src/common/serde.rs`).
-    `Codes` now implements `Serialize`/`Deserialize` natively in
-    dsi-bitstream 0.9.
+*   Removed the internal `CodesSerde` proxy enum (`src/common/serde.rs`). `Codes` now implements `Serialize`/`Deserialize` natively in dsi-bitstream 0.9.
 
-*   Removed `UnsignedInt` from the `Word` trait bounds to resolve trait
-    method ambiguity between `common_traits` and `num-primitive`.
+*   Removed `UnsignedInt` from the `Word` trait bounds to resolve trait method ambiguity between `common_traits` and `num-primitive`.
 
 ### Improved
 
-*   Codec auto-selection now applies `Codes::canonicalize()` to ensure
-    canonical codec forms (e.g., `Golomb(2^n)` becomes `Rice(n)`,
-    `Zeta(1)` becomes `Gamma`).
+*   Codec auto-selection now applies `Codes::canonicalize()` to ensure canonical codec forms (e.g., `Golomb(2^n)` becomes `Rice(n)`, `Zeta(1)` becomes `Gamma`).
 
 ## [0.5.1] - 2025-09-16
 
@@ -136,126 +164,58 @@ This release introduces a fundamental architectural restructuring of the library
 
 ## [0.4.0] - 2025-07-27
 
-This is a release representing a complete architectural overhaul of the
-library. It introduces a more ergonomic and powerful builder-based API, adds
-support for signed integers and parallel processing, and provides
-intelligent, automatic codec selection. These changes result in significant
-usability and performance gains but include foundational breaking changes.
+This is a release representing a complete architectural overhaul of the library. It introduces a more ergonomic and powerful builder-based API, adds support for signed integers and parallel processing, and provides intelligent, automatic codec selection. These changes result in significant usability and performance gains but include foundational breaking changes.
 
 ### New
 
-*   **Automatic Codec Selection (`CodecSpec::Auto`)**: The builder can now
-    intelligently select the most space-efficient compression codec for a given
-    dataset. When `CodecSpec::Auto` is used, the builder performs a statistical
-    analysis on a sample of the input data to choose the optimal variable-length
-    code (e.g., Gamma, Delta, Zeta). This eliminates the need for manual tuning
-    and ensures excellent compression ratios out-of-the-box.
+*   **Automatic Codec Selection (`CodecSpec::Auto`)**: The builder can now intelligently select the most space-efficient compression codec for a given dataset. When `CodecSpec::Auto` is used, the builder performs a statistical analysis on a sample of the input data to choose the optimal variable-length code (e.g., Gamma, Delta, Zeta). This eliminates the need for manual tuning and ensures excellent compression ratios out-of-the-box.
 
-*   **Signed Integer Vector (`SIntVec`)**: Introduced `SIntVec`, a new data
-    structure specifically designed for compressing vectors of `i64`. It
-    transparently uses ZigZag encoding to map signed integers to unsigned
-    integers, allowing standard compression codes to work efficiently on data
-    distributions centered around zero.
+*   **Signed Integer Vector (`SIntVec`)**: Introduced `SIntVec`, a new data structure specifically designed for compressing vectors of `i64`. It transparently uses ZigZag encoding to map signed integers to unsigned integers, allowing standard compression codes to work efficiently on data distributions centered around zero.
 
-*   **High-Performance Batch Access Methods**: Introduced two new methods for
-    efficiently retrieving multiple elements at once:
-    *   `get_many()`: An optimized sequential method for batch lookups.
-      For variable-length codes, it sorts the requested indices to perform a
-      single, monotonic forward scan over the data, which minimizes expensive
-      seek operations and avoids redundant decoding.
-    *   `par_get_many()`: A parallel version of `get_many` (enabled by the
-      `parallel` feature) that distributes lookups across multiple CPU cores,
-      offering significant speedups for large batches of indices.
+*   **High-Performance Batch Access Methods**: Introduced two new methods for efficiently retrieving multiple elements at once:
+    *   `get_many()`: An optimized sequential method for batch lookups. For variable-length codes, it sorts the requested indices to perform a single, monotonic forward scan over the data, which minimizes expensive seek operations and avoids redundant decoding.
+    *   `par_get_many()`: A parallel version of `get_many` (enabled by the `parallel` feature) that distributes lookups across multiple CPU cores, offering significant speedups for large batches of indices.
 
-*   **Parallel Processing (`parallel` feature)**: Added a `parallel` feature,
-    enabled by default, which leverages the Rayon library to accelerate
-    operations on multi-core systems. In addition to `par_get_many`, this
-    feature also provides:
-    *   `par_iter()`: A parallel iterator for high-throughput full-vector
-      decompression, which is particularly effective with computationally
-      intensive codecs.
+*   **Parallel Processing (`parallel` feature)**: Added a `parallel` feature, enabled by default, which leverages the Rayon library to accelerate operations on multi-core systems. In addition to `par_get_many`, this feature also provides:
+    *   `par_iter()`: A parallel iterator for high-throughput full-vector decompression, which is particularly effective with computationally intensive codecs.
 
-*   **Iterator-Based Builder**: Introduced `IntVec::from_iter_builder` to
-    construct an `IntVec` directly from a streaming iterator. This approach is
-    highly memory-efficient, making it suitable for datasets that are too large
-    to fit into memory. It requires manual codec parameter specification, as
-    data cannot be pre-analyzed.
+*   **Iterator-Based Builder**: Introduced `IntVec::from_iter_builder` to construct an `IntVec` directly from a streaming iterator. This approach is highly memory-efficient, making it suitable for datasets that are too large to fit into memory. It requires manual codec parameter specification, as data cannot be pre-analyzed.
 
-*   **Stateful Reader (`IntVecReader`)**: Added `IntVec::reader()`, which returns
-    a reusable `IntVecReader`. This stateful reader is designed for efficient
-    dynamic random access, as it amortizes the setup cost of the bitstream
-    reader across multiple `get()` calls, making it ideal for access patterns
-    where lookup indices are not known in advance.
+*   **Stateful Reader (`IntVecReader`)**: Added `IntVec::reader()`, which returns a reusable `IntVecReader`. This stateful reader is designed for efficient dynamic random access, as it amortizes the setup cost of the bitstream reader across multiple `get()` calls, making it ideal for access patterns where lookup indices are not known in advance.
 
-*   **Prelude Module**: Added a new `prelude` module (`compressed_intvec::prelude::*`)
-    to simplify imports of the most commonly used types and traits, such as
-    `LEIntVec`, `SIntVec`, and `CodecSpec`.
+*   **Prelude Module**: Added a new `prelude` module (`compressed_intvec::prelude::*`) to simplify imports of the most commonly used types and traits, such as `LEIntVec`, `SIntVec`, and `CodecSpec`.
 
 ### Changed
 
-*   **BREAKING: Complete API Redesign with Builder Pattern**: The core API has
-    been fundamentally redesigned around a builder pattern for ergonomics and flexibility.
-    *   The previous `from()` and `from_with_param()` methods have been entirely
-        replaced by `IntVec::builder()`.
-    *   Codec selection is no longer performed with generic type parameters
-        (e.g., `LEIntVec<GammaCodec>`). Instead, the compression strategy is now
-        specified at runtime via the `builder.codec(CodecSpec)` method. This
-        change is what enables dynamic and automatic codec selection.
+*   **BREAKING: Complete API Redesign with Builder Pattern**: The core API has been fundamentally redesigned around a builder pattern for ergonomics and flexibility.
+    *   The previous `from()` and `from_with_param()` methods have been entirely replaced by `IntVec::builder()`.
+    *   Codec selection is no longer performed with generic type parameters (e.g., `LEIntVec<GammaCodec>`). Instead, the compression strategy is now specified at runtime via the `builder.codec(CodecSpec)` method. This change is what enables dynamic and automatic codec selection.
 
-*   **BREAKING: Project Structure Refactoring**: The `src` directory has been
-    restructured.
-    *   Core logic is now split into dedicated modules: `src/intvec/`,
-        `src/sintvec/`, and `src/codec_spec.rs`.
-    *   The internal implementation of `IntVec` is further organized into
-        `builder.rs`, `iter.rs`, `reader.rs`, `parallel.rs`, and `serde.rs`.
+*   **BREAKING: Project Structure Refactoring**: The `src` directory has been restructured.
+    *   Core logic is now split into dedicated modules: `src/intvec/`, `src/sintvec/`, and `src/codec_spec.rs`.
+    *   The internal implementation of `IntVec` is further organized into `builder.rs`, `iter.rs`, `reader.rs`, `parallel.rs`, and `serde.rs`.
 
-*   **Dependencies**: Updated key dependencies, including `dsi-bitstream` to
-    version `0.5.0` and `mem_dbg` to `0.3.0`. Added `rayon` as a core dependency
-    for the new, default-enabled `parallel` feature.
+*   **Dependencies**: Updated key dependencies, including `dsi-bitstream` to version `0.5.0` and `mem_dbg` to `0.3.0`. Added `rayon` as a core dependency for the new, default-enabled `parallel` feature.
 
 ### Improved
 
-*   **`FixedLength` Encoding Strategy**: The new `CodecSpec::FixedLength` replaces
-    the old `MinimalBinaryCodec`. This new implementation is more powerful and
-    explicit:
-    *   It can now automatically detect the minimum required bit width for a
-      dataset when `num_bits: None` is specified.
-    *   It is now a distinct encoding strategy, separate from the DSI-based
-      codes, with a highly optimized O(1) access path that does not require a
-      sampling table.
+*   **`FixedLength` Encoding Strategy**: The new `CodecSpec::FixedLength` replaces the old `MinimalBinaryCodec`. This new implementation is more powerful and explicit:
+    *   It can now automatically detect the minimum required bit width for a dataset when `num_bits: None` is specified.
+    *   It is now a distinct encoding strategy, separate from the DSI-based codes, with a highly optimized O(1) access path that does not require a sampling table.
 
-*   **Memory-Efficient Sample Storage**: For bit-level encodings, the `IntVec`
-    now stores sample offsets in a `Vec<u32>` if the total bit-length of the
-    data is less than `u32::MAX`, falling back to `Vec<u64>` only when strictly
-    necessary. This reduces memory overhead for small to medium-sized vectors.
+*   **Memory-Efficient Sample Storage**: For bit-level encodings, the `IntVec` now stores sample offsets in a `Vec<u32>` if the total bit-length of the data is less than `u32::MAX`, falling back to `Vec<u64>` only when strictly necessary. This reduces memory overhead for small to medium-sized vectors.
 
-*   **Robust Serde Implementation**: The `serde` implementation is now handled
-    manually using serializable proxy ("shadow") structs. This makes
-    serialization more robust, removes previous limitations, and decouples the
-    library from the `dsi-bitstream` dependency, which does not provide `serde`
-    traits for its `Codes` enum.
+*   **Robust Serde Implementation**: The `serde` implementation is now handled manually using serializable proxy ("shadow") structs. This makes serialization more robust, removes previous limitations, and decouples the library from the `dsi-bitstream` dependency, which does not provide `serde` traits for its `Codes` enum.
 
-*   **Comprehensive Benchmarking Suite**: The benchmarking infrastructure has been
-    completely revamped to provide more accurate performance
-    data.
-    *   Benchmarks are now run against multiple data distributions (Uniform,
-        Geometric, Power-Law) to provide a cleaner view of codec performance.
-    *   A new benchmark, `bench_parallel`, specifically measures the performance
-        and scalability of the new parallel access methods.
-    *   Plotting scripts have been consolidated into a single `python/plot.py`
-        that generates interactive and static plots directly from Criterion's
-        JSON output, removing the need for intermediate CSV files for most
-        benchmarks (except for `bench_size`)
+*   **Comprehensive Benchmarking Suite**: The benchmarking infrastructure has been completely revamped to provide more accurate performance data.
+    *   Benchmarks are now run against multiple data distributions (Uniform, Geometric, Power-Law) to provide a cleaner view of codec performance.
+    *   A new benchmark, `bench_parallel`, specifically measures the performance and scalability of the new parallel access methods.
+    *   Plotting scripts have been consolidated into a single `python/plot.py` that generates interactive and static plots directly from Criterion's JSON output, removing the need for intermediate CSV files for most benchmarks (except for `bench_size`)
 
 ### Removed
 
-*   **BREAKING: Generic Codec API**: The old API, which relied on generic codec
-    structs (e.g., `GammaCodec`, `DeltaCodec`, `RiceCodec`, `MinimalBinaryCodec`)
-    and the associated `Codec` trait, has been completely removed in favor of the
-    new builder pattern and the `CodecSpec` enum.
+*   **BREAKING: Generic Codec API**: The old API, which relied on generic codec structs (e.g., `GammaCodec`, `DeltaCodec`, `RiceCodec`, `MinimalBinaryCodec`) and the associated `Codec` trait, has been completely removed in favor of the new builder pattern and the `CodecSpec` enum.
 
 ### Fixed
 
-*   **Fixed `serde` Serialization**: The `serde` implementation now correctly
-    serializes and deserializes the internal state of `IntVec` and `SIntVec`,
-    ensuring that all codec parameters and data are preserved accurately.
+*   **Fixed `serde` Serialization**: The `serde` implementation now correctly serializes and deserializes the internal state of `IntVec` and `SIntVec`, ensuring that all codec parameters and data are preserved accurately.

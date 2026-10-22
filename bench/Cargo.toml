@@ -1,0 +1,60 @@
+[package]
+name = "compressed-intvec-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "The benchmark suite of compressed-intvec. Its dependencies stay out of the library's build."
+
+[dependencies]
+compressed-intvec = { path = ".." }
+criterion = "0.8.2"
+# Format of the `serialization` target: fixed-width integers, so the numbers show this crate's
+# serialization and validation rather than a varint encoding.
+bincode = { version = "1.3.3", optional = true }
+gungraun = { version = "0.20.0", optional = true }
+rayon = { version = "1.12.0", optional = true }
+serde = { version = "1.0.229", optional = true }
+
+[dev-dependencies]
+sux = { version = "0.14.0", default-features = false }
+# The version whose traits sux 0.14 implements; the baselines call them.
+value-traits = "0.2.1"
+
+[features]
+# Benchmarks of the parallel iterators.
+parallel = ["compressed-intvec/parallel", "dep:rayon"]
+# Benchmarks of serialization.
+serde = ["compressed-intvec/serde", "dep:bincode", "dep:serde"]
+# Instruction counts with gungraun; needs Valgrind and gungraun-runner 0.20.0 (Linux).
+gungraun = ["dep:gungraun"]
+
+[[bench]]
+name = "fixed"
+harness = false
+
+[[bench]]
+name = "atomic"
+harness = false
+
+[[bench]]
+name = "variable"
+harness = false
+
+[[bench]]
+name = "seq"
+harness = false
+
+[[bench]]
+name = "parallel"
+harness = false
+required-features = ["parallel"]
+
+[[bench]]
+name = "serialization"
+harness = false
+required-features = ["serde"]
+
+[[bench]]
+name = "instructions"
+harness = false
+required-features = ["gungraun"]

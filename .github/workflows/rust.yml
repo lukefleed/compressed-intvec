@@ -10,14 +10,97 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-      - name: Install fontconfig
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
-      - name: Build
-        run: cargo build --release --all-features
-      - name: Run tests
-        run: cargo test --release --all-features
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo check --all-targets
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - run: cargo test --all-features
+      # Release builds have no overflow checks and no debug assertions.
+      - run: cargo test --release --all-features
+      - run: cargo test --release --no-default-features
+
+  # The loom models of the synchronization of AtomicFixedVec (tests/loom.rs).
+  loom:
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: --cfg loom
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --release --test loom
+
+  # Undefined behavior in the unsafe code, on a little-endian and a big-endian target. Tests too
+  # slow for Miri carry `cfg_attr(miri, ignore)`. On x86_64 miri-seeds runs the threaded atomic tests.
+  miri:
+    name: miri (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            filter: not test(/^atomic::(concurrent_|neighbors_|reads_|seqcst_)/)
+          - target: s390x-unknown-linux-gnu
+            filter: all()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: >-
+          cargo miri nextest run --target ${{ matrix.target }} --all-features --lib
+          --test integration -E '${{ matrix.filter }}'
+
+  # The atomic tests with threads again, under many schedules and weak-memory outcomes.
+  miri-seeds:
+    runs-on: ubuntu-latest
+    env:
+      MIRIFLAGS: -Zmiri-many-seeds=0..8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - run: cargo miri nextest run --all-features --test integration -E 'test(/^atomic::(concurrent_|neighbors_|reads_|seqcst_)/)'
+
+  # A 32-bit target, where `u64` is less aligned than `AtomicU64`. The compile-fail test runs in
+  # the test job: its expected compiler output does not depend on the target.
+  i686:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: i686-unknown-linux-gnu
+      - run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+      - run: >-
+          cargo test --target i686-unknown-linux-gnu --all-features --
+          --skip fixed::foreign_types_cannot_be_backends
+
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      # Only the library: the tests' dev-dependencies and compile-fail outputs follow stable.
+      - run: cargo check --locked --all-features
+
+  # The public API of 1.x changes only by addition: compare it with the last release.
+  semver:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: obi1kenobi/cargo-semver-checks-action@v2
+        with:
+          package: compressed-intvec
+          feature-group: all-features

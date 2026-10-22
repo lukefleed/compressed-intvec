@@ -1,212 +1,182 @@
-//! # Serde Serialization and Deserialization
+//! Serialization of [`FixedVec`] with the `serde` feature.
 //!
-//! This module provides `serde` implementations for [`FixedVec`] and [`AtomicFixedVec`],
-//! enabled by the `serde` feature flag. It uses a "proxy struct" pattern to
-//! ensure that the public API remains clean and to handle the specific needs
-//! of serialization and deserialization.
+//! The serialized form is tagged with the format version, and its body records the element
+//! signedness ([`Storable::SIGNED`]), the bit width, the length and the data words. A payload
+//! loads as any element type with the same signedness whose `BITS` is at least the bit width. A
+//! `u32` payload loads as `u64`, and a `usize` payload written on a 64-bit target loads on a
+//! 32-bit one when its bit width is at most 32.
 //!
-//! # Examples
-//!
-//! ## Serializing and deserializing a [`FixedVec`]
-//!
-//! ```
-//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! # #[cfg(feature = "serde")]
-//! # {
-//! use compressed_intvec::fixed::{FixedVec, UFixedVec};
-//!
-//! let vec: UFixedVec<u32> = (0..10).collect();
-//!
-//! // Serialize the vector to a JSON string.
-//! let serialized = serde_json::to_string(&vec)?;
-//!
-//! // Deserialize it back.
-//! let deserialized: UFixedVec<u32> = serde_json::from_str(&serialized)?;
-//!
-//! assert_eq!(vec, deserialized);
-//! # }
-//! # Ok(())
-//! # }
-//! ```
+//! Padding words are omitted and unused trailing bits are cleared, and the reader rejects a
+//! payload whose unused bits are set, while stored element words are preserved. Custom
+//! [`Storable`] aliases or element equality that identifies distinct stored words can therefore
+//! produce equal vectors with different serialized words.
 
-use super::{
-    atomic::AtomicFixedVec,
-    traits::{Storable, Word},
-    FixedVec,
-};
-use dsi_bitstream::prelude::Endianness;
-use num_traits::ToPrimitive;
-use serde::{
-    de,
-    ser::{Serializer},
-    Deserialize, Deserializer, Serialize,
-};
-use std::sync::atomic::Ordering;
+use super::{Backend, FixedVec, FixedVecError, checked_bit_width, layout};
+use crate::Storable;
+use serde::de;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
 
-// --- `FixedVec` Serde Implementation ---
-
-/// A private proxy struct for deserializing [`FixedVec`].
+/// The serialized form of a [`FixedVec`], with the data words as `W`.
 ///
-/// This struct holds the essential data needed to reconstruct a [`FixedVec`].
-/// It is used to decouple the `serde` implementation from the main struct's
-/// internal details and type parameters.
-#[derive(Deserialize)]
-#[serde(bound(deserialize = "B: Deserialize<'de>"))]
-struct FixedVecProxy<B> {
-    bits: B,
-    len: usize,
-    bit_width: usize,
-}
-
-impl<T, W, E, B> Serialize for FixedVec<T, W, E, B>
-where
-    T: Storable<W>,
-    W: Word,
-    E: Endianness,
-    B: AsRef<[W]>,
-    W: Serialize,
-{
-    /// Serializes a [`FixedVec`] by creating and serializing a temporary proxy struct.
-    /// This pattern correctly handles lifetimes when serializing slice-backed data.
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        #[derive(Serialize)]
-        struct SerializeProxy<'a, W: Word> {
-            bits: &'a [W],
-            len: usize,
-            bit_width: usize,
-        }
-
-        let proxy = SerializeProxy {
-            bits: self.bits.as_ref(),
-            len: self.len,
-            bit_width: self.bit_width,
-        };
-        proxy.serialize(serializer)
-    }
-}
-
-impl<'de, T, W, E> Deserialize<'de> for FixedVec<T, W, E, Vec<W>>
-where
-    T: Storable<W>,
-    W: Word + Deserialize<'de>,
-    E: Endianness,
-{
-    /// Deserializes data into an owned [`FixedVec`].
-    ///
-    /// The implementation first deserializes into a proxy struct and then
-    /// validates the data to ensure it can form a valid [`FixedVec`].
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        // Deserialize into the proxy struct. This will produce an owned Vec<W>.
-        let proxy = FixedVecProxy::<Vec<W>>::deserialize(deserializer)?;
-
-        // Validate the deserialized data to prevent creating an invalid state.
-        let word_size_bits = std::mem::size_of::<W>() * 8;
-        if proxy.bit_width > word_size_bits {
-            return Err(de::Error::custom(format!(
-                "Deserialized bit_width ({}) cannot be greater than the word size ({})",
-                proxy.bit_width, word_size_bits
-            )));
-        }
-
-        let required_bits = proxy.len.saturating_mul(proxy.bit_width);
-        let required_data_words = required_bits.div_ceil(word_size_bits);
-
-        // The buffer must be large enough to contain the specified number of elements.
-        // We check for `required_data_words` as a minimum, allowing for padding.
-        if proxy.bits.len() < required_data_words {
-            return Err(de::Error::custom(format!(
-                "Deserialized buffer is too small. It has {} words, but at least {} are required.",
-                proxy.bits.len(),
-                required_data_words
-            )));
-        }
-
-        // SAFETY: We have validated that the parameters are consistent. The `mask`
-        // field will be correctly recalculated by `new_unchecked`.
-        Ok(unsafe { FixedVec::new_unchecked(proxy.bits, proxy.len, proxy.bit_width) })
-    }
-}
-
-// --- `AtomicFixedVec` Serde Implementation ---
-
-/// A private proxy struct for serializing and deserializing [`AtomicFixedVec`].
+/// Format version 1 carries the element signedness, the bit width, the length and the
+/// `ceil(len * bit_width / 64)` data words, in which the bits past the last element are zero.
+/// Loading requires the signedness of `T`, a bit width of at most `T::BITS`, that many words,
+/// and zero unused bits.
+///
+/// The variant is the format version, which every serde format decodes before the body, so an
+/// unknown version is refused before the body is read. Binary formats write the variant's
+/// position in this declaration, so versions are only appended.
+///
+/// Once released, a version is never changed: a format change appends a variant, and readers
+/// keep loading every earlier version.
 #[derive(Serialize, Deserialize)]
-struct AtomicFixedVecProxy {
-    storage: Vec<u64>,
-    len: usize,
-    bit_width: usize,
+#[serde(rename = "FixedVec")]
+enum Wire<W> {
+    V1(V1<W>),
 }
 
-impl<T> Serialize for AtomicFixedVec<T>
-where
-    T: Storable<u64> + Copy + ToPrimitive,
-{
-    /// Serializes an [`AtomicFixedVec`].
-    ///
-    /// This is done by atomically loading each element from the `Vec<AtomicU64>`
-    /// into a plain `Vec<u64>` and then serializing a proxy struct.
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // Convert `Vec<AtomicU64>` to `Vec<u64>` for serialization.
-        // Relaxed ordering is sufficient as we just need any consistent atomic view.
-        let storage_plain: Vec<u64> = self
-            .as_slice()
-            .iter()
-            .map(|atomic| atomic.load(Ordering::Relaxed))
-            .collect();
+/// The body of format version 1 of a [`FixedVec`].
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V1<W> {
+    element_signed: bool,
+    bit_width: u32,
+    len: u64,
+    words: W,
+}
 
-        let proxy = AtomicFixedVecProxy {
-            storage: storage_plain,
-            len: self.len(),
-            bit_width: self.bit_width(),
-        };
+/// The data words of a vector, with the bits past the last element cleared.
+struct DataWords<'a> {
+    words: &'a [u64],
+    last_mask: u64,
+}
 
-        proxy.serialize(serializer)
+impl Serialize for DataWords<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let last = self.words.len().saturating_sub(1);
+        serializer.collect_seq(self.words.iter().enumerate().map(|(index, &word)| {
+            if index == last {
+                word & self.last_mask
+            } else {
+                word
+            }
+        }))
     }
 }
 
-impl<'de, T> Deserialize<'de> for AtomicFixedVec<T>
-where
-    T: Storable<u64> + Copy + ToPrimitive,
-{
-    /// Deserializes data into an [`AtomicFixedVec`].
+/// Returns the mask of the bits of the last data word that hold elements, when the elements
+/// take `bits` bits.
+fn last_mask(bits: usize) -> u64 {
+    match bits % layout::WORD_BITS {
+        0 => u64::MAX,
+        used => layout::mask(used),
+    }
+}
+
+impl<T: Storable, B: Backend> Serialize for FixedVec<T, B> {
+    /// Serializes the metadata and packed data words, omitting padding words and clearing unused
+    /// trailing bits.
     ///
-    /// This uses the proxy struct and the internal `new` constructor to safely
-    /// reconstruct the atomic vector, including its transient fields like `locks`.
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
+    /// Stored element representations are preserved. Custom [`Storable`] aliases or equality
+    /// that identifies distinct stored words can produce equal vectors with different serialized
+    /// words.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Does not overflow: the words hold `len` elements (invariant).
+        let bits = self.len * self.bit_width;
+        Wire::V1(V1 {
+            element_signed: T::SIGNED,
+            bit_width: self.bit_width as u32,
+            // Lossless: usize is at most 64 bits wide on every supported target.
+            len: self.len as u64,
+            words: DataWords {
+                words: &self.words.as_ref()[..bits.div_ceil(layout::WORD_BITS)],
+                last_mask: last_mask(bits),
+            },
+        })
+        .serialize(serializer)
+    }
+}
+
+/// A validation failure in a serialized [`FixedVec`] of the requested element type.
+enum WireError {
+    Length(u64),
+    Signedness { found: bool, expected: bool },
+    WordCount { found: usize, expected: usize },
+    UnusedBits,
+    Parts(FixedVecError),
+}
+
+impl fmt::Display for WireError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let signedness = |signed: bool| if signed { "signed" } else { "unsigned" };
+        match *self {
+            Self::Length(len) => write!(f, "serialized length {len} does not fit usize"),
+            Self::Signedness { found, expected } => write!(
+                f,
+                "serialized elements are {}, expected {}",
+                signedness(found),
+                signedness(expected)
+            ),
+            Self::WordCount { found, expected } => write!(
+                f,
+                "serialized vector has {found} data words, expected {expected}"
+            ),
+            Self::UnusedBits => write!(f, "a bit past the last element is set"),
+            Self::Parts(error) => write!(f, "invalid serialized vector: {error}"),
+        }
+    }
+}
+
+/// Builds the vector that `wire` describes, or returns the first check that it fails.
+fn parse<T: Storable>(wire: Wire<Vec<u64>>) -> Result<FixedVec<T>, WireError> {
+    let Wire::V1(V1 {
+        element_signed,
+        bit_width,
+        len,
+        mut words,
+    }) = wire;
+    if element_signed != T::SIGNED {
+        return Err(WireError::Signedness {
+            found: element_signed,
+            expected: T::SIGNED,
+        });
+    }
+    let len = usize::try_from(len).map_err(|_| WireError::Length(len))?;
+    let width =
+        checked_bit_width::<T>(bit_width).map_err(|error| WireError::Parts(error.into()))?;
+    let required = layout::required_words(len, width).ok_or(WireError::Parts(
+        FixedVecError::LengthOverflow { len, bit_width },
+    ))?;
+    let data_words = required.saturating_sub(1);
+    if words.len() != data_words {
+        return Err(WireError::WordCount {
+            found: words.len(),
+            expected: data_words,
+        });
+    }
+    // Does not overflow: `required_words` computed it.
+    if let Some(&last) = words.last()
+        && last & !last_mask(len * width) != 0
     {
-        let proxy = AtomicFixedVecProxy::deserialize(deserializer)?;
+        return Err(WireError::UnusedBits);
+    }
+    if len > 0 {
+        words.push(0);
+    }
+    FixedVec::from_parts(words, len, bit_width).map_err(WireError::Parts)
+}
 
-        // The `new` constructor performs all necessary validation of `bit_width`
-        // and `len`, and correctly initializes the lock structure.
-        let atomic_vec = AtomicFixedVec::<T>::new(proxy.bit_width, proxy.len)
-            .map_err(|err| de::Error::custom(err.to_string()))?;
-
-        let expected_words = atomic_vec.as_slice().len();
-        if proxy.storage.len() != expected_words {
-            return Err(de::Error::custom(format!(
-                "Mismatched storage length: expected {}, got {}",
-                expected_words,
-                proxy.storage.len()
-            )));
-        }
-
-        // Fill the newly allocated storage with the deserialized data.
-        let storage_slice = atomic_vec.as_slice();
-        for (i, val) in proxy.storage.into_iter().enumerate() {
-            storage_slice[i].store(val, Ordering::Relaxed);
-        }
-
-        Ok(atomic_vec)
+impl<'de, T: Storable> Deserialize<'de> for FixedVec<T> {
+    /// Deserializes a vector, checking the format version before the body, then the element
+    /// signedness, that the bit width fits `T`, that the number of words matches the length and
+    /// the bit width, and that the bits past the last element are zero.
+    ///
+    /// The stored bit width determines compatibility with `T`: for built-in integers, a payload
+    /// can load into another type with the same signedness when its stored bit width fits that
+    /// type. Padding is restored before [`FixedVec::from_parts`] validates the reconstructed
+    /// buffer.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        parse(Wire::<Vec<u64>>::deserialize(deserializer)?).map_err(de::Error::custom)
     }
 }

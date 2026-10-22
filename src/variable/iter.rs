@@ -1,274 +1,253 @@
-//! Iterators for [`VarVec`].
-//!
-//! This module provides the iterators for [`VarVec`]. Due to the nature of
-//! variable-length encoding, an [`VarVec`] is immutable once created, as
-//! modifying an element would require re-encoding the rest of the data stream.
-//!
-//! [`VarVec`]: crate::variable::VarVec
+//! Iteration and batch access over a [`VarVec`](super::VarVec).
 
-use super::{traits::Storable, VarVec};
-use crate::common::codec_reader::{CodecReader, VarVecBitReader};
-use dsi_bitstream::{
-    dispatch::{CodesRead, StaticCodeRead},
-    prelude::{BitRead, BitSeek, Endianness},
-};
-use std::fmt;
-use std::iter::FusedIterator;
-use std::marker::PhantomData;
+use super::View;
+use crate::Storable;
+use crate::common::Decoder;
+use std::{fmt, iter::FusedIterator, marker::PhantomData};
 
-/// A borrowing iterator over the values of an [`VarVec`].
+/// A decoder that knows which element it reads next, so that it seeks only when the target is
+/// behind it or in a later block.
+pub(crate) struct Cursor<'a> {
+    view: View<'a>,
+    decoder: Decoder<'a>,
+    /// The index of the element at the decoder's position.
+    next: usize,
+}
+
+impl<'a> Cursor<'a> {
+    /// Creates a cursor at element 0, which starts at bit 0 (invariant of `VarVec`).
+    #[inline]
+    pub(crate) fn new(view: View<'a>) -> Self {
+        Self {
+            decoder: Decoder::new(view.data, view.codec),
+            view,
+            next: 0,
+        }
+    }
+
+    /// Returns the word of element `index`, which is below the length of the vector.
+    #[inline]
+    pub(crate) fn read_at(&mut self, index: usize) -> u64 {
+        if index != self.next {
+            self.move_to(index);
+        }
+        self.next = index + 1;
+        self.decoder.read()
+    }
+
+    /// Moves the decoder to element `index`: forward when it is later in the current block,
+    /// otherwise from the sample of its block.
+    fn move_to(&mut self, index: usize) {
+        let k = self.view.sampling_rate;
+        let block = index / k;
+        if index < self.next || block != self.next / k {
+            let sample = self
+                .view
+                .samples
+                .get(block)
+                .expect("every element below the length has a sample");
+            self.decoder.seek(sample);
+            self.next = block * k;
+        }
+        for _ in self.next..index {
+            self.decoder.read();
+        }
+        self.next = index;
+    }
+}
+
+/// An iterator yielding the elements of a [`VarVec`](super::VarVec) by value.
 ///
-/// This struct is created by the [`iter`](VarVec::iter) method on [`VarVec`].
-/// It provides a sequential, forward-only scan over the compressed data,
-/// decompressing values on the fly.
+/// Created by [`VarVec::iter`](super::VarVec::iter), or by iterating over `&VarVec`. Forward
+/// iteration decodes each element once and uses constant auxiliary space. [`nth`](Iterator::nth)
+/// and [`nth_back`](DoubleEndedIterator::nth_back) use the sampled index to skip, requiring at
+/// most one seek and `sampling_rate` codeword decodes to reach their target.
+///
+/// Reverse iteration decodes one sample block into a cache, then yields its elements from the
+/// end. A complete reverse traversal decodes each element once and caches at most
+/// `sampling_rate` words, allocating when the first block is decoded. Mixing forward and
+/// backward iteration still yields each element at most once, but can decode elements more
+/// than once because the forward cursor and the reverse cache share a decoder.
 ///
 /// # Examples
 ///
 /// ```
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use compressed_intvec::variable::{VarVec, UVarVec};
+/// use compressed_intvec::VarVec;
 ///
-/// let data: &[u32] = &[10, 20, 30, 40, 50];
-/// let vec: UVarVec<u32> = VarVec::from_slice(data)?;
-///
-/// let mut sum = 0;
-/// for value in vec.iter() {
-///     sum += value;
-/// }
-///
-/// assert_eq!(sum, 150);
-/// # Ok(())
-/// # }
+/// let vec = VarVec::from_slice(&[2u32, 3, 5, 7, 11]);
+/// assert_eq!(vec.iter().skip(1).take(3).collect::<Vec<_>>(), [3, 5, 7]);
+/// assert_eq!(vec.iter().rev().collect::<Vec<_>>(), [11, 7, 5, 3, 2]);
 /// ```
-pub struct VarVecIter<'a, T: Storable, E: Endianness, B: AsRef<[u64]>>
-where
-    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    len: usize,
-    reader: VarVecBitReader<'a, E>,
-    /// The hybrid dispatcher that handles codec reading robustly.
-    code_reader: CodecReader<'a, E>,
-    current_index: usize,
-    _markers: PhantomData<(&'a B, T)>,
+pub struct VarVecIter<'a, T> {
+    cursor: Cursor<'a>,
+    /// The next element from the front.
+    front: usize,
+    /// One past the next element from the back.
+    back: usize,
+    /// The words of the elements `back - back_words.len()..back`, which `next_back` yields from
+    /// the end. Those below `front` are never yielded, since `next_back` stops at `front`.
+    back_words: Vec<u64>,
+    element: PhantomData<fn() -> T>,
 }
 
-impl<'a, T: Storable, E: Endianness, B: AsRef<[u64]>> VarVecIter<'a, T, E, B>
-where
-    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// Creates a new iterator.
-    pub(super) fn new(intvec: &'a VarVec<T, E, B>) -> Self {
-        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new_inf(
-            intvec.data.as_ref(),
-        ));
-        // Instantiate the robust hybrid dispatcher. This will not panic.
-        let code_reader = CodecReader::new(intvec.encoding);
-
+impl<'a, T: Storable> VarVecIter<'a, T> {
+    /// Creates an iterator over the elements `front..back` of `view`.
+    #[inline]
+    pub(crate) fn new(view: View<'a>, front: usize, back: usize) -> Self {
         Self {
-            len: intvec.len,
-            reader,
-            code_reader,
-            current_index: 0,
-            _markers: PhantomData,
+            cursor: Cursor::new(view),
+            front,
+            back,
+            back_words: Vec::new(),
+            element: PhantomData,
         }
+    }
+
+    /// Decodes the elements before `back`, from the sample of the element `back - 1` or from
+    /// `front` if it is later, into the empty `back_words`.
+    fn decode_back(&mut self) {
+        let k = self.cursor.view.sampling_rate;
+        let start = ((self.back - 1) / k * k).max(self.front);
+        let cursor = &mut self.cursor;
+        // Exact, so that the capacity never exceeds `sampling_rate` words.
+        self.back_words.reserve_exact(self.back - start);
+        self.back_words
+            .extend((start..self.back).map(|index| cursor.read_at(index)));
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> Iterator for VarVecIter<'_, T, E, B>
-where
-    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
+impl<T: Storable> Iterator for VarVecIter<'_, T> {
     type Item = T;
 
     #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.len {
+    fn next(&mut self) -> Option<T> {
+        if self.front == self.back {
             return None;
         }
-        // The read operation is infallible due to the robust dispatcher.
-        let value = self.code_reader.read(&mut self.reader).unwrap();
-        self.current_index += 1;
-        Some(Storable::from_word(value))
+        let word = self.cursor.read_at(self.front);
+        self.front += 1;
+        Some(T::from_word(word))
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.len.saturating_sub(self.current_index);
-        (remaining, Some(remaining))
+        let len = self.back - self.front;
+        (len, Some(len))
+    }
+
+    fn nth(&mut self, n: usize) -> Option<T> {
+        if n >= self.back - self.front {
+            self.front = self.back;
+            return None;
+        }
+        self.front += n;
+        self.next()
+    }
+
+    fn count(self) -> usize {
+        self.back - self.front
+    }
+
+    fn last(mut self) -> Option<T> {
+        // A single element, so it is read without buffering the elements before it.
+        (self.front < self.back).then(|| T::from_word(self.cursor.read_at(self.back - 1)))
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> ExactSizeIterator for VarVecIter<'_, T, E, B>
-where
-    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    fn len(&self) -> usize {
-        self.len.saturating_sub(self.current_index)
+impl<T: Storable> DoubleEndedIterator for VarVecIter<'_, T> {
+    fn next_back(&mut self) -> Option<T> {
+        if self.front == self.back {
+            return None;
+        }
+        if self.back_words.is_empty() {
+            self.decode_back();
+        }
+        self.back -= 1;
+        let word = self
+            .back_words
+            .pop()
+            .expect("decode_back decodes the element before back");
+        Some(T::from_word(word))
+    }
+
+    fn nth_back(&mut self, n: usize) -> Option<T> {
+        if n >= self.back - self.front {
+            self.back = self.front;
+            self.back_words.clear();
+            return None;
+        }
+        self.back -= n;
+        // Keeps the words of the elements that are still before `back`.
+        self.back_words
+            .truncate(self.back_words.len().saturating_sub(n));
+        self.next_back()
     }
 }
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> FusedIterator for VarVecIter<'_, T, E, B> where
-    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>
-{
-}
+impl<T: Storable> ExactSizeIterator for VarVecIter<'_, T> {}
 
-impl<T: Storable, E: Endianness, B: AsRef<[u64]>> fmt::Debug for VarVecIter<'_, T, E, B>
-where
-    for<'b> VarVecBitReader<'b, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
+impl<T: Storable> FusedIterator for VarVecIter<'_, T> {}
+
+impl<T> fmt::Debug for VarVecIter<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VarVecIter")
-            .field("remaining", &self.len.saturating_sub(self.current_index))
-            .finish()
+            .field("remaining", &(self.back - self.front))
+            .finish_non_exhaustive()
     }
 }
 
-/// An owning iterator over the values of an [`VarVec`].
+/// A lazy iterator yielding an [`Option<T>`] for each requested [`VarVec`](super::VarVec) index.
 ///
-/// This struct is created by the [`into_iter`](VarVec::into_iter) method on
-/// [`VarVec`] (or by using a `for` loop on an owned [`VarVec`]). It takes ownership
-/// of the vector and decodes its values on the fly.
+/// Created by [`VarVec::get_many`](super::VarVec::get_many). Preserves input order and
+/// duplicates, yielding `None` for out-of-bounds indices. Reads share a decoding cursor, so
+/// strictly increasing indices decode each element at most once. The cursor uses constant
+/// auxiliary space.
 ///
-/// # Examples
-///
-/// ```
-/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use compressed_intvec::variable::{VarVec, SVarVec};
-///
-/// let data: &[i16] = &[-1, -2, -3, -4];
-/// let vec: SVarVec<i16> = VarVec::from_slice(data)?;
-///
-/// // The `into_iter` call is implicit in the for loop.
-/// // This loop consumes `vec`.
-/// let collected: Vec<i16> = vec.into_iter().map(|v| v * 2).collect();
-///
-/// assert_eq!(collected, &[-2, -4, -6, -8]);
-/// # Ok(())
-/// # }
-/// ```
-pub struct VarVecIntoIter<T, E>
-where
-    T: Storable + 'static,
-    E: Endianness + 'static,
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// The number of elements remaining in the iterator.
-    len: usize,
-    /// The current position in the sequence.
-    current_index: usize,
-    /// A stateful reader that borrows from `_data_owner`.
-    reader: VarVecBitReader<'static, E>,
-    /// The hybrid dispatcher for decoding.
-    code_reader: CodecReader<'static, E>,
-    /// This field owns the data buffer, ensuring it lives as long as the iterator.
-    _data_owner: Vec<u64>,
-    /// Phantom data to hold the generic type `T`.
-    _markers: PhantomData<T>,
+/// The iterator has the same length as its input iterator, including invalid indices. It
+/// implements [`ExactSizeIterator`] and [`FusedIterator`] when the input iterator does.
+pub struct VarVecGetMany<'a, T, I> {
+    cursor: Cursor<'a>,
+    indices: I,
+    element: PhantomData<fn() -> T>,
 }
 
-impl<T, E> VarVecIntoIter<T, E>
-where
-    T: Storable + 'static,
-    E: Endianness + 'static,
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    /// Creates a new, efficient owning iterator from a [`VarVec`].
-    pub(super) fn new(vec: VarVec<T, E, Vec<u64>>) -> Self {
-        // This is a self-referential struct. We move the owned data buffer into `_data_owner`.
-        // Then, we create a 'static reference to that data to initialize the reader.
-        // This is safe because `_data_owner` is part of the same struct as `reader`,
-        // guaranteeing that the data outlives the reference.
-        let data_ref: &'static [u64] = unsafe { std::mem::transmute(vec.data.as_slice()) };
-
-        let reader = VarVecBitReader::<E>::new(dsi_bitstream::impls::MemWordReader::new_inf(data_ref));
-        let code_reader = CodecReader::new(vec.encoding);
-
+impl<'a, T: Storable, I> VarVecGetMany<'a, T, I> {
+    #[inline]
+    pub(crate) fn new(view: View<'a>, indices: I) -> Self {
         Self {
-            len: vec.len,
-            current_index: 0,
-            reader,
-            code_reader,
-            _data_owner: vec.data,
-            _markers: PhantomData,
+            cursor: Cursor::new(view),
+            indices,
+            element: PhantomData,
         }
     }
 }
 
-impl<T, E> Iterator for VarVecIntoIter<T, E>
-where
-    T: Storable + 'static,
-    E: Endianness + 'static,
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    type Item = T;
+impl<T: Storable, I: Iterator<Item = usize>> Iterator for VarVecGetMany<'_, T, I> {
+    type Item = Option<T>;
 
     #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.len {
-            return None;
-        }
-        let value = self.code_reader.read(&mut self.reader).unwrap();
-        self.current_index += 1;
-        Some(Storable::from_word(value))
+    fn next(&mut self) -> Option<Option<T>> {
+        let index = self.indices.next()?;
+        Some((index < self.cursor.view.len).then(|| T::from_word(self.cursor.read_at(index))))
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.len.saturating_sub(self.current_index);
-        (remaining, Some(remaining))
+        self.indices.size_hint()
     }
 }
 
-impl<T, E> ExactSizeIterator for VarVecIntoIter<T, E>
-where
-    T: Storable + 'static,
-    E: Endianness + 'static,
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
-    fn len(&self) -> usize {
-        self.len.saturating_sub(self.current_index)
-    }
-}
-
-impl<T, E> FusedIterator for VarVecIntoIter<T, E>
-where
-    T: Storable + 'static,
-    E: Endianness + 'static,
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
+impl<T: Storable, I: ExactSizeIterator<Item = usize>> ExactSizeIterator
+    for VarVecGetMany<'_, T, I>
 {
 }
 
-impl<T, E> fmt::Debug for VarVecIntoIter<T, E>
-where
-    T: Storable + 'static,
-    E: Endianness + 'static,
-    for<'a> VarVecBitReader<'a, E>: BitRead<E, Error = core::convert::Infallible>
-        + CodesRead<E>
-        + BitSeek<Error = core::convert::Infallible>,
-{
+impl<T: Storable, I: FusedIterator<Item = usize>> FusedIterator for VarVecGetMany<'_, T, I> {}
+
+impl<T, I: fmt::Debug> fmt::Debug for VarVecGetMany<'_, T, I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("VarVecIntoIter")
-            .field("remaining", &self.len.saturating_sub(self.current_index))
-            .finish()
+        f.debug_struct("VarVecGetMany")
+            .field("indices", &self.indices)
+            .finish_non_exhaustive()
     }
 }
